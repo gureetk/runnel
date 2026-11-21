@@ -1,0 +1,324 @@
+# Library and metadata
+
+How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
+
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet.
+
+## 1. The pipeline
+
+```
+scan ──► probe ──► parse ──► build items ──► match ──► fetch metadata ──► fetch images
+ │         │                     │
+ │         └ file is playable     └ item is browsable, under a title taken from its name
+ └ file is known
+```
+
+Two rules shape all of it:
+
+- **A file is playable as soon as it is probed.** Matching and artwork arrive later, in the background, and never block playback.
+- **A missing match is better than a wrong one.** Anything uncertain goes to a review list, stays playable, and waits for a person.
+
+The server never writes into a library folder.
+
+## 2. Scanning
+
+### 2.1 What a scan does
+
+For each root of a library:
+
+1. **Check the root.** If it cannot be listed, or lists empty when the database holds files for it, mark it unavailable and stop. Nothing is marked missing.
+2. **Load what is known**: `id, rel_path, size, mtime_ns, missing_since` for the root, into a map.
+3. **Walk the tree.** For every video file compare size and modification time with the map.
+   - Unknown path: a new file, unless its fingerprint matches a file that is marked missing, in which case it is a move.
+   - Changed size or time: reset `probe_version`, queue a probe.
+   - Same: nothing.
+4. **What was not seen** gets `missing_since`.
+5. **Write** all of it in one transaction, then queue probes for new and changed files.
+6. **Record what the scan found** on the root: files added, changed and removed, how long it took, or the error that stopped it. The administration page shows it (`04-api.md`, section 8.2).
+
+Measured with a Go prototype on a synthetic tree of 14,720 video files in 3,818 folders:
+
+| Step | Time |
+|---|---|
+| First index, empty database, no probing | 0.2 s |
+| Rescan, nothing changed | 87–114 ms |
+| Rescan after 12 additions, 5 changes, 3 deletions | 100 ms, and it found exactly those |
+| Rescan with the file cache dropped, on an SSD | 299 ms |
+
+Peak memory was 13–15 MB. On spinning disks a cold walk costs about one seek per folder, so tens of seconds after a reboot or a spin-down.
+
+### 2.2 When scans run
+
+- **On change.** The server watches every folder under each root with inotify. Events are collected for 5 seconds, then the affected folders are scanned. This keeps disks asleep when nothing changes.
+- **Nightly**, a full walk as a safety net, and at start.
+- **On request**: `POST /admin/scan`.
+- A file that is still being copied is left alone until its size has stopped changing for 10 seconds.
+- If a root cannot be watched (a network mount, or the system's watch limit), the server logs it once and scans that root every 15 minutes.
+
+### 2.3 What counts
+
+- **Video files**: `.mkv .mp4 .m4v .mov .avi .ts .m2ts .webm .wmv .mpg .mpeg`.
+- **Ignored**: names that start with a dot, `@eaDir`, `lost+found`, anything ending in `.part`, `.partial`, `.!qB` or `.tmp`, and files named `sample`.
+- **Extras**: a file in an extras folder or with an extras suffix (section 4.6) is stored with `kind = 'extra'` and kept out of lists.
+- **External tracks**: subtitle files (`.srt .ass .ssa .vtt .sub .sup`) and audio files (`.mka .ac3 .flac .opus`) whose name starts with a video's base name are attached to that video (section 4.7).
+
+## 3. Probing
+
+One ffprobe child per file:
+
+```
+ffprobe -v error -show_format -show_streams -show_chapters -of json <path>
+```
+
+It took about 0.05 s per file once the file was in the cache, and the child used 54 MB for its short life. At that rate a library of 14,700 files takes about 12 minutes on one core, once. One or two probes run at a time, and they pause while a playback starts.
+
+What is kept:
+
+| From ffprobe | Stored as |
+|---|---|
+| `format.format_name`, `duration`, `bit_rate` | `files.container`, `duration_ms`, `bit_rate` |
+| each stream's `index`, `codec_type`, `codec_name`, `profile` | `streams.idx`, `kind`, `codec`, `profile` |
+| `tags.language`, `tags.title` | `lang`, `title` |
+| `disposition.default`, `forced`, `hearing_impaired` | `is_default`, `is_forced`, `is_hearing_impaired` |
+| video `width`, `height`, `pix_fmt`, `avg_frame_rate` | `width`, `height`, `pix_fmt`, `fps_num`, `fps_den` |
+| video bit depth, read from the pixel format | `bit_depth` |
+| video `level` | `level`. With the profile and the bit depth it gives the name a browser asks about the stream by (`05-playback.md`, section 13.3). |
+| video `color_transfer` and side data | `hdr`: `smpte2084` is HDR10, `arib-std-b67` is HLG, a Dolby Vision configuration record is `dv` |
+| audio `channels`, `channel_layout`, `sample_rate`, `bit_rate` | the same |
+| attachment `tags.filename`, `tags.mimetype`, `extradata_size` | `filename`, `mime`, `size`, and their sum in `files.attachments_bytes` |
+| chapters | `chapters` |
+
+- The raw JSON is not kept. `probe_version` in the code is raised when this mapping changes, and every file is probed again.
+- A file ffprobe cannot read keeps `probe_error` and is not offered for playback. It is retried when its size or time changes.
+- The fingerprint is computed in the same task: the size, and a hash of the first and last 64 KiB.
+
+## 4. Parsing names
+
+The parser expects Jellyfin's documented folder layout, with episode file names in several common styles. It implements those conventions and no others.
+
+### 4.1 Films
+
+- A folder `Name (year) [ids]` holding the film, or a lone file `Name (year).ext` in the library root.
+- The item's key is the folder, or the file when there is no folder.
+- Title and year come from the folder name. Brackets are read for ids (4.5) and otherwise dropped.
+
+### 4.2 Series and seasons
+
+- A folder `Name (year) [ids]` per series. Its name gives the title and the year.
+- `Season NN` folders inside it. `Season 00` and `Specials` are season 0.
+- Episode files directly in the series folder belong to season 1.
+
+### 4.3 Episodes
+
+The folders already give the series and the season. The file name only has to yield an episode number. The forms it reads:
+
+- `Series - S01E02`
+- `[Group] Series - S01E02`
+- `[Group] Series - 123`, a running count with no season tag
+- any of those without the dash
+
+The rule, in order:
+
+1. Remove bracketed groups: `[Group]`, `[1080p]`, `(…)`.
+2. If an `SxxEyy` token is present, take it, with `SxxEyy-Ezz` for a file that holds several episodes. Class **explicit**.
+3. Otherwise, if the name starts with the series folder's title, cut the title off, skip the folder's year if it follows, and take the first number that stands alone. A version suffix such as `05v2` is allowed. Class **anchored**.
+4. Otherwise accept a number that follows ` - `. Class **dash**.
+5. Otherwise take the last number that stands alone. Class **guess**. The file goes to the review list.
+
+Comparison is on a normalised form: lower case, every run of other characters turned into one space. So `Unit No. 8` in a folder name matches `Unit No 8` in a file name.
+
+A Go prototype of this rule was run on 11,423 synthetic names in eight forms, including titles that contain numbers, version suffixes, quality tags outside brackets and episode titles with digits:
+
+| Form | Names | Right |
+|---|---|---|
+| The six forms above, with and without group tags and dashes | 10,761 | 10,761 |
+| File title differs from the folder's, with a dash | 592 | 592 |
+| File title differs from the folder's, no dash | 70 | 64 |
+
+All six errors were in the **guess** class, the one that goes to review. The names and the parser came from the same author, so this shows the rule is sound, not that it is complete. The test table should grow from real names.
+
+Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brackets, decimals such as `12.5`.
+
+### 4.4 Versions and parts
+
+- **Versions.** Two files that resolve to the same film or episode are versions of it. What follows the common name, after ` - `, is the label: `Film (2001) - 1080p.mkv`.
+- **Parts.** `cd`, `dvd`, `part`, `pt`, `disc` or `disk`, then a number or a letter a to d, split a film into parts that play in order.
+
+### 4.5 Ids in names
+
+`[imdbid-tt1234567]`, `[tmdbid-12345]`, `[tvdbid-12345]` on a folder or a file settle the match without a search. Several may appear together.
+
+### 4.6 Extras
+
+Kept out of lists in version 1.
+
+- Folders: `behind the scenes`, `deleted scenes`, `interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`, `other`, `extras`, `trailers`, `theme-music`, `backdrops`. This list is from memory of Jellyfin's documentation; confirm it there when coding.
+- Suffixes on a file name: `-trailer`, `-sample`, `-scene`, `-clip`, `-interview`, `-behindthescenes`, `-deleted`, `-deletedscene`, `-featurette`, `-short`, `-other`, `-extra`. Same caveat.
+
+### 4.7 External subtitles and audio
+
+`Film (2001).eng.forced.srt`: after the video's base name, dot-separated fields, each one a language code, a title, or a flag. Flags are `default`, `forced` or `foreign`, and `sdh`, `cc` or `hi`.
+
+### 4.8 Local images
+
+`poster`, `folder`, `backdrop`, `fanart`, `logo`, `banner` in an item's folder, and `<episode file name>-thumb` next to an episode. Used before anything is fetched.
+
+## 5. Building items
+
+Run after every scan that changed something. It must be idempotent: a second run changes nothing and bumps no sequence.
+
+- **Films.** One movie item per key. Its files are attached as versions or parts.
+- **Series.** One series item per series folder. Season items are created for the season numbers that occur. Episode items are created per `(series, season, episode)`.
+- **Titles before metadata.** A film or series takes its title and year from the folder name. An episode is titled `Episode N` until metadata arrives.
+- **`sort_title`** is the title in lower case without a leading article (`the`, `a`, `an`).
+- **`added_at`** is the earliest `first_seen_at` of the item's files. For a series it is that of its newest episode, so a new episode brings the series to the top of Recently added.
+- **Absolute numbering.** When a series has files in the anchored, dash or guess class whose numbers run past what one season holds (a number above 99, or above the provider's count for that season once known), the series is set to `numbering = 'absolute'`, the numbers are stored in `absolute_number`, and season and episode numbers wait for the mapping in section 6.5. A person can set `numbering` by hand in the match dialog.
+- **Removal.** An item whose files have all been missing for 30 days is deleted, with a tombstone. Until then it is shown as unavailable.
+- **Collections** are items too, but they are built from metadata, not from files (section 6.6).
+- **Sequence.** Every item written takes the transaction's sequence number. A new episode also bumps its season and its series.
+
+## 6. Matching and metadata
+
+### 6.1 Order
+
+For a film or a series, stop at the first step that gives an answer:
+
+1. **A manual match** in `overrides` for this folder. A row that names the provider `none` means the folder was left unmatched on purpose: stop here, and the item is `ignored`.
+2. **The one-time import** from Jellyfin (section 7), which seeds provider ids by path.
+3. **Ids in the name** (4.5), or in an `.nfo` file in the folder if there is one.
+4. **Search and score** (6.2).
+
+Episodes are never searched for. They are looked up by number inside their series' match.
+
+### 6.2 Search and score
+
+- Search the provider by the parsed title, with the year when there is one.
+- Score each candidate from 0 to 1: similarity of the normalised titles, counting the provider's alternative titles; plus the year matching exactly or within one; plus the candidate being the right kind.
+- **Accept** when the best score is at least 0.90 and at least 0.10 ahead of the second. The item becomes `matched`.
+- **Otherwise** the item becomes `review`, with the candidates kept for the dialog.
+- **Why** is written to `match_note` for the review list: no results, a best score that is too low, candidates too close together, or a running count that could not be mapped, with the number of candidates and the best score.
+- No result at all leaves it `unmatched`.
+
+The thresholds are starting values. Tune them on a real library, against what Jellyfin matched there.
+
+### 6.3 What is fetched
+
+| For | Request | Kept |
+|---|---|---|
+| A film | One details request with external ids, images and certifications appended | Title, original title, overview, date, runtime, rating, certification, genres, ids, image paths |
+| A series | One details request with the same appended, plus alternative titles | The same, plus alternative titles for the search index |
+| A season | One request per season | Every episode's title, overview, air date, runtime and still |
+| Credits | Appended to the film's or the series' details request, at no extra request | For each person kept: the provider's id, name, what they are known for, the path of their photo, and the character or the job. For a series, the number of episodes. |
+| A collection | One request, when a library first holds two of its films (6.6) | Title, overview, poster and backdrop paths |
+
+- Every response is stored in `provider_cache`. Changing how a response is read never fetches it again.
+- **Refresh**: a series that is still airing, weekly. Everything else, every 30 days, and on request. Mind the provider's terms on how long data may be kept.
+- At most two provider requests run at once.
+- **Credits kept**: the first 20 of the cast in billing order, then the directors, then the writers, with a series' creators first among the writers (P7). An item's credits are replaced as a whole on every fetch.
+- **No photo is downloaded here.** A person's photo is fetched when a client first asks for it (section 8).
+
+### 6.4 Providers
+
+| Provider | Use | Notes |
+|---|---|---|
+| TMDB | Primary, for films, series, episodes and artwork | Needs a free API key from whoever runs the server, set in the web interface or as `RUNNEL_TMDB_KEY` (D34). A new key is checked with one request before it is kept. Non-commercial use with attribution. The client's About screen must carry TMDB's notice. |
+| Anime-Lists | Mapping between AniDB entries and TMDB or TVDB seasons, with episode offsets | An XML file on GitHub. Fetched at most once a day. |
+| anime-offline-database | Titles and synonyms, for matching romanised release names without a network call | A JSON file, updated weekly, under the ODbL. |
+| TheTVDB, AniDB, AniList, TVmaze | Not called in version 1 | Licensing or rate limits; see the research notes, section 7.1. AniDB and AniList ids are still stored when a mapping supplies them. |
+
+TMDB requests, from memory and to be confirmed against its documentation when coding: `/search/movie`, `/search/tv`, `/movie/{id}`, `/tv/{id}`, `/tv/{id}/season/{n}`, `/find/{external id}`, with `append_to_response` for ids, images and credits, `/collection/{id}`, and `/configuration` for the image base address and sizes. A series' credits with episode counts are a separate list there (`aggregate_credits`).
+
+### 6.5 Libraries with the anime profile
+
+The databases disagree about what a series is. AniDB and AniList treat each season, film and OVA as its own entry, numbered from 1. TMDB and TVDB have one show with seasons, and do not always agree with each other. Release names add a third convention, one running count.
+
+- **The folder is the unit.** One series folder is one match.
+- **Titles are matched offline first**, against anime-offline-database's synonyms, then through Anime-Lists to a TMDB series. Only if that fails is TMDB searched by name.
+- **Episode data comes from TMDB.** An explicit `SxxEyy` is taken as it stands, plus any offset from `overrides`.
+- **A running count is mapped by counting.** Episode N of an absolute-numbered series is the Nth episode of the TMDB series in season order, specials left out. Where Anime-Lists gives an offset for the entry, it is applied first.
+- **What cannot be mapped stays playable**, titled by its number, and listed for review.
+
+Chapter names can mark openings and endings for a skip button. Many files name their chapters only `Chapter 01`, `Chapter 02` and so on, so this will not work everywhere.
+
+### 6.6 Collections
+
+A collection is a set of films the provider groups together. It is shown only when a library holds two or more of its films (D33).
+
+- A film's details name the collection it belongs to, if any. That goes on the film as an `external_ids` row with provider `tmdb_collection`, whether or not a collection is shown.
+- After a film is matched, and after a film is removed, the server counts the library's films for that collection. At two, it makes the collection item, fetches the collection's details and artwork, and points the films at it. Below two, it deletes the item and clears the pointer on the film that is left.
+- A collection is never built from a folder, and a library's listing does not include collections. They are reached from their films.
+- The rules that keep the rows consistent are in `03-data-model.md`, section 4.
+
+### 6.7 Leaving unmatched, and the preview
+
+- **Leaving an item unmatched** writes an `overrides` row with provider `none`. Matching skips that folder from then on, the item keeps the title from its name, and it leaves the review list. Forgetting the row puts it back.
+- **The preview of a series match** (`PUT /admin/items/{id}/match?dry_run=1`) answers how the folder's files would map before anything is saved. It fetches the provider's seasons into the cache, which is allowed in a dry run because the cache is not part of the library. It applies the numbering and the offsets to the files in memory, and returns how many map and a few samples: the first file, the first file of each later season, the last file.
+
+## 7. Importing from Jellyfin, once
+
+A library that Jellyfin has already matched can be imported. That is quicker and more accurate than matching again.
+
+1. `POST /admin/import/jellyfin` with the Jellyfin address, an API key, a map from Jellyfin users to local users, and path prefixes to rewrite when Jellyfin runs in a container:
+
+   ```json
+   {
+     "url": "http://jellyfin.lan:8096",
+     "api_key": "…",
+     "users": {"ada": "ada"},
+     "paths": [{"from": "/media", "to": "/srv/media"}],
+     "dry_run": true
+   }
+   ```
+
+2. The server lists Jellyfin's films, series and episodes with their paths, provider ids and each user's play state.
+3. Each is joined to a local item by path.
+4. For films and series: provider ids are written to `external_ids`, and the item becomes `matched`.
+5. For films and episodes, per user: played, play count, last played and position are written to `user_state`.
+6. A report says what matched, what did not, and what Jellyfin had that the server does not.
+
+- `dry_run` does everything except the writes. Run that first.
+- The import is safe to repeat. It never overwrites a manual match, and it never lowers a play state that is newer locally.
+- Jellyfin's item listing with paths and user data is known from versions before 12. Check it against 12 before relying on it.
+- Before the dry run, `POST /admin/import/jellyfin/users` lists Jellyfin's users, for the form that maps them to people here.
+- One import runs at a time. Its report is kept in the data directory, replaced by the next run. `GET /admin/import/jellyfin` returns the summary and the first 100 rows that did not join, and every row with `full=1` (`04-api.md`, section 8.5).
+
+## 8. Artwork
+
+| Kind | For | Width kept |
+|---|---|---|
+| `poster` | films, series, seasons | 342, and 500 for the detail screen |
+| `backdrop` | films, series | 1280 |
+| `thumb` | episodes | 300 |
+| `logo` | films, series | 500 |
+| a person's photo | cast and crew | One width for cards and one for the person page, chosen from the provider's sizes when stage 4 is specified |
+
+- **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once.
+- **Provider images** are downloaded at the provider's own sizes nearest to those widths. The server never decodes a large image in its own process.
+- **Key.** 32 hex characters derived from the image's source: the provider and its image path, or a local file's fingerprint. A changed image has a new key, so responses can be cached forever.
+- **On disk**: `images/<first two characters>/<key>_<width>.jpg` under the data directory.
+- **Placeholder colour**: the average colour of the smallest stored width, computed once.
+- **Order of work**: posters and backdrops for films and series first. Episode thumbs are fetched when their season is first opened, and in the background at the lowest priority.
+- A library of 3,000 films and 240 series comes to roughly 3,500 posters and backdrops, a few hundred megabytes at most.
+- **People's photos arrive on first request** (D33). A film can credit dozens of people, so matching a library downloads none of them. The key is derived from the photo's path when the credits are stored, so the address exists at once. `GET /img/{key}/{w}` for a key with no file on disk finds the person, downloads the provider's nearest size, stores it, works out the colour and answers. A photo the provider cannot give is `404`, and is not tried again for a day.
+- **Episode stills, to check when stage 4 is specified**: how wide the provider's stills are. The TV's episode rows are 400 px wide. If the largest fixed size is narrower, the original is fetched and scaled once by an ffmpeg child (`11-design-review.md`, U5).
+
+## 9. Background work
+
+One queue in the `tasks` table, so work survives a restart.
+
+| Kind | Runs | At once |
+|---|---|---|
+| `probe` | after a scan, per new or changed file | 2 |
+| `match` | after items are built, per unmatched film or series | 2, sharing the provider limit |
+| `fetch` | after a match, and on refresh | 2, sharing the provider limit |
+| `image` | after a fetch | 2 |
+| `sidecar` | when a transcode starts | 1 |
+| `import` | on request | 1 |
+| `extract` | when a browser first asks for a file's subtitles or fonts, or a `prepare` says so | 1 |
+
+- A failed task is retried with a growing delay, five times, then left as failed for `GET /admin/tasks`.
+- Everything here pauses while a playback session is starting.
+- A provider that answers 429 pauses its queue for the time it asks.
+- A task carries the library it works for. Finished tasks stay until their kind and library have nothing queued or running, and are then deleted together. `GET /admin/tasks` counts progress from that: done out of all (`03-data-model.md`, section 4).
+- An admin can cancel what is queued and retry what failed. Cancelled work is found again by the next scan or refresh.
+- A scan is not a task. The scanner reports its own state: walking, then probing with done out of total, which are its library's `probe` tasks.

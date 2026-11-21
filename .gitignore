@@ -1,0 +1,21 @@
+# Build output
+/runnel
+/dist/
+*.test
+*.out
+
+# The web interface's dependencies and build output (from stage 5)
+/web/node_modules/
+/web/dist/
+
+# Local data: never commit a database, a token or a media file
+*.db
+*.db-wal
+*.db-shm
+*.token
+/data/
+
+# Editors and systems
+.idea/
+.vscode/
+.DS_Store
