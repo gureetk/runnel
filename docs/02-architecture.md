@@ -101,6 +101,7 @@ Rules for the code:
 | ffprobe children | Up to 2 | Short-lived, about 54 MB each. The first probe also runs `ffprobe -pix_fmts` once, for the bit depths of pixel formats. |
 | ffmpeg children | One per stream, plus one warm-up | See `05-playback.md`, section 4.4. A browser playback has two streams, video and audio. A stream that only copies takes no transcode slot. |
 | Discovery responder | One goroutine | Answers multicast DNS for one service. Stage 6. |
+| Update check | One goroutine | One request to GitHub a few minutes after start, then one a day, unless `RUNNEL_UPDATE_CHECK=off` (D47). Stage 5. |
 
 **The playback gate.** A counter of sessions that are starting. While it is above zero, task workers finish what they hold and take nothing new. A session counts as starting from its request, or its `prepare`, until 10 seconds after its first byte.
 
@@ -125,6 +126,7 @@ Two settings can also be changed while the server runs, by an admin in the web i
 | `RUNNEL_TMDB_KEY` | none | The metadata key. It can be set in the web interface instead. Without a key nothing is fetched and items keep the titles from their names. |
 | `RUNNEL_NAME` | none | The server's name, shown by clients. It can be set in the web interface instead. Without one it is the machine's host name. |
 | `RUNNEL_DISCOVERY` | `on` | `off` stops the server from announcing itself on the local network. |
+| `RUNNEL_UPDATE_CHECK` | `on` | `off` stops the daily check for a newer release (D47, from stage 5). |
 | `RUNNEL_LOG` | `info` | `debug`, `info`, `warn` or `error`. |
 
 Subcommands of the one binary:
@@ -207,7 +209,7 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 
 ## 11. Running it
 
-The systemd unit is `deploy/runnel.service`. It says, in its comments, how to install it. `systemd-analyze verify` accepts it.
+The systemd unit is `deploy/runnel.service`. It says, in its comments, how to install it. `systemd-analyze verify` accepts it. From stage 5, `deploy/install.sh` installs a release that way, updates it and removes it (D46). The server never replaces its own binary (D47).
 
 ```ini
 [Unit]
@@ -248,7 +250,7 @@ WantedBy=multi-user.target
 - `CGO_ENABLED=1 go build -tags sqlite_fts5 -trimpath -ldflags "-s -w -X main.version=<tag>" ./cmd/runnel`
 - The prototype's stripped binary was 7.4 MB. A clean build took 66 s including one compile of SQLite's C source, and a rebuild after a one-line change 0.6 s.
 - From stage 5 the web interface is built first: `npm ci && npm run build` in `web/`, whose output `internal/web` embeds. A build then needs Node as well as Go and a C compiler.
-- Releases are tags. Pushing a tag `v…` runs `.github/workflows/release.yml`. It runs the tests and builds `linux/amd64` linked statically against musl, so that the binary runs whatever C library the distribution has: `CC=musl-gcc`, with `-linkmode external -extldflags -static` added to `-ldflags`. It starts the binary once and checks that `GET /server` gives the tag as the version. Then it attaches `runnel-linux-amd64`, the unit and `SHA256SUMS` to a GitHub release. A tag with a suffix, such as `v0.1.0-rc.1`, is published as a pre-release. A pull request that changes the workflow runs all of it except the publishing.
+- Releases are tags. Pushing a tag `v…` runs `.github/workflows/release.yml`. It runs the tests and builds `linux/amd64` linked statically against musl, so that the binary runs whatever C library the distribution has: `CC=musl-gcc`, with `-linkmode external -extldflags -static` added to `-ldflags`. It starts the binary once and checks that `GET /server` gives the tag as the version. Then it attaches `runnel-linux-amd64`, the unit and `SHA256SUMS` to a GitHub release. A tag with a suffix, such as `v0.1.0-rc.1`, is published as a pre-release. A pull request that changes the workflow runs all of it except the publishing. From stage 5 a release also carries `deploy/install.sh` (D46).
 - In the sandbox the static build is the lighter one. Idle after the first index and probe of 3,166 generated files, it held 14.5 MB against 17.8 MB for the dynamic build, with peaks of 18.1 MB and 20.9 MB (20 November 2026). The whole test suite passes built that way.
 
 ## 13. Testing
