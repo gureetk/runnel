@@ -4,7 +4,9 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -106,6 +108,35 @@ func TestMigrationMatchesTheDocument(t *testing.T) {
 	}
 	if body != string(m[1]) {
 		t.Fatal("migrations/0001_init.sql and docs/03-data-model.md, section 3, differ: change both together")
+	}
+}
+
+// frozen is the SHA-256 of every merged migration. A database made with a
+// migration may exist anywhere, and the server never applies one twice, so
+// an edited migration would go unnoticed where it has run. A merged
+// migration is therefore never changed, not even a comment in it: a change
+// to the schema is a new migration, whose hash is added here in the pull
+// request that adds it (docs/03-data-model.md, section 7).
+var frozen = map[string]string{
+	"0001_init.sql": "5010988cbfe70f4bc90dfdb9a0ad6fb61a804a1be5112e2f815251fa62211399",
+}
+
+func TestMigrationsAreFrozen(t *testing.T) {
+	ms, err := migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != len(frozen) {
+		t.Errorf("%d migrations and %d frozen hashes: add the hash of a new migration to frozen", len(ms), len(frozen))
+	}
+	for _, m := range ms {
+		sum := sha256.Sum256([]byte(m.sql))
+		switch want, ok := frozen[m.name]; {
+		case !ok:
+			t.Errorf("%s has no frozen hash: add %x to frozen", m.name, sum)
+		case hex.EncodeToString(sum[:]) != want:
+			t.Errorf("%s has changed since it was merged. A merged migration is never edited: undo the change, and make a new migration for it", m.name)
+		}
 	}
 }
 

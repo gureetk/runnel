@@ -20,7 +20,7 @@ Read `docs/00-start-here.md` first. Then read the document for the part you are 
 
 ## Git
 
-- Work on a branch. Open a pull request. The maintainer merges it with Squash and merge. Never push to `main`.
+- Work on a branch. Open a pull request. It is merged with Squash and merge, by the maintainer, or by the session that opened it once CI has passed on it, where the maintainer has allowed that. Never push to `main`, and never merge any other way.
 - Commits are authored as `gureet <noreply@git.gureet.ca>`.
 - A commit made with Claude's help may end with one trailer: `Co-Authored-By: Claude <model name> <noreply@anthropic.com>`.
 - Never add a `Claude-Session:` trailer. Never put a link to a Claude chat, session or project in a commit, a pull request title or description, an issue or a comment. After opening a pull request, read its description back and remove any such link.

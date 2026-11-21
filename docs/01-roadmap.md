@@ -1,10 +1,10 @@
 # Roadmap
 
-The stages in which the server and its clients get built, what each one must prove before the next starts, and why they are in this order. Durations are rough guesses for evenings and weekends, and exist only for the server stages. The client stages cannot be estimated before they are designed and before it is decided what they are built with.
+The stages in which the server and its clients get built, what each one must prove before it is done, and why they are in this order. Durations are rough guesses for evenings and weekends, and exist only for the server stages. The client stages cannot be estimated before they are designed and before it is decided what they are built with.
 
 Nothing here is to be started until it is asked for.
 
-**Revised, 20 November 2026,** after the design review (`11-design-review.md`, D29 to D37): the designs exist, their asks are in `04-api.md` and `03-data-model.md`, and the stages below say where each new piece lands. Revised again the same day after the research that closed the planning: the licence (D38), how a browser is fed (D39, D40), what the clients are built with (D41 to D44), and discovery (P6). Revised on 21 November 2026: installing and updating join stage 5 (D46, D47).
+**Revised, 20 November 2026,** after the design review (`11-design-review.md`, D29 to D37): the designs exist, their asks are in `04-api.md` and `03-data-model.md`, and the stages below say where each new piece lands. Revised again the same day after the research that closed the planning: the licence (D38), how a browser is fed (D39, D40), what the clients are built with (D41 to D44), and discovery (P6). Revised on 21 November 2026: installing and updating join stage 5 (D46, D47). Revised again the same day: a stage may start once the stage before it is built, and is done only when its checks have run on real hardware (D48, section 15).
 
 ## 1. Order
 
@@ -87,9 +87,13 @@ Build:
 5. A renamed file keeps its id. Unmounting a root marks nothing missing.
 6. The parse report has no file in the `none` class, and every file in the `guess` class has been looked at.
 
+State on 21 November 2026: built (D48). Everything on the list is merged, and the six criteria pass in a development sandbox on generated files. None has been run on real hardware yet. That check is an open issue of the stage's milestone, and the milestone stays open until it is met.
+
 ## 4. Stage 2: a library a client can use
 
 Everything a client needs for browsing and direct play, and the existing watch history brought over. About 3 to 4 weekends.
+
+Do first, because stage 1 is built and not done (D48): harden the parser, which has met no real name yet. Read the shapes that a review of stage 1 found with invented names: underscores between words, a season's number after the title, decimals, the forms of a file that holds several episodes, folders that are not season folders, `E05` and `EP05` (`06-library-and-metadata.md`, section 4). Give the parse report a note on every file of an item that several files make, where their names do not tell versions or parts apart, so that a wrong number in a trusted class shows. Freeze migration `0001`, since a database made with it may exist (`03-data-model.md`, section 7). Add a test that builds the binary and runs its subcommands.
 
 Build:
 
@@ -112,7 +116,7 @@ Build:
 
 **Exit:**
 
-1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, collections, credits and people. Stage 6, with the TV app: discovery. Stage 10: the sidecar.
+1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, sessions and `GET /admin/sessions` (a session is an ffmpeg child's, `05-playback.md`, section 5), `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, collections, credits and people. Stage 5: `GET /admin/update` (`04-api.md`, section 8.8). Stage 6, with the TV app: discovery. Stage 7: playing in a browser (`04-api.md`, section 7.9). Stage 10: the sidecar.
 2. The import's dry run joins at least 99% of Jellyfin's films and episodes to local items by path. What is left is explained.
 3. After the import, played flags and positions equal Jellyfin's for a sample of 50 items per user.
 4. A copy built from `GET /changes?since=0` equals a copy built later from zero, after a day of scans and playback in between.
@@ -228,7 +232,7 @@ In whatever order is wanted. Each is its own small project.
 
 ## 13. Running beside Jellyfin
 
-Runnel can run beside Jellyfin on the same files for as long as wanted, and a switch can wait until the stages have held in daily use. The server writes nothing Jellyfin reads, so there is nothing to undo.
+Runnel can run beside Jellyfin on the same files for as long as wanted, and a switch can wait until the stages have held in daily use. The server writes nothing Jellyfin reads, so there is nothing to undo. Jellyfin is switched off only for what stages that are done provide, not stages that are only built (D48).
 
 ## 14. Not being built
 
@@ -240,4 +244,7 @@ Keeping these out is what keeps the project small: live TV, DLNA, plugins, devic
 - Every change reaches `main` by pull request, merged with Squash and merge. The repository's rules are in `00-start-here.md`, section 7.
 - A change in behaviour updates the document that describes it, in the same pull request.
 - A decision that changes a document's premise is written into `08-decisions.md` first.
-- Every exit criterion is checked on real hardware before the next stage starts. The results are kept outside the repository (D28).
+- A stage is *built* when its list is merged and its exit criteria pass in a development sandbox. It is *done* when they are met on real hardware (D48). The next stage may start once a stage is built.
+- The checks a built stage still owes on real hardware are an open issue of its milestone, and the milestone stays open until they are met. What they find is fixed first, in whatever stage is then in progress.
+- A release cut while a stage is built and not done is a pre-release.
+- The results from real hardware are kept outside the repository (D28).

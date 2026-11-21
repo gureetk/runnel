@@ -20,6 +20,7 @@ type reportLibrary struct {
 	Kind       string         `json:"kind"`
 	Files      int            `json:"files"`
 	Counts     map[string]int `json:"counts"`
+	Noted      int            `json:"noted"`
 	Unreadable int            `json:"unreadable"`
 }
 
@@ -51,9 +52,10 @@ func intOrNil(n int, ok bool) *int {
 }
 
 // handleParseReport is GET /admin/parse-report: how every file's name
-// parsed, counted by class, with the files of the classes that need a
-// look, and the files ffprobe could not read. Parameters: library, and
-// class (a class, or all; guess and none when left out).
+// parsed, counted by class, with the files that need a look, and the files
+// ffprobe could not read. Parameters: library; class, a class or all; and
+// noted=1 for the noted files only: those outside none that have a note.
+// Left out, the files listed are those in guess and none, and the noted.
 func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	libs, err := s.db.Libraries(r.Context())
@@ -77,14 +79,28 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		}
 		libs = []model.Library{lib}
 	}
-	listed := []string{parse.Guess, parse.None}
+	// By default the files that need a look: guess and none, and the files
+	// of the other classes that have a note.
+	listed, withNote := []string{parse.Guess, parse.None}, true
 	switch c := q.Get("class"); {
 	case c == "all":
 		listed = parse.Classes
 	case slices.Contains(parse.Classes, c):
-		listed = []string{c}
+		listed, withNote = []string{c}, false
 	case c != "":
 		s.fail(w, r, http.StatusBadRequest, "bad_request", "class is explicit, anchored, dash, guess, none or all")
+		return
+	}
+	notedOnly := false
+	switch q.Get("noted") {
+	case "", "0":
+	case "1":
+		notedOnly = true
+		if q.Get("class") == "" {
+			listed = parse.Classes
+		}
+	default:
+		s.fail(w, r, http.StatusBadRequest, "bad_request", "noted is 1, for the files with a note only")
 		return
 	}
 
@@ -120,7 +136,16 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		lib := &body.Libraries[at[row.LibraryID]]
 		lib.Files++
 		lib.Counts[row.Class]++
-		if !slices.Contains(listed, row.Class) {
+		// A note on a file in none says why it makes no item. A noted file
+		// is one that makes an item and still has something to look at.
+		noted := row.Note != "" && row.Class != parse.None
+		if noted {
+			lib.Noted++
+		}
+		switch {
+		case notedOnly && !noted:
+			continue
+		case !slices.Contains(listed, row.Class) && !(withNote && noted):
 			continue
 		}
 		f := reportFile{FileID: row.FileID, LibraryID: row.LibraryID, Path: row.Path, Class: row.Class,

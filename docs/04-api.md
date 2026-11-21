@@ -796,7 +796,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
-| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files of the classes asked for, and the files ffprobe could not read. Parameters: `library`, and `class`: a class, or `all`; `guess` and `none` when left out. The names are parsed again for each request: nothing about it is stored. |
+| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there). Left out, the files listed are those in `guess` and `none`, and the noted ones. The names are parsed again for each request: nothing about it is stored. |
 
 `GET /admin/libraries`:
 
@@ -820,9 +820,12 @@ Two settings can be changed while the server runs, and are kept in the database.
 
 ```json
 {"libraries": [{"id": 2, "name": "Anime", "kind": "shows", "files": 1790,
-                "counts": {"explicit": 1650, "anchored": 112, "dash": 20, "guess": 7, "none": 1}, "unreadable": 1}],
+                "counts": {"explicit": 1650, "anchored": 112, "dash": 20, "guess": 7, "none": 1}, "noted": 2, "unreadable": 1}],
  "files": [{"file_id": 4410, "library_id": 2, "path": "Salt Road (2010)/Season 01/Low Water 07.mkv", "class": "guess",
-            "title": "Salt Road", "year": 2010, "season": 1, "episode": 7}],
+            "title": "Salt Road", "year": 2010, "season": 1, "episode": 7},
+           {"file_id": 4502, "library_id": 2, "path": "Salt Road (2010)/S02/Salt Road - 03.mkv", "class": "anchored",
+            "title": "Salt Road", "year": 2010, "season": 1, "episode": 3,
+            "note": "in the folder \"S02\", which is not a season folder; one of 2 files that make S01E03, and their names do not tell them apart as versions or parts"}],
  "unreadable": [{"file_id": 5002, "library_id": 2, "path": "Salt Road (2010)/Season 02/Salt Road - S02E03.mkv",
                  "error": "Invalid data found when processing input"}]}
 ```

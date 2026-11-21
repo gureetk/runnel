@@ -298,11 +298,11 @@ func TestLibraryAddAndScan(t *testing.T) {
 	// Items were built, and the report says how the names parsed.
 	srv.waitFor(t, `msg="items built" library=1 ms=\d+ added=2`)
 	out.Reset()
-	if err := report(ctx, client, 0, "all", &out); err != nil {
+	if err := report(ctx, client, 0, "all", false, &out); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, none 0. ffprobe could not read 0.",
+		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, none 0. With a note 0. ffprobe could not read 0.",
 		"explicit\t1\tInvented Film (2001)\tInvented Film (2001)/Invented Film (2001).mkv",
 		"explicit\t2\tLone Film (1999)\tLone Film (1999).mp4",
 	} {

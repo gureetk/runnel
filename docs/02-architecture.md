@@ -138,7 +138,7 @@ Subcommands of the one binary:
 | `runnel setup-code` | Prints the setup code, while no user exists (D35). The server also prints it in its log when it starts without users. |
 | `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id>` | Libraries. |
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
-| `runnel report [--library <id>] [--class <class>\|all]` | Prints how every file's name parsed, by class, and the files ffprobe could not read. |
+| `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |
 | `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code. |
 | `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it. |
 | `runnel import jellyfin …` | The one-time import. |
@@ -263,6 +263,7 @@ WantedBy=multi-user.target
 | Database | Migrations and every query | Against a temporary database with sample rows. The queries in `03-data-model.md` are the starting set. |
 | API | Every endpoint | `net/http/httptest` against a temporary database and a temporary library. |
 | Integration | Scan, probe, range requests, a piped transcode's first packet | Tiny media files generated with ffmpeg's test sources in CI. Software codecs only. |
+| The binary | `serve` and the subcommands, as they ship | A test builds `runnel` and runs `serve`, `user add`, `library add`, `scan` and `report` as processes of their own, on a library made with ffmpeg, checking their output and exit statuses and that SIGTERM stops the server. |
 | Hardware | Encoders, timings, memory | By hand on real hardware, with the checklist in `05-playback.md`, section 12. CI has no GPU. |
 | Web | The web interface | Unit tests for its logic. From stage 7, the player in a headless browser against a test server. |
 

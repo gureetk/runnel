@@ -6,13 +6,13 @@ A lean, fast media server for a home library, built together with its own offici
 
 Read this file first. Then read the document for the part being worked on.
 
-## 1. Where things stand (20 November 2026)
+## 1. Where things stand (21 November 2026)
 
-- **Stage 1 is built:** a server that serves files (`01-roadmap.md`, section 3). It is being checked against its exit criteria on real hardware.
-- **Decided:** the server's design (D1 to D19), the name and the logo (D20, D21), the order of the stages (D22, D25), official clients and their designs (D23 to D26, D29 to D37), the licence (D38), how a browser is fed (D39, D40), and what each client is built with (D41 to D44).
+- **Stage 1 is built:** a server that serves files (`01-roadmap.md`, section 3). Its exit criteria pass in a development sandbox on generated files, and are still to be checked on real hardware (D48).
+- **Stage 2 is being built:** a library a client can use (`01-roadmap.md`, section 4). It opens by hardening the parser against shapes that real names may have.
+- **Decided:** the server's design (D1 to D19), the name and the logo (D20, D21), the order of the stages (D22, D25), official clients and their designs (D23 to D26, D29 to D37), the licence (D38), how a browser is fed (D39, D40), what each client is built with (D41 to D44), installing and updating (D46, D47), and when a stage may start (D48).
 - **Proposed, to confirm in use:** encoder arguments, limits, thresholds, discovery on the local network (P1 to P8).
 - **Open:** O5, O6, O8, O12 and O13 in `08-decisions.md`. None of them blocks the server.
-- **Next:** stage 2, a library a client can use, once stage 1 has met its exit criteria on real hardware.
 
 The design documents (`design/`) and the design review (`11-design-review.md`) that other documents refer to are added in the repository's next pull request, together with the brand files.
 
@@ -135,3 +135,4 @@ For anyone working on this, person or Claude session. `CLAUDE.md` at the top of 
 | Playback gate | The rule that background work pauses while a playback starts. |
 | Official client | An app or page that is part of Runnel. `10-clients.md`. |
 | Real hardware | The machines a stage is proven on. Section 3. |
+| Built, done | A stage is built when its list is merged and its criteria pass in a development sandbox, and done when they are met on real hardware (D48). |
