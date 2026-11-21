@@ -457,7 +457,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | Parameter | Meaning |
 |---|---|
 | `library` | Library id. Required unless `parent`, `series`, `ids`, `genre`, `list`, `collection` or `person` is given. |
-| `type` | `movie` or `series` at the top of a library. `season` or `episode` below a parent. With `genre`, `list` or `person`: `movie` or `series` to narrow it, both when left out. |
+| `type` | `movie` or `series` at the top of a library; left out, the library's own kind. `season` or `episode` below a parent. With `genre`, `list` or `person`: `movie` or `series` to narrow it, both when left out. |
 | `parent` | Children of an item: seasons of a series, episodes of a season. |
 | `series` | With `type=episode`: every episode of a series in one list. |
 | `ids` | Comma-separated ids, at most 200. For refreshing a few cards. |
@@ -576,7 +576,7 @@ Audio never needs a transcode for an mpv-based client: mpv decodes every codec t
 
 The file as it is on disk.
 
-- `Range` requests are supported and expected. Responses carry `Accept-Ranges: bytes`, the container's media type and an `ETag` made from the file's fingerprint.
+- `Range` requests are supported and expected. Responses carry `Accept-Ranges: bytes`, the container's media type and an `ETag` made from the file's fingerprint: the fingerprint in quotes. A file not probed yet is served with the media type of its extension and no `ETag`.
 - `404` if the file is unknown. `503` with code `unavailable` while the file is missing or its disk is away.
 - The server copies from disk to socket in the kernel. It holds no buffer of its own.
 

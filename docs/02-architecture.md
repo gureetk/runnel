@@ -74,6 +74,7 @@ internal/discover/     the responder that announces the server on the local netw
 internal/web/          the built web interface, embedded, and the handler that serves it (stage 5)
 internal/testmedia/    small media files made with ffmpeg's test sources, for tests only
 web/                   the web interface's source (stage 5)
+deploy/                the systemd unit
 docs/                  these documents, in their public editions
 ```
 
@@ -190,7 +191,7 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 - JSON routes: 15 s to respond.
 - `/files/…/raw`, `/files/…/sidecar.mkv`, `/files/…/transcode.mkv`, `/files/…/video.mp4`, `/files/…/audio.mp4`: no write deadline. They last as long as the player keeps them.
 - The API is under `/api/v1`. The web interface is served from `/`, as files compressed at build time, with names that change when their content does.
-- Middleware, in order: recover, request id, log (method, path, status, time; never the query string), authenticate, gzip for JSON.
+- Middleware, in order: recover, request id, log (method, path, status, time; never the query string), authenticate, gzip for JSON. Gzip runs at its fastest level, with writers kept between requests: a writer at the default level holds much more memory.
 - No CORS headers unless an origin is configured.
 
 ## 10. Security
@@ -206,30 +207,37 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 
 ## 11. Running it
 
-A systemd unit, as a starting point:
+The systemd unit is `deploy/runnel.service`. It says, in its comments, how to install it. `systemd-analyze verify` accepts it.
 
 ```ini
 [Unit]
-Description=Runnel
+Description=Runnel media server
+Documentation=https://github.com/gureetk/runnel/tree/main/docs
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=runnel
 Group=runnel
+# For the GPU, from stage 3. Both groups must exist.
 SupplementaryGroups=render video
 Environment=RUNNEL_DATA=/var/lib/runnel
 Environment=GOMEMLIMIT=64MiB
 ExecStart=/usr/local/bin/runnel serve
 Restart=on-failure
+StateDirectory=runnel
+StateDirectoryMode=0700
 NoNewPrivileges=true
 ProtectSystem=strict
+ProtectHome=read-only
 ReadWritePaths=/var/lib/runnel
 PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+`StateDirectory` makes the data directory, owned by the service's user. `ProtectHome=read-only` leaves media under `/home` readable and makes it unwritable.
 
 - The media paths must be readable by the `runnel` user. Nothing needs to be writable outside the data directory.
 - In a container: mount the media read-only, mount the data directory, pass `/dev/dri/renderD128` through, and add the render group. Apps find the server by themselves only when the container uses the host's network. Otherwise its address is typed.

@@ -39,7 +39,8 @@ Each rule comes from a measurement.
 
 - `ETag` is the file's fingerprint, so a player that reconnects resumes its range.
 - No write timeout on this route. A paused player may sit on a connection for hours.
-- A request for a file with `missing_since` set, or on a root marked unavailable, is `503 unavailable` without touching the disk.
+- A request for a file with `missing_since` set, or on a root marked unavailable, is `503 unavailable` without touching the disk. So is one for a file that cannot be opened, which the next scan marks missing.
+- Checked in the development sandbox: `strace` showed `sendfile` carrying everything after the first 512 bytes of each response, whole files and ranges alike, through the server's middleware.
 
 **Warm-up for direct play.** `prepare` with `mode: direct` reads the first 4 MiB and the last 1 MiB of the file and discards them. That pulls the header, the attachments and usually the index into the page cache, and spins up a sleeping disk before Play is pressed.
 

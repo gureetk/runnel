@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The Runnel server as a systemd service (docs/02-architecture.md, section 11).
+#
+#   useradd --system --home-dir /var/lib/runnel --shell /usr/sbin/nologin runnel
+#   install -m 755 runnel /usr/local/bin/runnel
+#   install -m 644 deploy/runnel.service /etc/systemd/system/runnel.service
+#   systemctl daemon-reload && systemctl enable --now runnel
+#
+# The subcommands run as the same user: sudo -u runnel runnel user add <name>.
+# The media must be readable by that user; nothing outside the data directory
+# is writable to it.
+
+[Unit]
+Description=Runnel media server
+Documentation=https://github.com/gureetk/runnel/tree/main/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=runnel
+Group=runnel
+# For the GPU, from stage 3. Both groups must exist.
+SupplementaryGroups=render video
+Environment=RUNNEL_DATA=/var/lib/runnel
+Environment=GOMEMLIMIT=64MiB
+ExecStart=/usr/local/bin/runnel serve
+Restart=on-failure
+StateDirectory=runnel
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/runnel
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
