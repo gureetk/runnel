@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -274,6 +275,7 @@ func TestLibraryAddAndScan(t *testing.T) {
 		os.MkdirAll(filepath.Dir(p), 0o755)
 		tm.Make(t, p, tm.Join(tm.Video("1"), tm.Tone("440", "1"), []string{"-c:v", "libx264", "-c:a", "aac"})...)
 	}
+	tm.Settle(t, root)
 
 	var out bytes.Buffer
 	if err := libraryAdd(ctx, client, "Films", "movies", "", []string{root}, &out); err != nil {
@@ -310,4 +312,89 @@ func TestLibraryAddAndScan(t *testing.T) {
 			t.Fatalf("the report lacks %q:\n%s", want, out.String())
 		}
 	}
+}
+
+// TestANewFileIsPlayableSoon is stage 2's sixth exit criterion in the
+// test's own sandbox: a file written into a library is playable through
+// the API within 15 seconds, without a scan being asked for
+// (docs/01-roadmap.md, section 4).
+func TestANewFileIsPlayableSoon(t *testing.T) {
+	tm.Tools(t)
+	srv := startServer(t)
+	ctx := context.Background()
+	client, err := newAdminClient(config.Config{Listen: srv.addr, DataDir: srv.data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "films")
+	first := filepath.Join(root, "Invented Film (2001)", "Invented Film (2001).mkv")
+	os.MkdirAll(filepath.Dir(first), 0o755)
+	tm.Make(t, first, tm.Join(tm.Video("1"), tm.Tone("440", "1"), []string{"-c:v", "libx264", "-c:a", "aac"})...)
+	tm.Settle(t, root)
+	if err := userAdd(ctx, client, "ada", "correct horse", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := libraryAdd(ctx, client, "Films", "movies", "", []string{root}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	srv.waitFor(t, `msg="probing done" probed=1 unreadable=0`)
+
+	// Sign in as a client does.
+	base := "http://" + srv.addr + "/api/v1"
+	body := `{"name":"ada","password":"correct horse","device":{"id":"test"}}`
+	resp, err := http.Post(base+"/auth/login", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var login struct{ Token string }
+	json.NewDecoder(resp.Body).Decode(&login)
+	resp.Body.Close()
+	get := func(path string, out any) {
+		req, _ := http.NewRequest("GET", base+path, nil)
+		req.Header.Set("Authorization", "Bearer "+login.Token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		json.NewDecoder(resp.Body).Decode(out)
+	}
+
+	// A new film is written into the library as a copy is: a file whose
+	// time is now.
+	made := filepath.Join(t.TempDir(), "made.mkv")
+	tm.Make(t, made, tm.Join(tm.Video("1"), tm.Tone("440", "1"), []string{"-c:v", "libx264", "-c:a", "aac"})...)
+	b, _ := os.ReadFile(made)
+	start := time.Now()
+	dir := filepath.Join(root, "Paper Comets (2019)")
+	os.MkdirAll(dir, 0o755)
+	if err := os.WriteFile(filepath.Join(dir, "Paper Comets (2019).mkv"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for time.Since(start) < 20*time.Second {
+		var page struct {
+			Items []struct {
+				ID    int64
+				Title string
+			}
+		}
+		get("/items?library=1", &page)
+		for _, it := range page.Items {
+			if it.Title != "Paper Comets" {
+				continue
+			}
+			var d struct{ Files []struct{ ID int64 } }
+			get("/items/"+strconv.FormatInt(it.ID, 10), &d)
+			if len(d.Files) == 1 {
+				took := time.Since(start)
+				t.Logf("playable after %v", took.Round(10*time.Millisecond))
+				if took > 15*time.Second {
+					t.Fatalf("playable after %v, more than 15 seconds", took)
+				}
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("not playable after 20 seconds:\n%s", srv.logs.String())
 }

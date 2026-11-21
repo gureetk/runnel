@@ -97,6 +97,7 @@ Rules for the code:
 | Database writer | One connection, one user at a time | Every write is `BEGIN IMMEDIATE`. Writers queue in the process, not in SQLite. |
 | Database readers | Up to 4 connections | WAL lets them read during a write. |
 | Scanner | One | One root at a time. |
+| Watcher | One goroutine | Reads inotify's events, and gathers the folders that changed for 5 seconds before it asks for their scan (`06-library-and-metadata.md`, section 2.2). |
 | Task workers | A few, by kind | See `06-library-and-metadata.md`, section 9. |
 | ffprobe children | Up to 2 | Short-lived, about 54 MB each. The first probe also runs `ffprobe -pix_fmts` once, for the bit depths of pixel formats. |
 | ffmpeg children | One per stream, plus one warm-up | See `05-playback.md`, section 4.4. A browser playback has two streams, video and audio. A stream that only copies takes no transcode slot. |
@@ -152,7 +153,7 @@ Subcommands that change data talk to the running server over its API on localhos
 - **The local admin token.** At every start the server makes a new random token, writes it to `admin.token` in the data directory, readable by its own user only, and keeps only its hash, in memory. The token is not a row in `tokens`: it belongs to no user, so it also works before the first user exists. The server takes it for the calls of `04-api.md`, section 8, and only from its own host: a loopback address, or the address the request arrived at.
 - **Finding the server.** A subcommand reads the same `RUNNEL_LISTEN` and `RUNNEL_DATA` as the server. It connects to `127.0.0.1` when the server listens on every address. It has to run as the server's user, or as root, to read the token: `sudo -u runnel runnel user add ada`.
 - **`runnel user add`** asks for the password twice, without echo, on a terminal. Otherwise it reads the first line of standard input.
-- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`.
+- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`. A scan of some folders also gives `folders`, and one that left files alone as still being written gives `being_written`.
 
 ## 7. The data directory
 

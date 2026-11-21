@@ -54,6 +54,8 @@ func newBrowse(t *testing.T) *browse {
 	mk(b.shows, "Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv")
 	mk(b.shows, "Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E01.mkv")
 	mk(b.shows, "Harbor Lantern (2021)/Specials/Harbor Lantern - S00E01.mkv")
+	tm.Settle(t, b.films)
+	tm.Settle(t, b.shows)
 
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
