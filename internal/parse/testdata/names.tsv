@@ -1,0 +1,66 @@
+# How names parse. Every name here is invented. A real name that parses wrong
+# is added only with its title replaced by an invented one of the same shape.
+#
+# kind	path below the root	class	title	year	season	episode	episode_end
+#
+# Films: a folder "Name (year) [ids]", or a lone file at the top.
+film	Paper Comets (2019)/Paper Comets (2019).mkv	explicit	Paper Comets	2019	-	-	-
+film	Paper Comets (2019) [imdbid-tt0000001]/Paper Comets (2019).mkv	explicit	Paper Comets	2019	-	-	-
+film	Paper Comets (2019) [tmdbid-1] [imdbid-tt0000001]/Paper Comets.mkv	explicit	Paper Comets	2019	-	-	-
+film	Paper Comets (2019)/Paper Comets (2019) - 1080p.mkv	explicit	Paper Comets	2019	-	-	-
+film	Paper Comets (2019)/Paper Comets (2019) - part2.mkv	explicit	Paper Comets	2019	-	-	-
+film	Lone Lantern (1999).mp4	explicit	Lone Lantern	1999	-	-	-
+film	Lone Lantern (1999) - 720p.mp4	explicit	Lone Lantern	1999	-	-	-
+film	1917 Signals (2019)/1917 Signals (2019).mkv	explicit	1917 Signals	2019	-	-	-
+film	2041: A North Light (1968)/2041 A North Light (1968).mkv	explicit	2041: A North Light	1968	-	-	-
+film	The Salt Road (2005)/The Salt Road (2005).mkv	explicit	The Salt Road	2005	-	-	-
+film	Glass River (Final Cut) (2011)/Glass River.mkv	explicit	Glass River	2011	-	-	-
+film	Glass River/Glass River.mkv	guess	Glass River	0	-	-	-
+film	Ferry Signal.mkv	guess	Ferry Signal	0	-	-	-
+film	Echo Garden (12345)/Echo Garden.mkv	guess	Echo Garden	0	-	-	-
+film	(2001)/x.mkv	none		2001	-	-	-
+film	[tmdbid-5]/x.mkv	none		0	-	-	-
+# Episodes: the form Series - S01E02, with a group and without the dash.
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05.mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/[Group] Harbor Lantern - S01E05.mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern S01E05.mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/[Group] Harbor Lantern S01E05 [1080p].mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/harbor.lantern.s01e05.720p.mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05 - The Quiet Morning.mkv	explicit	Harbor Lantern	2021	1	5	0
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05-E06.mkv	explicit	Harbor Lantern	2021	1	5	6
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05E06.mkv	explicit	Harbor Lantern	2021	1	5	6
+episode	Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E12.mkv	explicit	Harbor Lantern	2021	2	12	0
+episode	Harbor Lantern (2021)/Season 2/Harbor Lantern - S02E12.mkv	explicit	Harbor Lantern	2021	2	12	0
+episode	Harbor Lantern (2021)/Season 03/Harbor Lantern - S01E13.mkv	explicit	Harbor Lantern	2021	1	13	0
+episode	Harbor Lantern (2021)/Harbor Lantern - S03E01.mkv	explicit	Harbor Lantern	2021	3	1	0
+# Specials: Season 00 and Specials are season 0.
+episode	Harbor Lantern (2021)/Season 00/Harbor Lantern - S00E01.mkv	explicit	Harbor Lantern	2021	0	1	0
+episode	Harbor Lantern (2021)/Specials/Harbor Lantern - S00E02.mkv	explicit	Harbor Lantern	2021	0	2	0
+episode	Harbor Lantern (2021)/Specials/Harbor Lantern - 03.mkv	anchored	Harbor Lantern	2021	0	3	0
+# A running count, with no season tag: anchored on the series' title.
+episode	Salt Road (2010)/[Group] Salt Road - 001.mkv	anchored	Salt Road	2010	1	1	0
+episode	Salt Road (2010)/[Group] Salt Road - 112.mkv	anchored	Salt Road	2010	1	112	0
+episode	Salt Road (2010)/[Group] Salt Road 112 [1080p].mkv	anchored	Salt Road	2010	1	112	0
+episode	Salt Road (2010)/Salt Road - 05v2.mkv	anchored	Salt Road	2010	1	5	0
+episode	Salt Road (2010)/Salt Road 2010 - 07.mkv	anchored	Salt Road	2010	1	7	0
+episode	Salt Road (2010)/Salt Road (2010) - 08.mkv	anchored	Salt Road	2010	1	8	0
+episode	Salt Road (2010)/Season 01/Salt Road - 09 - Low Water 2.mkv	anchored	Salt Road	2010	1	9	0
+# A title that holds a number: the anchor takes it with the title.
+episode	Unit No. 8 (2020)/Season 01/Unit No 8 - 03.mkv	anchored	Unit No. 8	2020	1	3	0
+episode	Unit No. 8 (2020)/Season 01/Unit No. 8 - 03.mkv	anchored	Unit No. 8	2020	1	3	0
+episode	Unit No. 8 (2020)/Season 01/[Group] Unit No 8 03 [720p].mkv	anchored	Unit No. 8	2020	1	3	0
+episode	Orchard 2041 (2018)/Season 01/Orchard 2041 - 04.mkv	anchored	Orchard 2041	2018	1	4	0
+# The file's title differs from the folder's: after " - ", or a guess.
+episode	Harbor Lantern (2021)/Season 01/Lantern of the Harbor - 06.mkv	dash	Harbor Lantern	2021	1	6	0
+episode	Harbor Lantern (2021)/Season 01/[Group] Lantern of the Harbor - 06v3 [1080p].mkv	dash	Harbor Lantern	2021	1	6	0
+episode	Harbor Lantern (2021)/Season 01/Lantern of the Harbor 06.mkv	guess	Harbor Lantern	2021	1	6	0
+episode	Harbor Lantern (2021)/Season 01/Episode 7.mkv	guess	Harbor Lantern	2021	1	7	0
+# Nothing to place, or no number: the none class.
+episode	Harbor Lantern - S01E05.mkv	none		0	-	-	-
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern.mkv	none	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Pilot.mkv	none	Harbor Lantern	2021	1	0	0
+episode	[Group]/Season 01/Something - S01E01.mkv	none		0	-	-	-
+# Not handled in version 1 (docs/06-library-and-metadata.md, section 4.3):
+# 1x02, dates, numbers inside brackets, decimals. They fall to a lower class.
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern 1x02.mkv	none	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Other Title [05].mkv	none	Harbor Lantern	2021	1	0	0

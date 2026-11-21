@@ -131,7 +131,7 @@ For anyone working on this, person or Claude session. `CLAUDE.md` at the top of 
 | Sequence | A counter that rises with every visible change. Clients sync by it. |
 | Tombstone | A record that an item was deleted, kept so clients can drop it. |
 | Fingerprint | A file's size plus a hash of its first and last 64 KiB. Follows a file through a rename. |
-| Confidence class | How an episode number was found in a name: explicit, anchored, dash or guess. |
+| Confidence class | How an episode number was found in a name: explicit, anchored, dash or guess; none when there is none. A film's name has a class too. |
 | Playback gate | The rule that background work pauses while a playback starts. |
 | Official client | An app or page that is part of Runnel. `10-clients.md`. |
 | Real hardware | The machines a stage is proven on. Section 3. |

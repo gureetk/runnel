@@ -73,9 +73,9 @@ Build:
 - `runnel library add`, roots.
 - The scanner without watching: walk, compare, fingerprint, moves, missing, root availability.
 - The prober and its mapping. Until the queue of stage 2, the files table is the queue: a file waits while its `probe_version` is behind, and the scanner probes two at a time after each scan and at start.
-- The parser for films and episodes, and item building with titles taken from names.
+- The parser for films and episodes, and item building with titles taken from names: films, series and episodes, with every file of an item attached as part 0 without a label. Seasons, versions, parts, files that hold several episodes and absolute numbering are the full item model of stage 2.
 - `GET /server`, `POST /auth/login`, `GET /libraries`, `GET /items`, `GET /items/{id}`, `GET /files/{id}/raw`.
-- A report of how every file parsed, by class.
+- A report of how every file parsed, by class: `runnel report`, which reads `GET /admin/parse-report` (`04-api.md`, section 8.2). It also lists the files ffprobe could not read.
 - The systemd unit.
 
 **Exit, on real hardware with a real library:**

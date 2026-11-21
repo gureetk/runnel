@@ -135,6 +135,7 @@ Subcommands of the one binary:
 | `runnel setup-code` | Prints the setup code, while no user exists (D35). The server also prints it in its log when it starts without users. |
 | `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id>` | Libraries. |
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
+| `runnel report [--library <id>] [--class <class>\|all]` | Prints how every file's name parsed, by class, and the files ffprobe could not read. |
 | `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code. |
 | `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it. |
 | `runnel import jellyfin …` | The one-time import. |
