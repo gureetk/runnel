@@ -18,19 +18,20 @@ var version = "dev"
 const usage = `Usage: runnel <command>
 
 Commands:
-  serve     Run the server.
-  version   Print the version.
+  serve                        Run the server.
+  user add <name> [--admin]    Add a user to the running server.
+  version                      Print the version.
 
 Settings are environment variables that start with RUNNEL_. They are listed
 in docs/02-architecture.md, section 6.
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 // run runs one command and returns the process's exit status.
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -38,6 +39,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "serve":
 		return serve(args[1:], stderr)
+	case "user":
+		return userCmd(args[1:], stdin, stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

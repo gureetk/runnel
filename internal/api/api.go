@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/db"
 )
 
@@ -28,23 +30,56 @@ type Info struct {
 	InstanceID string
 }
 
+// Config is what the API is built from.
+type Config struct {
+	Info
+	// AdminTokenHash is the hash of the local admin token that the server
+	// wrote into its data directory at start. Nil takes no admin token.
+	AdminTokenHash []byte
+	// Now is the clock: time.Now outside tests.
+	Now func() time.Time
+}
+
 // Server is the API. Build one with New and serve its Handler.
 type Server struct {
-	db   *db.DB
-	log  *slog.Logger
-	info Info
-	mux  *http.ServeMux
+	db        *db.DB
+	log       *slog.Logger
+	info      Info
+	adminHash []byte
+	now       func() time.Time
+	mux       *http.ServeMux
+
+	logins *auth.Limiter // wrong sign-ins by address
+
+	touchMu sync.Mutex
+	touched map[int64]int64 // token id -> when its use was last written
 }
 
 // New builds the API on an open database.
-func New(d *db.DB, log *slog.Logger, info Info) *Server {
-	s := &Server{db: d, log: log, info: info, mux: http.NewServeMux()}
+func New(d *db.DB, log *slog.Logger, c Config) *Server {
+	now := c.Now
+	if now == nil {
+		now = time.Now
+	}
+	s := &Server{
+		db:        d,
+		log:       log,
+		info:      c.Info,
+		adminHash: c.AdminTokenHash,
+		now:       now,
+		mux:       http.NewServeMux(),
+		logins:    auth.NewLimiter(loginTries, time.Minute, now),
+		touched:   map[int64]int64{},
+	}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/server", s.json(s.handleServer))
+	s.mux.Handle("POST "+Prefix+"/auth/login", s.json(s.handleLogin))
+
+	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 }
 
 // Handler is the whole server: every route inside the middleware that every

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gureetk/runnel/internal/api"
+	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/config"
 	"github.com/gureetk/runnel/internal/db"
 )
@@ -70,9 +71,18 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			name = "runnel"
 		}
 	}
+	// A new local admin token at every start, for the subcommands.
+	adminHash, err := auth.WriteAdminToken(cfg.DataDir)
+	if err != nil {
+		return err
+	}
 
+	handler := api.New(database, log, api.Config{
+		Info:           api.Info{Name: name, Version: version, InstanceID: instanceID},
+		AdminTokenHash: adminHash,
+	}).Handler()
 	srv := &http.Server{
-		Handler:           api.New(database, log, api.Info{Name: name, Version: version, InstanceID: instanceID}).Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		// No WriteTimeout: a player keeps a file's stream open for as long

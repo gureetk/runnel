@@ -23,7 +23,7 @@ Added the same day, after the research on browsers (D39, D40): playing in a brow
 | Format | JSON, UTF-8. Field names are `snake_case`. Unknown fields must be ignored by clients. |
 | Identifiers | Integers, as stored. Stable for the life of one server database. |
 | Time | Unix milliseconds. Durations and positions are milliseconds. Dates are `YYYY-MM-DD`. |
-| Authentication | `Authorization: Bearer <token>`. Media and image URLs also take `?t=<token>`, for players that cannot send headers. The server never logs a query string. A token is one person on one device. |
+| Authentication | `Authorization: Bearer <token>`. Media and image URLs also take `?t=<token>`, for players that cannot send headers; other calls do not. The server never logs a query string. A token is one person on one device. The subcommands use the server's local admin token instead (section 8). |
 | Errors | An HTTP status and a body `{"error":{"code":"…","message":"…"}}`. Codes are in section 9. |
 | Wrong tries | A call that takes a secret (a password, a setup code, a pairing code) answers `429` with code `too_many` and a `Retry-After` header after too many wrong tries. The limit is given with each call. |
 | Paging | `limit` and `cursor`. A response carries `next`, a cursor for the following page, or `null`. Cursors are opaque. |
@@ -331,10 +331,11 @@ Returns `200`:
 {"token": "rn_Jp3mK0c5Xq8sTn2vYw7zBf4hLr9dGa6eUi1oCx0", "user": {"id": 1, "name": "ada", "is_admin": true}}
 ```
 
+- `name`, `password` and `device.id` are needed. `device.id` has at most 200 bytes, `device.name` and `device.client` at most 100.
 - A device id is made once by the client and kept. Signing in again from the same device and user replaces that device's earlier token.
 - `client` is the app and its version: `runnel-web`, `runnel-androidtv`, `runnel-android`, `runnel-ios` or `runnel-desktop`, then a slash and the version. A client from somewhere else sends its own name.
 - A device can hold several people's tokens, one each, and offer a picker between them (`design/00-design-system.md`, DS1). The server has no picker of its own: a token is one person on one device.
-- Wrong name or password is `401` with code `wrong_login`. Five failures a minute from one address is `429`.
+- Wrong name or password is `401` with code `wrong_login`, and so is a person who signs in by pairing only. Five failures a minute from one address is `429`, with `Retry-After`. A sixth try within the minute is refused before its password is checked.
 - A password has at least ten characters. Setting a shorter one, anywhere, is `400` with code `weak_password`.
 
 ### 3.3 Pairing by code
@@ -762,7 +763,7 @@ Behaviour:
 
 ## 8. Administration
 
-All of these need a token whose user is an admin. Anyone else gets `403`. They serve the web interface's administration pages and the command-line tool. The apps use them only to approve a pairing code as someone else: `GET /admin/users` for the list to choose from.
+All of these need a token whose user is an admin. Anyone else gets `403`. The local admin token that the server writes into its data directory works for them too, from the server's own host only (`02-architecture.md`, section 6): it is how the subcommands reach the server. They serve the web interface's administration pages and the command-line tool. The apps use them only to approve a pairing code as someone else: `GET /admin/users` for the list to choose from.
 
 ### 8.1 Settings
 
@@ -902,13 +903,15 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 | Endpoint | Purpose |
 |---|---|
 | `GET /admin/users` | `{"users": [{"id": 1, "name": "ada", "is_admin": true, "has_password": true, "devices": 3, "last_active_at": 1795203000000}]}`. |
-| `POST /admin/users` | `{"name": "noor", "password": "…", "is_admin": false}`. Without a password the person signs in by pairing only. |
+| `POST /admin/users` | `{"name": "noor", "password": "…", "is_admin": false}`. Without a password the person signs in by pairing only. Returns `201` with `{"id": 2, "name": "noor", "is_admin": false}`. |
 | `PATCH /admin/users/{id}` | Rename, set a new password, make admin or not. |
 | `DELETE /admin/users/{id}` | Removes the person, with their progress, their list and their sign-ins. |
 | `GET /admin/tokens`, `DELETE /admin/tokens/{id}` | Signed-in devices, one entry for each person on a device, shaped as in 3.5 with the `user` added. Deleting one signs it out. |
 | `GET /admin/pairings` | Devices waiting with a pairing code: `{"pairings": [{"code": "K7Q2M9", "device": {"name": "Bedroom TV", "client": "runnel-androidtv/1.0.0"}, "created_at": 1795203000000, "expires_in": 412}]}`. |
 
 - The last admin cannot be removed or made a non-admin: `409` with code `last_admin`.
+- A name has 1 to 40 characters, no control characters and no space at either end. Names are compared without case. A name that is taken is `409` with code `conflict`.
+- The first person is always an admin, whatever `is_admin` says, so that a server always has one.
 - The pairings list says that something is waiting. Approving is still done against the code on the device's own screen (3.3).
 
 ### 8.7 Playback
@@ -982,7 +985,7 @@ A row is a snapshot: it keeps the device's name and the title as they were, also
 | 409 | `setup_done` | The first person already exists. |
 | 409 | `locked` | The setting is fixed by the server's environment. |
 | 409 | `last_admin` | The change would leave the server without an admin. |
-| 409 | `conflict` | It is already running: a second import while one runs. |
+| 409 | `conflict` | It is already running, as a second import while one runs, or it exists already, as a name that is taken. |
 | 410 | `expired` | A pairing code that ran out or was spent. |
 | 429 | `too_many` | Too many wrong sign-ins, setup codes or code lookups, or too many pairings started. |
 | 502 | `upstream` | TMDB or Jellyfin could not be reached, or answered with something unexpected. |

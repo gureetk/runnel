@@ -141,11 +141,15 @@ Subcommands of the one binary:
 
 Subcommands that change data talk to the running server over its API on localhost, with a token kept in the data directory. They never open the database behind the server's back.
 
+- **The local admin token.** At every start the server makes a new random token, writes it to `admin.token` in the data directory, readable by its own user only, and keeps only its hash, in memory. The token is not a row in `tokens`: it belongs to no user, so it also works before the first user exists. The server takes it for the calls of `04-api.md`, section 8, and only from its own host: a loopback address, or the address the request arrived at.
+- **Finding the server.** A subcommand reads the same `RUNNEL_LISTEN` and `RUNNEL_DATA` as the server. It connects to `127.0.0.1` when the server listens on every address. It has to run as the server's user, or as root, to read the token: `sudo -u runnel runnel user add ada`.
+- **`runnel user add`** asks for the password twice, without echo, on a terminal. Otherwise it reads the first line of standard input.
+
 ## 7. The data directory
 
 ```
 runnel.db, runnel.db-wal, runnel.db-shm   the database
-admin.token                               for the subcommands, readable by the service user only
+admin.token                               for the subcommands, readable by the service user only; new at every start (section 6)
 images/ab/<key>_<width>.jpg               artwork
 sidecar/<file id>-<fingerprint>.mkv       audio-and-subtitle files, a capped cache
 subs/<file id>-<fingerprint>/             text subtitle tracks and attached fonts, extracted for browsers; in the same cap
@@ -190,8 +194,8 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 - A new server has no user. Making the first one needs the setup code from the server's log (D35), so that whoever opens the address first does not become its admin.
 - Over plain HTTP a browser gives a page no secure context. The web interface is built to need none (D45).
 - Wrong tries are limited: sign-ins, setup codes, pairing codes (P7).
-- Tokens are 32 random bytes. Only their SHA-256 is stored. They are per device and can be revoked.
-- Passwords: PBKDF2 with SHA-256, a random salt and an iteration count stored with the hash.
+- Tokens are 32 random bytes, sent as `rn_` and 43 base-62 characters. Only their SHA-256 is stored. They are per device and can be revoked.
+- Passwords: PBKDF2 with SHA-256, a 16-byte random salt and an iteration count stored with the hash. New hashes use 600,000 iterations: one took 117 ms in the development sandbox. A wrong name takes as long to refuse as a wrong password.
 - URLs carry ids, never paths. A path from the database is joined to its root and checked to be inside it before any open.
 - The service runs as its own user, with the media mounted read-only and membership of the group that owns the render device.
 

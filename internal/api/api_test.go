@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/db"
 )
 
@@ -42,6 +43,24 @@ type testServer struct {
 	*Server
 	db  *db.DB
 	log *syncBuffer
+
+	clockMu        sync.Mutex
+	clock          time.Time
+	adminToken     string
+	adminTokenHash []byte
+}
+
+// now is the test server's clock, which tests move with advance.
+func (ts *testServer) now() time.Time {
+	ts.clockMu.Lock()
+	defer ts.clockMu.Unlock()
+	return ts.clock
+}
+
+func (ts *testServer) advance(d time.Duration) {
+	ts.clockMu.Lock()
+	ts.clock = ts.clock.Add(d)
+	ts.clockMu.Unlock()
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -57,8 +76,14 @@ func newTestServer(t *testing.T) *testServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(d, logger, Info{Name: "Test", Version: "0.0.0-test", InstanceID: id})
-	return &testServer{Server: s, db: d, log: logs}
+	ts := &testServer{db: d, log: logs, clock: time.Unix(1_800_000_000, 0)}
+	ts.adminToken, ts.adminTokenHash = auth.NewToken()
+	ts.Server = New(d, logger, Config{
+		Info:           Info{Name: "Test", Version: "0.0.0-test", InstanceID: id},
+		AdminTokenHash: ts.adminTokenHash,
+		Now:            ts.now,
+	})
+	return ts
 }
 
 // do sends one request to the handler and decodes a JSON answer into out,

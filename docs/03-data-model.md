@@ -447,6 +447,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A value that the environment sets is used as it is and is never written to `meta`.
 - `tmdb_key` is stored in plain text. Whoever can read the database file can read it. The API never returns it.
 - `setup_code` is deleted in the transaction that makes the first user.
+- The local admin token of the subcommands is not in the database. The server keeps its hash in memory (`02-architecture.md`, section 6).
 - `tokens.last_used_at` is written at most once in ten minutes for a token (P7). Otherwise every request would be a write.
 - A pairing is deleted an hour after it expires or is claimed. Until then a lookup can say that the code has expired.
 
