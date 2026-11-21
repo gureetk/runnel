@@ -72,6 +72,7 @@ internal/api/          handlers, middleware, JSON shapes, ETags
 internal/tasks/        the background queue and its workers
 internal/discover/     the responder that announces the server on the local network (stage 6)
 internal/web/          the built web interface, embedded, and the handler that serves it (stage 5)
+internal/testmedia/    small media files made with ffmpeg's test sources, for tests only
 web/                   the web interface's source (stage 5)
 docs/                  these documents, in their public editions
 ```
@@ -96,7 +97,7 @@ Rules for the code:
 | Database readers | Up to 4 connections | WAL lets them read during a write. |
 | Scanner | One | One root at a time. |
 | Task workers | A few, by kind | See `06-library-and-metadata.md`, section 9. |
-| ffprobe children | Up to 2 | Short-lived, about 54 MB each. |
+| ffprobe children | Up to 2 | Short-lived, about 54 MB each. The first probe also runs `ffprobe -pix_fmts` once, for the bit depths of pixel formats. |
 | ffmpeg children | One per stream, plus one warm-up | See `05-playback.md`, section 4.4. A browser playback has two streams, video and audio. A stream that only copies takes no transcode slot. |
 | Discovery responder | One goroutine | Answers multicast DNS for one service. Stage 6. |
 
@@ -250,6 +251,6 @@ WantedBy=multi-user.target
 | Hardware | Encoders, timings, memory | By hand on real hardware, with the checklist in `05-playback.md`, section 12. CI has no GPU. |
 | Web | The web interface | Unit tests for its logic. From stage 7, the player in a headless browser against a test server. |
 
-CI runs `gofmt`, `go vet`, the tests and a build on every pull request, all with cgo and the `sqlite_fts5` tag, as `CLAUDE.md` gives them. It installs ffmpeg for the integration tests.
+CI runs `gofmt`, `go vet`, the tests and a build on every pull request, all with cgo and the `sqlite_fts5` tag, as `CLAUDE.md` gives them. It installs ffmpeg for the integration tests, and sets `RUNNEL_TEST_REQUIRE_FFMPEG`, so that a test that needs ffmpeg fails there instead of skipping.
 
 The rigs that produced the numbers in the research notes are not in the repository (D28). The repository's tests are written for it.

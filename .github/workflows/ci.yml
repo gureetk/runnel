@@ -16,6 +16,8 @@ jobs:
       # The SQLite driver is C, built with cgo, and the schema needs FTS5.
       CGO_ENABLED: "1"
       TAGS: sqlite_fts5
+      # Tests that need ffmpeg fail here instead of skipping.
+      RUNNEL_TEST_REQUIRE_FFMPEG: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -76,21 +76,25 @@ What is kept:
 
 | From ffprobe | Stored as |
 |---|---|
-| `format.format_name`, `duration`, `bit_rate` | `files.container`, `duration_ms`, `bit_rate` |
-| each stream's `index`, `codec_type`, `codec_name`, `profile` | `streams.idx`, `kind`, `codec`, `profile` |
-| `tags.language`, `tags.title` | `lang`, `title` |
+| `format.format_name`, `duration`, `bit_rate` | `files.container`, `duration_ms`, `bit_rate`. The container is ffprobe's first name for the format (`avi`, `mpegts`, `asf`, `mpeg`), except for two families that ffprobe names together: `matroska,webm` is `webm` for a `.webm` file and `matroska` otherwise, and `mov,mp4,…` is `mov` for a `.mov` file and `mp4` otherwise. |
+| each stream's `index`, `codec_type`, `codec_name`, `profile` | `streams.idx`, `kind`, `codec`, `profile`. A video stream marked `attached_pic` (cover art) and streams of other types (`data`) are not kept. |
+| `tags.language`, `tags.title` | `lang`, `title`, read whatever the case of the tag's name |
 | `disposition.default`, `forced`, `hearing_impaired` | `is_default`, `is_forced`, `is_hearing_impaired` |
-| video `width`, `height`, `pix_fmt`, `avg_frame_rate` | `width`, `height`, `pix_fmt`, `fps_num`, `fps_den` |
-| video bit depth, read from the pixel format | `bit_depth` |
-| video `level` | `level`. With the profile and the bit depth it gives the name a browser asks about the stream by (`05-playback.md`, section 13.3). |
-| video `color_transfer` and side data | `hdr`: `smpte2084` is HDR10, `arib-std-b67` is HLG, a Dolby Vision configuration record is `dv` |
+| video `width`, `height`, `pix_fmt`, `avg_frame_rate` | `width`, `height`, `pix_fmt`, `fps_num`, `fps_den`. A rate of `0/0` is unknown. |
+| video bit depth, read from the pixel format | `bit_depth`: the depth of the format's first component, as the `BIT_DEPTHS` column of `ffprobe -pix_fmts` gives it, read once at the first probe |
+| video `level` | `level`, unless ffprobe prints `-99`, which means it does not know. With the profile and the bit depth it gives the name a browser asks about the stream by (`05-playback.md`, section 13.3). |
+| video `color_transfer` and side data | `hdr`: `smpte2084` is HDR10, `arib-std-b67` is HLG, a Dolby Vision configuration record is `dv` and wins over the transfer. HDR10+ is carried frame by frame and cannot be seen this way, so such a file reads as HDR10. |
 | audio `channels`, `channel_layout`, `sample_rate`, `bit_rate` | the same |
 | attachment `tags.filename`, `tags.mimetype`, `extradata_size` | `filename`, `mime`, `size`, and their sum in `files.attachments_bytes` |
 | chapters | `chapters` |
 
-- The raw JSON is not kept. `probe_version` in the code is raised when this mapping changes, and every file is probed again.
-- A file ffprobe cannot read keeps `probe_error` and is not offered for playback. It is retried when its size or time changes.
+- The raw JSON is not kept. `probe_version` in the code is raised when this mapping changes, and every file is probed again. It is 1.
+- A file ffprobe cannot read keeps `probe_error`, ffprobe's reason without the file's path, and is not offered for playback. It is retried when its size or time changes.
+- A probe that takes longer than a minute is stopped, and so is one whose server stops. Neither is an error: the file is probed again on a later pass.
+- A result is stored only while the file's size and time in the database are still those that were probed. A file that changed during its probe is probed again.
 - The fingerprint is computed in the same task: the size, and a hash of the first and last 64 KiB.
+
+What ffprobe prints was checked with ffprobe 6.1 in the development sandbox, and with the version CI installs, on files made from ffmpeg's test sources. The Dolby Vision record is the one case checked only against a hand-made sample, because the test sources cannot make one.
 
 ## 4. Parsing names
 

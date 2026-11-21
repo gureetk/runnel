@@ -25,3 +25,56 @@ type Password struct {
 	Salt []byte
 	Iter int
 }
+
+// Probe is what ffprobe found in a file, mapped to the columns the
+// database keeps (docs/06-library-and-metadata.md, section 3). A zero
+// number or an empty string is unknown.
+type Probe struct {
+	Container        string // "matroska", "webm", "mp4", "mov", "avi", "mpegts", "asf", "mpeg", …
+	DurationMS       int64
+	BitRate          int64
+	AttachmentsBytes int64
+	Streams          []Stream
+	Chapters         []Chapter
+}
+
+// Stream is one stream of a file. Which fields mean something depends on
+// its Kind.
+type Stream struct {
+	Index           int    // ffprobe's stream index
+	Kind            string // "video", "audio", "subtitle" or "attachment"
+	Codec           string
+	Profile         string
+	Lang            string // as the file tags it
+	Title           string
+	Default         bool
+	Forced          bool
+	HearingImpaired bool
+
+	// Video.
+	Width, Height  int
+	PixFmt         string
+	BitDepth       int
+	Level          *int // nil when unknown; 0 is a level
+	FPSNum, FPSDen int
+	HDR            string // "hdr10", "hlg", "dv" or ""
+
+	// Audio.
+	Channels      int
+	ChannelLayout string
+	SampleRate    int
+	BitRate       int64
+
+	// Attachment.
+	Filename string
+	MIME     string
+	Size     int64
+}
+
+// Chapter is one chapter of a file.
+type Chapter struct {
+	Index   int
+	StartMS int64
+	EndMS   *int64 // nil when unknown
+	Title   string
+}
