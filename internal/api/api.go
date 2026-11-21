@@ -106,6 +106,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
+	s.mux.Handle("GET "+Prefix+"/files/{id}/external/{external_id}", s.media(s.handleExternal))
 	s.mux.Handle("POST "+Prefix+"/files/{id}/prepare", s.json(s.signedIn(s.handlePrepare)))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))

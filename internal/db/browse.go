@@ -285,6 +285,7 @@ type FileDetail struct {
 	AttachmentsBytes int64
 	Streams          []model.Stream
 	Chapters         []model.Chapter
+	Tracks           []ExternalTrack // files beside it
 }
 
 // ItemFiles lists the files that play an item, with their streams and
@@ -360,6 +361,9 @@ func (d *DB) fileDetails(ctx context.Context, query string, args ...any) ([]File
 			return nil, err
 		}
 		if out[i].Chapters, err = d.chapters(ctx, out[i].ID); err != nil {
+			return nil, err
+		}
+		if out[i].Tracks, err = d.tracksOf(ctx, out[i].ID); err != nil {
 			return nil, err
 		}
 	}

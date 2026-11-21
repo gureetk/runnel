@@ -67,7 +67,7 @@ Peak memory was 13–15 MB. On spinning disks a cold walk costs about one seek p
 - **Ignored**: names that start with a dot, `@eaDir`, `lost+found`, anything ending in `.part`, `.partial`, `.!qB` or `.tmp`, and files named `sample`. Names are compared without case.
 - **Links**: a symbolic link to a file counts as that file. A link to a folder is not followed.
 - **Extras**: a file in an extras folder or with an extras suffix (section 4.6) is stored with `kind = 'extra'` and kept out of lists. Extras are not probed in version 1.
-- **External tracks**: subtitle files (`.srt .ass .ssa .vtt .sub .sup`) and audio files (`.mka .ac3 .flac .opus`) whose name starts with a video's base name are attached to that video (section 4.7).
+- **External tracks**: subtitle files (`.srt .ass .ssa .vtt .sub .sup`) and audio files (`.mka .ac3 .flac .opus .dts .mp3 .aac`) in a video's folder, whose name starts with the video's base name, are attached to that video (section 4.7). Jellyfin's documentation shows `.dts`, `.mp3` and `.aac` among its examples [checked: its page on external subtitles and audio tracks, 21 November 2026].
 
 ## 3. Probing
 
@@ -191,7 +191,14 @@ Both lists are Jellyfin's, as its documentation for films gives them (checked on
 
 ### 4.7 External subtitles and audio
 
-`Film (2001).eng.forced.srt`: after the video's base name, dot-separated fields, each one a language code, a title, or a flag. Flags are `default`, `forced` or `foreign`, and `sdh`, `cc` or `hi`.
+`Film (2001).eng.forced.srt`: after the video's base name, dot-separated fields, each one a language code, a title, or a flag. Flags are `default`, `forced` or `foreign`, and `sdh`, `cc` or `hi`. This is Jellyfin's documented form [checked: its page on external subtitles and audio tracks, 21 November 2026].
+
+- The name is the video's base name, then a dot or the extension. A track whose name begins with the base names of two videos in its folder, such as `Film (2001) - 720p.eng.srt` beside `Film (2001).mkv` and `Film (2001) - 720p.mkv`, is the track of the longer. Two videos with one base name, such as one name with two extensions, both have it.
+- A language is a code of two letters (ISO 639-1) or three (ISO 639-2). It is kept in three, as the bibliographic code where ISO 639-2 has two, as Matroska keeps it: `en` and `eng` are `eng`, `de` and `deu` are `ger`. The first language in a name counts, and another is part of the title. The table is that of the iso-codes project, version 4.16.0.
+- `hi` alone is Hindi. Beside another language it means hearing impaired, as Jellyfin's documentation says.
+- What is neither a language nor a flag is the title, its fields joined with spaces: `Film.English Commentary.en.mp3` is English audio titled `English Commentary`.
+- A track file is not probed. Its codec is what its extension holds, by ffprobe's name for it: `.srt` subrip, `.ass` and `.ssa` ass, `.vtt` webvtt, `.ac3`, `.flac`, `.opus`, `.dts`, `.mp3` and `.aac` their own [checked: ffprobe 6.1 in the development sandbox, on files made with ffmpeg and a hand-written SSA file]. A `.sub`, which can be MicroDVD text or VobSub pictures, a `.sup` and an `.mka` have no codec, and no audio track file has a channel count.
+- A scan of a folder makes the tracks of its videos what it finds there. A track that stays keeps its id, which is its `external_id`. A track that comes, goes or changes is a change to its video's items (`03-data-model.md`, section 5). The tracks of a folder that could not be read stay as they were.
 
 ### 4.8 Local images
 

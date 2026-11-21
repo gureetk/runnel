@@ -92,3 +92,55 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	}}
 	http.ServeContent(gw, r, "", fi.ModTime(), file)
 }
+
+// trackTypes are the media types the files beside a video are served with.
+var trackTypes = map[string]string{
+	".srt": "application/x-subrip", ".ass": "text/x-ssa", ".ssa": "text/x-ssa", ".vtt": "text/vtt",
+	".sub": "application/octet-stream", ".sup": "application/octet-stream",
+	".mka": "audio/x-matroska", ".ac3": "audio/ac3", ".flac": "audio/flac", ".opus": "audio/ogg",
+	".dts": "audio/vnd.dts", ".mp3": "audio/mpeg", ".aac": "audio/aac",
+}
+
+// handleExternal is GET /files/{id}/external/{external_id}: a subtitle or
+// audio file beside the video, by byte range, as the video is served
+// (docs/04-api.md, section 7.2).
+func (s *Server) handleExternal(w http.ResponseWriter, r *http.Request) {
+	id, err1 := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	track, err2 := strconv.ParseInt(r.PathValue("external_id"), 10, 64)
+	if err1 != nil || err2 != nil {
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such file or track")
+		return
+	}
+	t, err := s.db.TrackFileOf(r.Context(), id, track)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such file or track")
+		return
+	case errors.Is(err, db.ErrOutsideRoot):
+		s.log.Warn("a stored path leaves its root; it is not served", "file", id, "track", track)
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such file or track")
+		return
+	case err != nil:
+		s.internal(w, r, err)
+		return
+	}
+	if !t.Available {
+		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the file is missing or its disk is away")
+		return
+	}
+	file, err := os.Open(t.Path)
+	if err != nil {
+		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the track cannot be opened")
+		return
+	}
+	defer file.Close()
+	fi, err := file.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the track cannot be read")
+		return
+	}
+	// An audio track plays along with its video: no write deadline.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	w.Header().Set("Content-Type", trackTypes[strings.ToLower(filepath.Ext(t.Path))])
+	http.ServeContent(w, r, "", fi.ModTime(), file)
+}
