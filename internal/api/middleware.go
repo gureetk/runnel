@@ -14,7 +14,10 @@ import (
 
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	callerKey
+)
 
 // requestID is the id the base middleware gave this request.
 func requestID(ctx context.Context) string {
