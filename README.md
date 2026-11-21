@@ -9,7 +9,7 @@ A lean, fast media server for a home library, built together with its own client
 
 ## Status
 
-Stage 1 of the roadmap is built: a server that indexes a library, probes its files and serves them by byte range to a player such as mpv. It is being checked on real hardware. **There is no client yet.**
+Stage 1 of the roadmap is built: a server that indexes a library, probes its files and serves them by byte range to a player such as mpv. It is being checked on real hardware. **There is no client yet.** Builds for Linux on amd64 are attached to the [releases](https://github.com/gureetk/runnel/releases); a pre-release is a build for testing.
 
 The design is in [`docs/`](docs/00-start-here.md). The [roadmap](docs/01-roadmap.md) lists the stages in which it gets built, and what each stage must prove before the next one starts.
 

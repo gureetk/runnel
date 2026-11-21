@@ -248,7 +248,8 @@ WantedBy=multi-user.target
 - `CGO_ENABLED=1 go build -tags sqlite_fts5 -trimpath -ldflags "-s -w -X main.version=<tag>" ./cmd/runnel`
 - The prototype's stripped binary was 7.4 MB. A clean build took 66 s including one compile of SQLite's C source, and a rebuild after a one-line change 0.6 s.
 - From stage 5 the web interface is built first: `npm ci && npm run build` in `web/`, whose output `internal/web` embeds. A build then needs Node as well as Go and a C compiler.
-- Releases are tags. CI builds `linux/amd64` and attaches the binary.
+- Releases are tags. Pushing a tag `v…` runs `.github/workflows/release.yml`. It runs the tests and builds `linux/amd64` linked statically against musl, so that the binary runs whatever C library the distribution has: `CC=musl-gcc`, with `-linkmode external -extldflags -static` added to `-ldflags`. It starts the binary once and checks that `GET /server` gives the tag as the version. Then it attaches `runnel-linux-amd64`, the unit and `SHA256SUMS` to a GitHub release. A tag with a suffix, such as `v0.1.0-rc.1`, is published as a pre-release. A pull request that changes the workflow runs all of it except the publishing.
+- In the sandbox the static build is the lighter one. Idle after the first index and probe of 3,166 generated files, it held 14.5 MB against 17.8 MB for the dynamic build, with peaks of 18.1 MB and 20.9 MB (20 November 2026). The whole test suite passes built that way.
 
 ## 13. Testing
 

@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Release
+
+# Releases are tags (docs/02-architecture.md, section 12). Pushing a tag v…
+# builds the server for linux/amd64 and attaches it to a GitHub release. A tag
+# with a suffix, such as v0.1.0-rc.1, is published as a pre-release. A pull
+# request that changes this file runs everything except the publishing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to create the release
+    env:
+      CGO_ENABLED: "1"
+      TAGS: sqlite_fts5
+      RUNNEL_TEST_REQUIRE_FFMPEG: "1"
+      # Linked statically against musl, so that the binary runs whatever C
+      # library the distribution has.
+      CC: musl-gcc
+      STATIC: -linkmode external -extldflags -static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: musl, and ffmpeg for the integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools ffmpeg
+      - name: Version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="$GITHUB_REF_NAME"; else v="pr-$(git rev-parse --short HEAD)"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: Test, linked as the release is
+        run: go test -tags "$TAGS" -ldflags "$STATIC" ./...
+      - name: Build
+        run: |
+          go build -tags "$TAGS" -trimpath -ldflags "-s -w -X main.version=$VERSION $STATIC" -o runnel-linux-amd64 ./cmd/runnel
+          file runnel-linux-amd64
+          ./runnel-linux-amd64 version
+      - name: Start it once
+        run: |
+          export RUNNEL_DATA="$(mktemp -d)" RUNNEL_LISTEN=127.0.0.1:8610
+          ./runnel-linux-amd64 serve &
+          pid=$!
+          ok=""
+          for i in $(seq 50); do
+            if curl -fsS http://127.0.0.1:8610/api/v1/server | grep -F "\"version\":\"$VERSION\""; then ok=1; break; fi
+            sleep 0.2
+          done
+          kill "$pid"
+          wait "$pid"
+          test -n "$ok"
+      - name: Checksums
+        run: |
+          cp deploy/runnel.service .
+          sha256sum runnel-linux-amd64 runnel.service > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$VERSION" in *-*) pre=--prerelease ;; esac
+          gh release create "$VERSION" $pre --verify-tag --title "$VERSION" --generate-notes \
+            runnel-linux-amd64 runnel.service SHA256SUMS
