@@ -404,11 +404,12 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - Movies and series are keyed by `(root_id, path_key)`: the folder they were built from, or the lone file for a film that has no folder.
 - Seasons belong to a series by `parent_id`. Episodes belong to a season by `parent_id` and carry `series_id` as well, so episode queries need no join through seasons.
 - Season 0 holds specials. Sorting by `(season_number, episode_number)` with season 0 last is the display order.
-- `numbering = 'absolute'` on a series means its files carry one running count. `absolute_number` is that count. `season_number` and `episode_number` then hold the provider's numbers once they are mapped (see `06-library-and-metadata.md`).
+- `numbering = 'absolute'` on a series means its files carry one running count. `absolute_number` is that count, and the episode's key. `season_number` and `episode_number` then hold the provider's numbers once they are mapped, and until then the season the file is in, or 1, and the running number (`06-library-and-metadata.md`, section 5).
+- An episode's key is `(series, season_number, episode_number)`, or `(series, absolute_number)` where that is set. Building keeps an episode's id while its key is wanted, and otherwise lets it follow its files (`06-library-and-metadata.md`, section 5).
 - A file that holds episodes 1 and 2 is one episode item with `episode_number = 1` and `episode_number_end = 2`.
-- Two files that resolve to the same item are versions: two rows in `item_files` with different labels.
+- Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
-- An item that no file makes any more is deleted when items are built, with a tombstone at the transaction's sequence value. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together.
+- An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Collections**
@@ -472,7 +473,9 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 Clients keep a local copy of the library and ask "what changed since I last looked". One counter answers that.
 
 - `meta.seq` is a counter. Every transaction that changes something a client can see takes the next value and stamps it on the rows it touched: `items.updated_seq`, `user_state.updated_seq`, `user_list.updated_seq`, `series_prefs.updated_seq`, `libraries.updated_seq`.
-- Deleting an item writes a row to `tombstones` with the new value.
+- Deleting an item writes a row to `tombstones` with the transaction's value.
+- **One value is on at most 500 rows.** A transaction that stamps more, such as the first build of a large library, takes the next value for every 500 rows it stamps, counting tombstones and the rows of every table together. A page of `/changes` never splits a value, so this is what keeps a page bounded: at most its limit, or 500 rows when the limit is lower (`04-api.md`, section 5). The 500 is `db.StampBatch`.
+- Within a transaction, a parent is written before its children and children are deleted before their parent. A client that applies a page before the rest of a large transaction has arrived then never holds an episode without its season.
 - A client that last saw sequence S asks for items, state and tombstones above S.
 - Tombstones older than 90 days are pruned, and `meta.tombstone_floor` moves up to the highest pruned value. A client whose S is below the floor is told to start again from a full copy.
 - An image change, a genre change, a credits change or a file change bumps the `updated_seq` of the item it belongs to. That includes a file going missing or coming back. A new episode also bumps its season and series, because their counts changed.

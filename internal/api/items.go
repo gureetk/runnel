@@ -51,34 +51,57 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"libraries": out})
 }
 
-// cardBody is a card as stage 1 fills it (docs/04-api.md, section 2.1).
-// What needs watch state, metadata or artwork is absent.
+// cardBody is a card (docs/04-api.md, section 2.1) as far as stage 2 has
+// its data. What needs metadata, artwork or a user's state is absent.
 type cardBody struct {
-	ID          int64  `json:"id"`
-	Type        string `json:"type"`
-	LibraryID   int64  `json:"library_id"`
-	RootID      *int64 `json:"root_id,omitempty"`
-	Title       string `json:"title"`
-	Year        *int   `json:"year,omitempty"`
-	SeriesID    *int64 `json:"series_id,omitempty"`
-	SeriesTitle string `json:"series_title,omitempty"`
-	Season      *int   `json:"season,omitempty"`
-	Episode     *int   `json:"episode,omitempty"`
-	AddedAt     int64  `json:"added_at"`
-	Seq         int64  `json:"seq"`
+	ID          int64       `json:"id"`
+	Type        string      `json:"type"`
+	LibraryID   int64       `json:"library_id"`
+	RootID      *int64      `json:"root_id,omitempty"`
+	Title       string      `json:"title"`
+	Year        *int        `json:"year,omitempty"`
+	SeriesID    *int64      `json:"series_id,omitempty"`
+	SeriesTitle string      `json:"series_title,omitempty"`
+	Season      *int        `json:"season,omitempty"`
+	Episode     *int        `json:"episode,omitempty"`
+	EpisodeEnd  *int        `json:"episode_end,omitempty"`
+	Absolute    *int        `json:"absolute,omitempty"`
+	Available   bool        `json:"available"`
+	Counts      *countsBody `json:"counts,omitempty"`
+	AddedAt     int64       `json:"added_at"`
+	Seq         int64       `json:"seq"`
+}
+
+// countsBody is a series' or a season's counts. A series counts its
+// episodes and seasons outside the specials.
+type countsBody struct {
+	Episodes int  `json:"episodes"`
+	Seasons  *int `json:"seasons,omitempty"`
 }
 
 func cardJSON(c db.Card) cardBody {
-	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, AddedAt: c.AddedAt, Seq: c.Seq}
+	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, Available: c.Available, AddedAt: c.AddedAt, Seq: c.Seq}
 	if c.RootID != 0 {
 		b.RootID = &c.RootID
 	}
 	if c.Year != 0 {
 		b.Year = &c.Year
 	}
-	if c.Type == "episode" {
+	switch c.Type {
+	case "episode":
 		b.SeriesID, b.SeriesTitle = &c.SeriesID, c.SeriesTitle
 		b.Season, b.Episode = &c.Season, &c.Episode
+		if c.EpisodeEnd != 0 {
+			b.EpisodeEnd = &c.EpisodeEnd
+		}
+		if c.Absolute != 0 {
+			b.Absolute = &c.Absolute
+		}
+	case "season":
+		b.SeriesID, b.SeriesTitle, b.Season = &c.SeriesID, c.SeriesTitle, &c.Season
+		b.Counts = &countsBody{Episodes: c.Episodes}
+	case "series":
+		b.Counts = &countsBody{Episodes: c.Episodes, Seasons: &c.Seasons}
 	}
 	return b
 }
@@ -105,12 +128,27 @@ type episodeCursor struct {
 	I int64 `json:"i"`
 }
 
-// itemsParams are the parameters of GET /items that this server takes.
-// The others of docs/04-api.md, section 4.3, arrive with stage 2.
-var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "sort": true, "limit": true, "cursor": true}
+type seasonCursor struct {
+	Z bool  `json:"z"`
+	S int   `json:"s"`
+	I int64 `json:"i"`
+}
 
-// handleItems is GET /items: the films or series of a library by title, or
-// the episodes of a series in season and episode order, specials last.
+type numberCursor struct {
+	E int   `json:"e"`
+	A int   `json:"a"`
+	I int64 `json:"i"`
+}
+
+// itemsParams are the parameters of GET /items that this server takes.
+// The others of docs/04-api.md, section 4.3, arrive with the parts of
+// stage 2 that hold their data.
+var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "parent": true, "sort": true, "limit": true, "cursor": true}
+
+// handleItems is GET /items: the films or series of a library by title;
+// the episodes of a series in season and episode order, specials last; or
+// the children of an item, the seasons of a series or the episodes of a
+// season, in their order.
 func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	for k := range q {
@@ -138,7 +176,53 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var next func(db.Card) string
 	var err error
-	if v := q.Get("series"); v != "" {
+	if v := q.Get("parent"); v != "" {
+		id, perr := strconv.ParseInt(v, 10, 64)
+		parent, gerr := s.db.Item(r.Context(), id)
+		switch {
+		case perr != nil || errors.Is(gerr, db.ErrNotFound) || (gerr == nil && parent.Type != "series" && parent.Type != "season"):
+			s.fail(w, r, http.StatusNotFound, "not_found", "no such series or season")
+			return
+		case gerr != nil:
+			s.internal(w, r, gerr)
+			return
+		}
+		child := map[string]string{"series": "season", "season": "episode"}[parent.Type]
+		if t := q.Get("type"); t != "" && t != child {
+			s.fail(w, r, http.StatusBadRequest, "bad_request", "the children of a "+parent.Type+" are of type "+strconv.Quote(child))
+			return
+		}
+		if first {
+			total, err = s.db.CountChildren(r.Context(), id, child)
+		}
+		if child == "season" {
+			var c seasonCursor
+			if !first && !decodeCursor(q.Get("cursor"), &c) {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", "the cursor is not one this server gave")
+				return
+			}
+			if first {
+				c = seasonCursor{S: math.MinInt32}
+			}
+			if err == nil {
+				cards, err = s.db.SeasonsOf(r.Context(), id, db.SeasonKey{Specials: c.Z, Season: c.S, ID: c.I}, limit+1)
+			}
+			next = func(c db.Card) string { return encodeCursor(seasonCursor{Z: c.Season == 0, S: c.Season, I: c.ID}) }
+		} else {
+			var c numberCursor
+			if !first && !decodeCursor(q.Get("cursor"), &c) {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", "the cursor is not one this server gave")
+				return
+			}
+			if first {
+				c = numberCursor{E: math.MinInt32}
+			}
+			if err == nil {
+				cards, err = s.db.EpisodesOfSeason(r.Context(), id, db.NumberKey{Episode: c.E, Absolute: c.A, ID: c.I}, limit+1)
+			}
+			next = func(c db.Card) string { return encodeCursor(numberCursor{E: c.Episode, A: c.Absolute, I: c.ID}) }
+		}
+	} else if v := q.Get("series"); v != "" {
 		id, perr := strconv.ParseInt(v, 10, 64)
 		series, gerr := s.db.Item(r.Context(), id)
 		switch {
@@ -174,7 +258,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		lib, gerr := s.db.Library(r.Context(), id)
 		switch {
 		case v == "":
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "library or series is needed")
+			s.fail(w, r, http.StatusBadRequest, "bad_request", "library, series or parent is needed")
 			return
 		case perr != nil || errors.Is(gerr, db.ErrNotFound):
 			s.fail(w, r, http.StatusNotFound, "not_found", "no such library")
@@ -337,9 +421,10 @@ func fileJSON(f db.FileDetail) fileBody {
 	return b
 }
 
-// handleItem is GET /items/{id}: the card and, for a film or an episode,
-// its files with their streams and chapters, which is what a player needs
-// (docs/04-api.md, sections 2.2 and 4.4).
+// handleItem is GET /items/{id}: the detail of docs/04-api.md, sections
+// 2.2 and 4.4. A film or an episode has its files, versions and parts with
+// their streams and chapters, which is what a player needs; an episode its
+// neighbours; a series its numbering and its seasons.
 func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	c, gerr := s.db.Item(r.Context(), id)
@@ -351,11 +436,18 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, gerr)
 		return
 	}
-	body := struct {
-		cardBody
-		Files *[]fileBody `json:"files,omitempty"` // films and episodes; a series' episodes are GET /items?series=
-	}{cardBody: cardJSON(c)}
-	if c.Type == "movie" || c.Type == "episode" {
+	m, err := s.db.MatchOf(r.Context(), id)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	body := detailBody{cardBody: cardJSON(c), OriginalTitle: nil, ExternalIDs: m.ExternalIDs,
+		Match: matchBody{State: m.State}}
+	if m.Confidence != 0 {
+		body.Match.Confidence = &m.Confidence
+	}
+	switch c.Type {
+	case "movie", "episode":
 		files, err := s.db.ItemFiles(r.Context(), id)
 		if err != nil {
 			s.internal(w, r, err)
@@ -366,6 +458,65 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 			list = append(list, fileJSON(f))
 		}
 		body.Files = &list
+		if c.Type == "episode" {
+			prev, next, err := s.db.Neighbours(r.Context(), c)
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			if prev.ID != 0 {
+				body.Prev = &neighbourBody{ID: prev.ID}
+			}
+			if next.ID != 0 {
+				body.Next = &neighbourBody{ID: next.ID, Title: next.Title, Season: &next.Season, Episode: &next.Episode}
+			}
+		}
+	case "series":
+		body.Numbering = m.Numbering
+		seasons, err := s.db.SeasonsOf(r.Context(), id, db.SeasonKey{Season: math.MinInt32}, 1000)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		list := []seasonBody{}
+		for _, se := range seasons {
+			list = append(list, seasonBody{ID: se.ID, Season: se.Season, Title: se.Title, Counts: countsBody{Episodes: se.Episodes}})
+		}
+		body.Seasons = &list
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// detailBody is an item's detail (docs/04-api.md, section 2.2), as far as
+// stage 2 has its data: the card, and for a film or an episode its files,
+// for an episode its neighbours, for a series its numbering and seasons.
+type detailBody struct {
+	cardBody
+	OriginalTitle *string           `json:"original_title"`
+	ExternalIDs   map[string]string `json:"external_ids"`
+	Match         matchBody         `json:"match"`
+	Numbering     string            `json:"numbering,omitempty"`
+	Seasons       *[]seasonBody     `json:"seasons,omitempty"`
+	Files         *[]fileBody       `json:"files,omitempty"`
+	Prev          *neighbourBody    `json:"prev,omitempty"`
+	Next          *neighbourBody    `json:"next,omitempty"`
+}
+
+type matchBody struct {
+	State      string   `json:"state"`
+	Confidence *float64 `json:"confidence"`
+}
+
+type seasonBody struct {
+	ID     int64      `json:"id"`
+	Season int        `json:"season"`
+	Title  string     `json:"title"`
+	Counts countsBody `json:"counts"`
+}
+
+type neighbourBody struct {
+	ID      int64  `json:"id"`
+	Title   string `json:"title,omitempty"`
+	Season  *int   `json:"season,omitempty"`
+	Episode *int   `json:"episode,omitempty"`
 }

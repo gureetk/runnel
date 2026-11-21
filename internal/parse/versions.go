@@ -3,6 +3,7 @@
 package parse
 
 import (
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -85,6 +86,141 @@ func differences(names []string) []string {
 		out[i] = strings.TrimFunc(strings.Join(p[lead:len(p)-tail], ""), func(r rune) bool {
 			return !wordRun.MatchString(string(r))
 		})
+	}
+	return out
+}
+
+// Version is how one file plays its item: as a version, by its label (""
+// for the main one, or when there is only one), and as a part of it (0 for
+// the whole item).
+type Version struct {
+	Label string
+	Part  int
+}
+
+// Versions tells the files of one item apart, from their paths below the
+// root: which are parts of one version, and what label each version has.
+// folder is the item's own folder name, for a film whose files begin with
+// it, as Jellyfin names versions: "Film (2001) - 1080p" in "Film (2001)".
+// Other names are labelled by what follows the beginning they share. Two
+// versions whose names tie are told apart by their extension, then by their
+// folder.
+func Versions(rels []string, folder string) []Version {
+	out := make([]Version, len(rels))
+	type group struct {
+		name  string // the version's name: the base, or what precedes its part
+		files []int
+	}
+	var groups []*group
+	byKey := map[string]*group{}
+	bases := make([]string, len(rels))
+	parts := make([]int, len(rels))
+	rests := make([]string, len(rels))
+	for i, rel := range rels {
+		bases[i] = Base(rel)
+		parts[i], rests[i] = Part(bases[i])
+	}
+	for i, rel := range rels {
+		if parts[i] != 0 {
+			shared := false
+			for j := range rels {
+				if j != i && parts[j] != 0 && parts[j] != parts[i] && strings.EqualFold(rests[i], rests[j]) {
+					shared = true
+				}
+			}
+			if !shared {
+				parts[i], rests[i] = 0, bases[i]
+			}
+		}
+		// Parts of one version share their name before the part and their
+		// extension; a file that is not a part is a version of its own.
+		key := "\x00" + strconv.Itoa(i)
+		if parts[i] != 0 {
+			key = strings.ToLower(rests[i] + "\x00" + extension(rel))
+		}
+		g := byKey[key]
+		if g == nil {
+			g = &group{name: rests[i]}
+			byKey[key] = g
+			groups = append(groups, g)
+		}
+		g.files = append(g.files, i)
+		out[i].Part = parts[i]
+	}
+	if len(groups) < 2 {
+		return out
+	}
+	names := make([]string, len(groups))
+	for i, g := range groups {
+		names[i] = g.name
+	}
+	labels := leadingDifferences(names)
+	if folder != "" {
+		for i, n := range names {
+			if len(n) >= len(folder) && strings.EqualFold(n[:len(folder)], folder) {
+				labels[i] = trimLabel(n[len(folder):])
+			}
+		}
+	}
+	// Ties: the extension, then the folder below the item's own.
+	for _, tell := range []func(g *group) string{
+		func(g *group) string { return extension(rels[g.files[0]]) },
+		func(g *group) string { return path.Base(path.Dir(rels[g.files[0]])) },
+	} {
+		count := map[string]int{}
+		for _, l := range labels {
+			count[strings.ToLower(l)]++
+		}
+		for i, g := range groups {
+			if count[strings.ToLower(labels[i])] > 1 {
+				if labels[i] == "" {
+					labels[i] = tell(g)
+				} else {
+					labels[i] += " " + tell(g)
+				}
+			}
+		}
+	}
+	for i, g := range groups {
+		for _, f := range g.files {
+			out[f].Label = labels[i]
+		}
+	}
+	return out
+}
+
+func extension(rel string) string { return strings.TrimPrefix(strings.ToLower(path.Ext(rel)), ".") }
+
+func trimLabel(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool { return !wordRun.MatchString(string(r)) })
+}
+
+// leadingDifferences returns what follows the beginning that all the names
+// share, cut where letters and digits meet other characters, and trimmed.
+func leadingDifferences(names []string) []string {
+	split := make([][]string, len(names))
+	shortest := -1
+	for i, n := range names {
+		split[i] = pieces(n)
+		if shortest < 0 || len(split[i]) < shortest {
+			shortest = len(split[i])
+		}
+	}
+	lead := 0
+	for ; lead < shortest; lead++ {
+		same := true
+		for _, p := range split[1:] {
+			if !strings.EqualFold(p[lead], split[0][lead]) {
+				same = false
+			}
+		}
+		if !same {
+			break
+		}
+	}
+	out := make([]string, len(names))
+	for i, p := range split {
+		out[i] = trimLabel(strings.Join(p[lead:], ""))
 	}
 	return out
 }

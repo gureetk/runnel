@@ -172,7 +172,7 @@ func recordScan(ctx context.Context, tx *Tx, rootID int64, available bool, r mod
 }
 
 // bumpItemsOfFiles stamps every item that plays one of the files with this
-// transaction's sequence number.
+// transaction's sequence values: a file change is a change to its items.
 func bumpItemsOfFiles(ctx context.Context, tx *Tx, fileIDs []int64) error {
 	if len(fileIDs) == 0 {
 		return nil
@@ -181,22 +181,25 @@ func bumpItemsOfFiles(ctx context.Context, tx *Tx, fileIDs []int64) error {
 	if err != nil {
 		return err
 	}
-	var linked bool
-	if err := tx.tx.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM item_files WHERE file_id IN (SELECT value FROM json_each(?)))`, string(ids)).Scan(&linked); err != nil {
-		return err
-	}
-	if !linked {
-		return nil
-	}
-	seq, err := tx.Seq(ctx)
+	rows, err := tx.tx.QueryContext(ctx,
+		`SELECT DISTINCT item_id FROM item_files WHERE file_id IN (SELECT value FROM json_each(?)) ORDER BY item_id`, string(ids))
 	if err != nil {
 		return err
 	}
-	_, err = tx.tx.ExecContext(ctx,
-		`UPDATE items SET updated_seq = ? WHERE id IN (SELECT item_id FROM item_files WHERE file_id IN (SELECT value FROM json_each(?)))`,
-		seq, string(ids))
-	return err
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return tx.stampItems(ctx, items)
 }
 
 // FilesToProbe lists up to limit files, after afterID in id order, whose

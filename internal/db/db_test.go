@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -266,7 +267,8 @@ func TestSequence(t *testing.T) {
 		t.Fatalf("seq = %d after a transaction that changed nothing", s)
 	}
 
-	// One value per transaction, however often it is asked for.
+	// One value per transaction, however often it is asked for, up to
+	// StampBatch rows.
 	for want := int64(1); want <= 3; want++ {
 		err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
 			a, err := tx.Seq(ctx)
@@ -295,6 +297,55 @@ func TestSequence(t *testing.T) {
 	}
 	if s, _ := d.Seq(ctx); s != 3 {
 		t.Fatalf("seq = %d after a rollback, want 3", s)
+	}
+}
+
+// TestStampBatches checks that no sequence value is stamped on more than
+// StampBatch rows, so that a page of /changes stays bounded when one
+// transaction changes thousands of items (docs/03-data-model.md, section 5).
+func TestStampBatches(t *testing.T) {
+	d, _ := openTemp(t)
+	ctx := context.Background()
+	exec(t, d, `INSERT INTO libraries (id, name, kind, created_at) VALUES (1, 'Films', 'movies', 1)`)
+	const n = 2*StampBatch + 3
+	exec(t, d, `WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
+		INSERT INTO items (id, library_id, type, title, sort_title, added_at, updated_seq)
+		SELECT i, 1, 'movie', 'Film ' || i, 'film ' || i, 1, 0 FROM k`, n)
+	ids := make([]int64, n)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		// Rows stamped one at a time and rows stamped together share the
+		// count: the first value has room for StampBatch-2 more.
+		for range 2 {
+			if _, err := tx.Seq(ctx); err != nil {
+				return err
+			}
+		}
+		return tx.stampItems(ctx, ids)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perSeq := map[int64]int{}
+	rows, err := d.r.QueryContext(ctx, `SELECT updated_seq, count(*) FROM items GROUP BY updated_seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq int64
+		var count int
+		rows.Scan(&seq, &count)
+		perSeq[seq] = count
+	}
+	want := map[int64]int{1: StampBatch - 2, 2: StampBatch, 3: 5}
+	if !maps.Equal(perSeq, want) {
+		t.Fatalf("rows per sequence value: %v, want %v", perSeq, want)
+	}
+	if s, _ := d.Seq(ctx); s != 3 {
+		t.Fatalf("seq = %d, want 3", s)
 	}
 }
 
