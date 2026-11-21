@@ -9,7 +9,7 @@ A lean, fast media server for a home library, built together with its own client
 
 ## Status
 
-Planning is finished. **Nothing is implemented yet.**
+Stage 1 of the roadmap is being built: a server that serves files. **Nothing is usable yet.**
 
 The design is in [`docs/`](docs/00-start-here.md). The [roadmap](docs/01-roadmap.md) lists the stages in which it gets built, and what each stage must prove before the next one starts.
 

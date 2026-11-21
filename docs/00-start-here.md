@@ -8,11 +8,11 @@ Read this file first. Then read the document for the part being worked on.
 
 ## 1. Where things stand (20 November 2026)
 
-- **Planning is finished. No code exists yet**, beyond a module that builds.
+- **Planning is finished. Stage 1 is being built:** a server that serves files (`01-roadmap.md`, section 3).
 - **Decided:** the server's design (D1 to D19), the name and the logo (D20, D21), the order of the stages (D22, D25), official clients and their designs (D23 to D26, D29 to D37), the licence (D38), how a browser is fed (D39, D40), and what each client is built with (D41 to D44).
 - **Proposed, to confirm in use:** encoder arguments, limits, thresholds, discovery on the local network (P1 to P8).
 - **Open:** O5, O6, O8, O12 and O13 in `08-decisions.md`. None of them blocks the server.
-- **Next:** stage 1 of `01-roadmap.md`: a server that serves files.
+- **Next:** stage 2, a library a client can use, once stage 1 has met its exit criteria on real hardware.
 
 The design documents (`design/`) and the design review (`11-design-review.md`) that other documents refer to are added in the repository's next pull request, together with the brand files.
 

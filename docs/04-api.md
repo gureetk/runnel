@@ -314,7 +314,8 @@ No authentication. What a client reads first, to check an address it found (3.6)
 - `product` is always `runnel`. It is how a client knows that what answered is a Runnel server.
 - `name` is the server's name, which an admin sets (8.1). Until one is set it is the machine's host name. Clients show it where a server is chosen and on the server chip.
 - `setup_done` is false while no person exists. The web interface then opens the first run (3.4).
-- `transcode` is what the server found it can encode when it last checked (see `05-playback.md`, section 8). A client asks only for what is listed.
+- `transcode` is what the server found it can encode when it last checked (see `05-playback.md`, section 8). A client asks only for what is listed. A server that can encode nothing answers `{"hw": "none", "video": [], "depth10": [], "slots": 0}`.
+- `api.features` lists only what this server implements, so a client can tell an older server from a newer one.
 
 ### 3.2 Password sign-in
 

@@ -102,7 +102,7 @@ Rules for the code:
 
 **The playback gate.** A counter of sessions that are starting. While it is above zero, task workers finish what they hold and take nothing new. A session counts as starting from its request, or its `prepare`, until 10 seconds after its first byte.
 
-**Shutdown.** On SIGTERM: stop accepting requests, kill every child, let the writer finish its transaction, close the database. Within 5 seconds.
+**Shutdown.** On SIGTERM or an interrupt: stop accepting requests, kill every child, let the writer finish its transaction, close the database. Within 5 seconds. A request still open after 3 seconds, such as a player's stream, is cut.
 
 ## 6. Configuration
 
@@ -153,7 +153,7 @@ import/jellyfin-report.json               the report of the last import or dry r
 backup/                                   database copies made before migrations
 ```
 
-Everything except the database can be deleted and will be rebuilt. `images/` also holds people's photos, which arrive only when a client first asks for one (D33).
+The server makes the directory at its first start, readable by its own user only, if it is not there. Everything except the database can be deleted and will be rebuilt. `images/` also holds people's photos, which arrive only when a client first asks for one (D33).
 
 The server's instance id, its settings and the setup code are rows in the database (`03-data-model.md`, section 4), not files here.
 
@@ -246,6 +246,6 @@ WantedBy=multi-user.target
 | Hardware | Encoders, timings, memory | By hand on real hardware, with the checklist in `05-playback.md`, section 12. CI has no GPU. |
 | Web | The web interface | Unit tests for its logic. From stage 7, the player in a headless browser against a test server. |
 
-CI runs `go vet`, the tests and a build on every pull request. It installs ffmpeg for the integration tests.
+CI runs `gofmt`, `go vet`, the tests and a build on every pull request, all with cgo and the `sqlite_fts5` tag, as `CLAUDE.md` gives them. It installs ffmpeg for the integration tests.
 
 The rigs that produced the numbers in the research notes are not in the repository (D28). The repository's tests are written for it.

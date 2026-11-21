@@ -746,7 +746,7 @@ DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - 1000;
 
 - Numbered SQL files in the binary (`embed`). `meta.schema_version` records the last one applied.
 - At start the server applies what is missing, each file in its own transaction, and refuses to start on a database newer than itself.
-- A migration never rewrites watch state in a way that cannot be reversed from a backup. Before a migration that rebuilds a table, the server copies the database file next to itself.
+- A migration never rewrites watch state in a way that cannot be reversed from a backup. Before a migration that rebuilds a table, the server copies the database file into `backup/` in the data directory (`02-architecture.md`, section 7).
 - Anything derived from the media or from providers (`files`, `streams`, `chapters`, `items`, `images`, `people`, `credits`, `provider_cache`) can be rebuilt by a rescan. Only `users`, `tokens`, `user_state`, `user_list`, `series_prefs`, `overrides` and the settings in `meta` are irreplaceable. A backup is those, or the whole file.
 
 ## 8. Sizes to expect

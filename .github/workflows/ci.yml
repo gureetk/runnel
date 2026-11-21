@@ -12,16 +12,25 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    env:
+      # The SQLite driver is C, built with cgo, and the schema needs FTS5.
+      CGO_ENABLED: "1"
+      TAGS: sqlite_fts5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: ffmpeg, for the integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -1
       - name: Formatting
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: Vet
-        run: go vet ./...
+        run: go vet -tags "$TAGS" ./...
       - name: Test
-        run: go test ./...
+        run: go test -tags "$TAGS" ./...
       - name: Build
-        run: go build -trimpath -o runnel ./cmd/runnel
+        run: go build -tags "$TAGS" -trimpath -o runnel ./cmd/runnel
