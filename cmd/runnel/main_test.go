@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gureetk/runnel/internal/config"
+	tm "github.com/gureetk/runnel/internal/testmedia"
 )
 
 func TestVersionHasADefault(t *testing.T) {
@@ -243,5 +244,54 @@ func TestParseArgs(t *testing.T) {
 	pos, err := parseArgs(fs, []string{"ada", "--admin"})
 	if err != nil || len(pos) != 1 || pos[0] != "ada" || !*admin {
 		t.Fatalf("%v %v %v", pos, *admin, err)
+	}
+}
+
+// waitFor waits until the server's log has a line that matches re.
+func (r *running) waitFor(t *testing.T, re string) string {
+	t.Helper()
+	pattern := regexp.MustCompile(re)
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if m := pattern.FindString(r.logs.String()); m != "" {
+			return m
+		}
+	}
+	t.Fatalf("no log line matching %q:\n%s", re, r.logs.String())
+	return ""
+}
+
+func TestLibraryAddAndScan(t *testing.T) {
+	tm.Tools(t)
+	srv := startServer(t)
+	ctx := context.Background()
+	client, err := newAdminClient(config.Config{Listen: srv.addr, DataDir: srv.data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "films")
+	for _, rel := range []string{"Invented Film (2001)/Invented Film (2001).mkv", "Lone Film (1999).mp4"} {
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		tm.Make(t, p, tm.Join(tm.Video("1"), tm.Tone("440", "1"), []string{"-c:v", "libx264", "-c:a", "aac"})...)
+	}
+
+	var out bytes.Buffer
+	if err := libraryAdd(ctx, client, "Films", "movies", "", []string{root}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "Added library 1, Films (movies), with folders: 1 "+root+".") {
+		t.Fatalf("output %q", out.String())
+	}
+	srv.waitFor(t, `msg="scan done" root=\S+ ms=\d+ files=2 added=2`)
+	srv.waitFor(t, `msg="probing done" probed=2 unreadable=0`)
+
+	out.Reset()
+	if err := scanRequest(ctx, client, 1, &out); err != nil || out.String() != "Asked the server to scan library 1.\n" {
+		t.Fatalf("scan: %q %v", out.String(), err)
+	}
+	srv.waitFor(t, `msg="scan done" root=\S+ ms=\d+ files=2 added=0 back=0 changed=0 moved=0 missing=0`)
+	var e *apiError
+	if err := scanRequest(ctx, client, 7, &out); err == nil || !strings.Contains(err.Error(), "no library 7") {
+		t.Fatalf("an unknown library: %v (%v)", err, errors.As(err, &e))
 	}
 }

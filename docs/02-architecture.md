@@ -115,7 +115,7 @@ Two settings can also be changed while the server runs, by an admin in the web i
 |---|---|---|
 | `RUNNEL_LISTEN` | `:8610` | Address to listen on. |
 | `RUNNEL_DATA` | `/var/lib/runnel` | Data directory. |
-| `RUNNEL_FFMPEG`, `RUNNEL_FFPROBE` | found on `PATH` | Paths to the binaries. Jellyfin's ffmpeg build is a good choice where it is installed, since it is known to work with the GPU there. |
+| `RUNNEL_FFMPEG`, `RUNNEL_FFPROBE` | found on `PATH` | Paths to the binaries. Jellyfin's ffmpeg build is a good choice where it is installed, since it is known to work with the GPU there. Without ffprobe the server still scans, says so in its log, and probes nothing. |
 | `RUNNEL_HWACCEL` | `auto` | `auto`, `vaapi`, `qsv` or `none`. |
 | `RUNNEL_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device. |
 | `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once. |
@@ -145,6 +145,7 @@ Subcommands that change data talk to the running server over its API on localhos
 - **The local admin token.** At every start the server makes a new random token, writes it to `admin.token` in the data directory, readable by its own user only, and keeps only its hash, in memory. The token is not a row in `tokens`: it belongs to no user, so it also works before the first user exists. The server takes it for the calls of `04-api.md`, section 8, and only from its own host: a loopback address, or the address the request arrived at.
 - **Finding the server.** A subcommand reads the same `RUNNEL_LISTEN` and `RUNNEL_DATA` as the server. It connects to `127.0.0.1` when the server listens on every address. It has to run as the server's user, or as root, to read the token: `sudo -u runnel runnel user add ada`.
 - **`runnel user add`** asks for the password twice, without echo, on a terminal. Otherwise it reads the first line of standard input.
+- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`.
 
 ## 7. The data directory
 
@@ -175,6 +176,8 @@ The server's instance id, its settings and the setup code are rows in the databa
 | A held warm-up | A transcode's memory, no CPU | Measured |
 | A browser playback with the video copied | Two ffmpeg children, 56 to 58 MB each at their peak | Measured in the sandbox, 20 November 2026 |
 | The web interface | Its files are part of the binary. To be measured at stage 5. | Not measured |
+
+After a batch of scans and after a probe pass, the server hands the memory it freed back to the system (`debug.FreeOSMemory`): in the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files.
 
 Set `GOMEMLIMIT=64MiB` in the service. In the prototype a 16 MiB limit with `GOGC=50` held the server at 21.8 MB after load.
 

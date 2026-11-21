@@ -26,6 +26,8 @@ type Config struct {
 	// Name is the server's name as clients show it. Empty means the
 	// machine's host name.
 	Name string
+	// FFprobe is the path of ffprobe. Empty means the one found on PATH.
+	FFprobe string
 	// LogLevel is the lowest level that is logged.
 	LogLevel slog.Level
 }
@@ -67,6 +69,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.DataDir = abs
 
 	c.Name = strings.TrimSpace(getenv("RUNNEL_NAME"))
+	c.FFprobe = getenv("RUNNEL_FFPROBE")
 
 	if v := getenv("RUNNEL_LOG"); v != "" {
 		switch strings.ToLower(v) {

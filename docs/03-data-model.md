@@ -390,10 +390,10 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 **Files**
 
 - A file's identity is `(root_id, rel_path)`. Its `fingerprint` is the size plus a hash of the first and last 64 KiB: two small reads.
-- A scan that finds a new path whose fingerprint equals that of a file with `missing_since` set treats it as a move: it updates `rel_path` and clears `missing_since`. The file keeps its id, its items and its watch state.
+- A scan that finds a new path whose fingerprint equals that of a file of the same root with `missing_since` set, or one that this scan did not see where it was, treats it as a move: it updates `rel_path` and clears `missing_since`. The file keeps its id, its probe, its items and its watch state.
 - A changed `size` or `mtime_ns` resets `probe_version` to 0 and queues a probe.
 - `probe_version` is a number in the code. Raising it re-probes every file once, after a change to how probe output is mapped.
-- A root that cannot be listed, or lists empty when it held files before, is marked `available = 0` and skipped. None of its files is marked missing.
+- A root that cannot be listed, or lists empty when it held files before, is marked `available = 0` and skipped. None of its files is marked missing. Nothing in a folder below a root that cannot be read is marked missing either.
 - A root going away or coming back bumps its library's `updated_seq`, and nothing else. That one record is how a client knows that everything under the folder is unavailable (`04-api.md`, sections 2.1 and 5).
 - A file that is gone from a healthy root gets `missing_since`. It stays, shown as unavailable, for 30 days. After that the file row goes, and any item left with no file goes with it.
 

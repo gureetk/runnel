@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -20,6 +21,8 @@ import (
 	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/config"
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/probe"
+	"github.com/gureetk/runnel/internal/scan"
 )
 
 // shutdownHTTP is how long open requests get to finish after SIGTERM. What
@@ -77,9 +80,31 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
+	// The scanner, and the prober it hands new and changed files to. Without
+	// ffprobe the server still indexes, and probes nothing.
+	var prober *probe.Prober
+	ffprobe := cfg.FFprobe
+	if ffprobe == "" {
+		ffprobe, _ = exec.LookPath("ffprobe")
+	}
+	if ffprobe == "" {
+		log.Warn("ffprobe is not on PATH: nothing will be probed; set RUNNEL_FFPROBE to its path")
+	} else {
+		prober = probe.New(ffprobe, 2)
+	}
+	scanner := scan.New(database, prober, log)
+	background, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	scanning := make(chan struct{})
+	go func() {
+		defer close(scanning)
+		scanner.Run(background)
+	}()
+
 	handler := api.New(database, log, api.Config{
 		Info:           api.Info{Name: name, Version: version, InstanceID: instanceID},
 		AdminTokenHash: adminHash,
+		Scans:          scanner,
 	}).Handler()
 	srv := &http.Server{
 		Handler:           handler,
@@ -115,6 +140,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 	log.Debug("requests stopped", "ms", time.Since(start).Milliseconds())
+	// Stop the scanner and the prober: ffprobe children are killed, and a
+	// write in progress ends before the database closes.
+	stopBackground()
+	<-scanning
+	log.Debug("background work stopped", "ms", time.Since(start).Milliseconds())
 	if err := database.Close(); err != nil {
 		return err
 	}

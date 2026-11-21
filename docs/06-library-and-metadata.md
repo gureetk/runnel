@@ -26,15 +26,18 @@ The server never writes into a library folder.
 
 For each root of a library:
 
-1. **Check the root.** If it cannot be listed, or lists empty when the database holds files for it, mark it unavailable and stop. Nothing is marked missing.
-2. **Load what is known**: `id, rel_path, size, mtime_ns, missing_since` for the root, into a map.
+1. **Check the root.** If it cannot be listed, or lists empty when the database holds files for it that are not missing, mark it unavailable and stop. Nothing is marked missing.
+2. **Load what is known**: `id, rel_path, size, mtime_ns, missing_since` and the fingerprint for the root, into a map.
 3. **Walk the tree.** For every video file compare size and modification time with the map.
-   - Unknown path: a new file, unless its fingerprint matches a file that is marked missing, in which case it is a move.
+   - Unknown path: a new file, unless it is a known file that moved (step 4).
    - Changed size or time: reset `probe_version`, queue a probe.
+   - Marked missing, and there again unchanged: clear `missing_since`.
    - Same: nothing.
-4. **What was not seen** gets `missing_since`.
-5. **Write** all of it in one transaction, then queue probes for new and changed files.
-6. **Record what the scan found** on the root: files added, changed and removed, how long it took, or the error that stopped it. The administration page shows it (`04-api.md`, section 8.2).
+   - A folder below the root that cannot be read is skipped, and nothing in it is marked missing. The scan's result says how many could not be read.
+4. **Moves.** A new path whose fingerprint equals that of a file of the same root that is marked missing, or that was not seen in this walk, is that file at a new path: the row keeps its id and its probe, and takes the new path. Only new paths with the size of such a file are read for their fingerprint, so a scan reads no file's content otherwise. A file not probed yet has no fingerprint, so a rename before its first probe is a new file and a missing one. A move across roots is a new file and a missing one too.
+5. **What was not seen**, and did not move, gets `missing_since`. A file missing for more than 30 days is deleted (`03-data-model.md`, section 4).
+6. **Write** all of it in one transaction, then queue probes for new and changed files.
+7. **Record what the scan found** on the root: files added (new, and back from missing), changed (including moved) and removed (newly missing), how long it took, or the error that stopped it. The administration page shows it (`04-api.md`, section 8.2), and the server logs it.
 
 Measured with a Go prototype on a synthetic tree of 14,720 video files in 3,818 folders:
 
@@ -51,15 +54,16 @@ Peak memory was 13–15 MB. On spinning disks a cold walk costs about one seek p
 
 - **On change.** The server watches every folder under each root with inotify. Events are collected for 5 seconds, then the affected folders are scanned. This keeps disks asleep when nothing changes.
 - **Nightly**, a full walk as a safety net, and at start.
-- **On request**: `POST /admin/scan`.
+- **On request**: `POST /admin/scan`, and when a library is created.
 - A file that is still being copied is left alone until its size has stopped changing for 10 seconds.
 - If a root cannot be watched (a network mount, or the system's watch limit), the server logs it once and scans that root every 15 minutes.
 
 ### 2.3 What counts
 
 - **Video files**: `.mkv .mp4 .m4v .mov .avi .ts .m2ts .webm .wmv .mpg .mpeg`.
-- **Ignored**: names that start with a dot, `@eaDir`, `lost+found`, anything ending in `.part`, `.partial`, `.!qB` or `.tmp`, and files named `sample`.
-- **Extras**: a file in an extras folder or with an extras suffix (section 4.6) is stored with `kind = 'extra'` and kept out of lists.
+- **Ignored**: names that start with a dot, `@eaDir`, `lost+found`, anything ending in `.part`, `.partial`, `.!qB` or `.tmp`, and files named `sample`. Names are compared without case.
+- **Links**: a symbolic link to a file counts as that file. A link to a folder is not followed.
+- **Extras**: a file in an extras folder or with an extras suffix (section 4.6) is stored with `kind = 'extra'` and kept out of lists. Extras are not probed in version 1.
 - **External tracks**: subtitle files (`.srt .ass .ssa .vtt .sub .sup`) and audio files (`.mka .ac3 .flac .opus`) whose name starts with a video's base name are attached to that video (section 4.7).
 
 ## 3. Probing
@@ -156,8 +160,11 @@ Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brack
 
 Kept out of lists in version 1.
 
-- Folders: `behind the scenes`, `deleted scenes`, `interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`, `other`, `extras`, `trailers`, `theme-music`, `backdrops`. This list is from memory of Jellyfin's documentation; confirm it there when coding.
-- Suffixes on a file name: `-trailer`, `-sample`, `-scene`, `-clip`, `-interview`, `-behindthescenes`, `-deleted`, `-deletedscene`, `-featurette`, `-short`, `-other`, `-extra`. Same caveat.
+Both lists are Jellyfin's, as its documentation for films gives them (checked on 20 November 2026). Names are compared without case.
+
+- Folders: `behind the scenes`, `deleted scenes`, `interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`, `other`, `extras`, `trailers`, `theme-music`, `backdrops`. Such a folder counts inside a film's or a series' folder, at any depth, and not as a top folder of the root, where it would be the folder of a title such as "Other".
+- Suffixes at the end of a file's base name: `-trailer`, `-sample`, `-scene`, `-clip`, `-interview`, `-behindthescenes`, `-deleted`, `-deletedscene`, `-featurette`, `-short`, `-other`, `-extra`. For `trailer` and `sample` a `.`, a `_` or a space also works in place of the `-`.
+- A file whose base name is `trailer` is an extra. One named `sample` is ignored (section 2.3).
 
 ### 4.7 External subtitles and audio
 
