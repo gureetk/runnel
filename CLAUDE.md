@@ -36,5 +36,5 @@ Read `docs/00-start-here.md` first. Then read the document for the part you are 
 
 - Every source file starts with `// SPDX-License-Identifier: GPL-3.0-or-later`, in the file's own comment style.
 - The layout and the rules for the code are in `docs/02-architecture.md`, section 4.
-- The SQLite driver is C: building needs cgo (`CGO_ENABLED=1`) and a C compiler, and the `sqlite_fts5` build tag. The integration tests need `ffmpeg` and `ffprobe` on `PATH`.
+- The SQLite driver is C: building needs cgo (`CGO_ENABLED=1`) and a C compiler, and the `sqlite_fts5` build tag. The integration tests need `ffmpeg` and `ffprobe` on `PATH`. Without them they skip, except where `RUNNEL_TEST_REQUIRE_FFMPEG` is set, as CI sets it.
 - Before pushing: `gofmt -l .` prints nothing, and `go vet -tags sqlite_fts5 ./...`, `go test -tags sqlite_fts5 ./...` and `go build -tags sqlite_fts5 ./cmd/runnel` pass. CI runs the same.
