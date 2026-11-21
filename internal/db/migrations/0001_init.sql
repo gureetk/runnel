@@ -316,12 +316,14 @@ CREATE TABLE series_prefs (
   PRIMARY KEY (user_id, series_id)
 ) WITHOUT ROWID;
 
--- Deleted items, so a client that was away learns what to drop.
+-- Deleted items, so a client that was away learns what to drop. One transaction can delete
+-- several items, all at its one sequence value, so the key is the pair.
 CREATE TABLE tombstones (
-  seq     INTEGER PRIMARY KEY,
+  seq     INTEGER NOT NULL,
   item_id INTEGER NOT NULL,
-  at      INTEGER NOT NULL
-);
+  at      INTEGER NOT NULL,
+  PRIMARY KEY (seq, item_id)
+) WITHOUT ROWID;
 
 -- Background work that must survive a restart.
 CREATE TABLE tasks (

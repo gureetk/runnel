@@ -339,12 +339,14 @@ CREATE TABLE series_prefs (
   PRIMARY KEY (user_id, series_id)
 ) WITHOUT ROWID;
 
--- Deleted items, so a client that was away learns what to drop.
+-- Deleted items, so a client that was away learns what to drop. One transaction can delete
+-- several items, all at its one sequence value, so the key is the pair.
 CREATE TABLE tombstones (
-  seq     INTEGER PRIMARY KEY,
+  seq     INTEGER NOT NULL,
   item_id INTEGER NOT NULL,
-  at      INTEGER NOT NULL
-);
+  at      INTEGER NOT NULL,
+  PRIMARY KEY (seq, item_id)
+) WITHOUT ROWID;
 
 -- Background work that must survive a restart.
 CREATE TABLE tasks (
@@ -406,6 +408,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A file that holds episodes 1 and 2 is one episode item with `episode_number = 1` and `episode_number_end = 2`.
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
+- An item that no file makes any more is deleted when items are built, with a tombstone at the transaction's sequence value. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Collections**

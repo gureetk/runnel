@@ -236,3 +236,30 @@ func (d *DB) CountToProbe(ctx context.Context, version int) (int, error) {
 	}
 	return n, nil
 }
+
+// UnreadableFile is a file ffprobe could not read.
+type UnreadableFile struct {
+	ID      int64
+	RelPath string
+	Error   string
+}
+
+// UnreadableFiles lists the files of a library whose probe failed.
+func (d *DB) UnreadableFiles(ctx context.Context, libraryID int64) ([]UnreadableFile, error) {
+	rows, err := d.r.QueryContext(ctx,
+		`SELECT f.id, f.rel_path, f.probe_error FROM files f JOIN roots r ON r.id = f.root_id
+		 WHERE r.library_id = ? AND f.probe_error IS NOT NULL ORDER BY f.id`, libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("db: read unreadable files: %w", err)
+	}
+	defer rows.Close()
+	var out []UnreadableFile
+	for rows.Next() {
+		var u UnreadableFile
+		if err := rows.Scan(&u.ID, &u.RelPath, &u.Error); err != nil {
+			return nil, fmt.Errorf("db: read unreadable files: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

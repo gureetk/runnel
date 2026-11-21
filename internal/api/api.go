@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
+	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
 }
 
 // Handler is the whole server: every route inside the middleware that every

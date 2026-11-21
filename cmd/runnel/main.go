@@ -23,6 +23,8 @@ Commands:
   library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
                                Add a library to the running server.
   scan [--library <id>]        Ask the running server to scan.
+  report [--library <id>] [--class <class>|all]
+                               Print how every file's name parsed.
   version                      Print the version.
 
 Settings are environment variables that start with RUNNEL_. They are listed
@@ -48,6 +50,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return libraryCmd(args[1:], stdout, stderr)
 	case "scan":
 		return scanCmd(args[1:], stdout, stderr)
+	case "report":
+		return reportCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

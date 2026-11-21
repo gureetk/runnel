@@ -108,13 +108,16 @@ The parser expects Jellyfin's documented folder layout, with episode file names 
 
 - A folder `Name (year) [ids]` holding the film, or a lone file `Name (year).ext` in the library root.
 - The item's key is the folder, or the file when there is no folder.
-- Title and year come from the folder name. Brackets are read for ids (4.5) and otherwise dropped.
+- Title and year come from the folder name, or from a lone file's name. Brackets are read for ids (4.5) and otherwise dropped. The year is the last `(NNNN)` between 1880 and 2100; whatever follows it, such as a version label, is not part of the title.
+- A film's name has a class, as an episode's does (4.3): **explicit** with its year, **guess** without one, and **none** when no title is left once brackets are dropped. A file in the none class makes no item.
 
 ### 4.2 Series and seasons
 
 - A folder `Name (year) [ids]` per series. Its name gives the title and the year.
+- The series folder is the top folder of the root that the file is under.
 - `Season NN` folders inside it. `Season 00` and `Specials` are season 0.
-- Episode files directly in the series folder belong to season 1.
+- Episode files directly in the series folder belong to season 1, and so do files in a folder of it that is not a season folder.
+- A file at the top of a shows library has no series folder: it is in the none class and makes no item.
 
 ### 4.3 Episodes
 
@@ -128,10 +131,13 @@ The folders already give the series and the season. The file name only has to yi
 The rule, in order:
 
 1. Remove bracketed groups: `[Group]`, `[1080p]`, `(…)`.
-2. If an `SxxEyy` token is present, take it, with `SxxEyy-Ezz` for a file that holds several episodes. Class **explicit**.
+2. If an `SxxEyy` token is present, take it, with `SxxEyy-Ezz` or `SxxEyyEzz` for a file that holds several episodes. Case does not matter, and a space, dot, dash or underscore may stand between the season and the episode. Class **explicit**. The token's season is taken; where it differs from its season folder's, the report says so.
 3. Otherwise, if the name starts with the series folder's title, cut the title off, skip the folder's year if it follows, and take the first number that stands alone. A version suffix such as `05v2` is allowed. Class **anchored**.
 4. Otherwise accept a number that follows ` - `. Class **dash**.
 5. Otherwise take the last number that stands alone. Class **guess**. The file goes to the review list.
+6. Otherwise there is no number: class **none**. The file makes no item, and is listed in the report.
+
+An episode number has 1 to 4 digits.
 
 Comparison is on a normalised form: lower case, every run of other characters turned into one space. So `Unit No. 8` in a folder name matches `Unit No 8` in a file name.
 
@@ -176,15 +182,16 @@ Both lists are Jellyfin's, as its documentation for films gives them (checked on
 
 ## 5. Building items
 
-Run after every scan that changed something. It must be idempotent: a second run changes nothing and bumps no sequence.
+Run after every scan. It must be idempotent: a second run changes nothing and bumps no sequence, so a scan that changed nothing changes no item, and a newer parser is applied by the next scan without a file having changed.
 
 - **Films.** One movie item per key. Its files are attached as versions or parts.
 - **Series.** One series item per series folder. Season items are created for the season numbers that occur. Episode items are created per `(series, season, episode)`.
 - **Titles before metadata.** A film or series takes its title and year from the folder name. An episode is titled `Episode N` until metadata arrives.
+- **A renamed folder keeps its item.** When none of an item's files parse to its own key any more, and they now parse to a key that no item has, the item takes the new key and keeps its id: a folder renamed to fix a year keeps its watch state. This needs the files to have kept their ids, which takes a fingerprint (section 2.1).
 - **`sort_title`** is the title in lower case without a leading article (`the`, `a`, `an`).
 - **`added_at`** is the earliest `first_seen_at` of the item's files. For a series it is that of its newest episode, so a new episode brings the series to the top of Recently added.
 - **Absolute numbering.** When a series has files in the anchored, dash or guess class whose numbers run past what one season holds (a number above 99, or above the provider's count for that season once known), the series is set to `numbering = 'absolute'`, the numbers are stored in `absolute_number`, and season and episode numbers wait for the mapping in section 6.5. A person can set `numbering` by hand in the match dialog.
-- **Removal.** An item whose files have all been missing for 30 days is deleted, with a tombstone. Until then it is shown as unavailable.
+- **Removal.** An item whose files have all been missing for 30 days is deleted, with a tombstone. Until then it is shown as unavailable. More generally, an item that no file makes any more is deleted when items are built, with a tombstone; a series takes its episodes with it, each with its own.
 - **Collections** are items too, but they are built from metadata, not from files (section 6.6).
 - **Sequence.** Every item written takes the transaction's sequence number. A new episode also bumps its season and its series.
 

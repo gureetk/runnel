@@ -21,6 +21,7 @@ import (
 	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/config"
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
 )
@@ -93,6 +94,16 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		prober = probe.New(ffprobe, 2)
 	}
 	scanner := scan.New(database, prober, log)
+	scanner.Built = func(ctx context.Context, libraryID int64) error {
+		start := time.Now()
+		res, err := library.Build(ctx, database, libraryID, time.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
+		log.Info("items built", "library", libraryID, "ms", time.Since(start).Milliseconds(),
+			"added", res.Added, "changed", res.Changed, "removed", res.Removed)
+		return nil
+	}
 	background, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
 	scanning := make(chan struct{})

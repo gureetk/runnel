@@ -796,6 +796,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
+| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files of the classes asked for, and the files ffprobe could not read. Parameters: `library`, and `class`: a class, or `all`; `guess` and `none` when left out. The names are parsed again for each request: nothing about it is stored. |
 
 `GET /admin/libraries`:
 
@@ -814,6 +815,17 @@ Two settings can be changed while the server runs, and are kept in the database.
 - Creating a library: `kind` is `movies` or `shows`, `profile` is `default` (when left out) or `anime`. A library has 1 to 32 folders, each an absolute path to a folder the server can open, stored without a trailing slash. A folder that is, contains or lies inside one that a library already scans is `409` with code `conflict`, and so is a name that is taken. Library names are compared with their case.
 - `scan.state` is `idle`, `walking` (going through the folders, with no numbers yet), `probing` (reading what was found: `done` of `total` files) or `failed`.
 - `last_scan` is the folder's last scan of any kind: asked for, nightly, or set off by a change on disk. `added`, `changed` and `removed` count files.
+
+`GET /admin/parse-report`:
+
+```json
+{"libraries": [{"id": 2, "name": "Anime", "kind": "shows", "files": 1790,
+                "counts": {"explicit": 1650, "anchored": 112, "dash": 20, "guess": 7, "none": 1}, "unreadable": 1}],
+ "files": [{"file_id": 4410, "library_id": 2, "path": "Salt Road (2010)/Season 01/Low Water 07.mkv", "class": "guess",
+            "title": "Salt Road", "year": 2010, "season": 1, "episode": 7}],
+ "unreadable": [{"file_id": 5002, "library_id": 2, "path": "Salt Road (2010)/Season 02/Salt Road - S02E03.mkv",
+                 "error": "Invalid data found when processing input"}]}
+```
 
 `GET /admin/fs?path=/srv/media`:
 
