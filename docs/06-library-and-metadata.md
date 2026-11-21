@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code.
 
 ## 1. The pipeline
 
@@ -115,8 +115,9 @@ The parser expects Jellyfin's documented folder layout, with episode file names 
 
 - A folder `Name (year) [ids]` per series. Its name gives the title and the year.
 - The series folder is the top folder of the root that the file is under.
-- `Season NN` folders inside it. `Season 00` and `Specials` are season 0.
-- Episode files directly in the series folder belong to season 1, and so do files in a folder of it that is not a season folder.
+- Season folders inside it: `Season` and a number of 1 to 4 digits, `Season 01`, `Season 1` or `Season 2019`, as Jellyfin's documentation names them. Case does not matter, and a space, dot, dash or underscore may stand between the word and the number. `Season 00` and `Specials` are season 0.
+- Jellyfin's documentation says not to shorten `Season` to `S01` [checked: its pages on shows, 21 November 2026]. Its naming code is more lenient: version 12.4 also reads `S01`, a season folder with more after its number, and the word for season in other languages [checked: its `SeasonPathParser`]. Runnel reads the documented form only.
+- Episode files directly in the series folder belong to season 1, and so do files in a folder of it that is not a season folder. Such a folder gives the file a note in the parse report, which names it: otherwise a second season in `S02` would land on the first one's numbers with nobody seeing it.
 - A file at the top of a shows library has no series folder: it is in the none class and makes no item.
 
 ### 4.3 Episodes
@@ -126,18 +127,25 @@ The folders already give the series and the season. The file name only has to yi
 - `Series - S01E02`
 - `[Group] Series - S01E02`
 - `[Group] Series - 123`, a running count with no season tag
-- any of those without the dash
+- `Series - S01E02-E03`, a file that holds several episodes
+- `Series - E05` and `Series - EP05`, which Jellyfin's naming code reads as episode 5 [checked: `NamingOptions` in version 12.4]
+- any of those without the dash, and with underscores between the words
 
 The rule, in order:
 
 1. Remove bracketed groups: `[Group]`, `[1080p]`, `(…)`.
-2. If an `SxxEyy` token is present, take it, with `SxxEyy-Ezz` or `SxxEyyEzz` for a file that holds several episodes. Case does not matter, and a space, dot, dash or underscore may stand between the season and the episode. Class **explicit**. The token's season is taken; where it differs from its season folder's, the report says so.
-3. Otherwise, if the name starts with the series folder's title, cut the title off, skip the folder's year if it follows, and take the first number that stands alone. A version suffix such as `05v2` is allowed. Class **anchored**.
-4. Otherwise accept a number that follows ` - `. Class **dash**.
+2. If an `SxxEyy` token is present, take it. It starts the name or follows a character that is not a letter or a digit, so that an underscore separates it as a space does: `Series_S01E02`. Case does not matter, and up to three of space, dot, dash or underscore may stand between the season and the episode. Class **explicit**. The token's season is taken; where it differs from its season folder's, the report says so.
+   - A file that holds several episodes ends its token with the last one. Jellyfin's documentation shows `S01E02-E03` [checked: its pages on shows, 21 November 2026]. Its naming code also reads `S01E02E03`, `S01E02 - E03` and `S01E02-03` [checked: `NamingOptions` in version 12.4]. Runnel reads those, and `S01E02-S01E03`, the token repeated with its own season, which Jellyfin's code does not read.
+   - The ends may repeat: `S01E02E03E04` holds three. As in Jellyfin's code, a number that runs on into a digit, a `p` or an `i` is not an end, so `S01E14-1080p` is episode 14 alone. An end must come after the start, and `-S02E03` after `S01E02` names another season and is not an end.
+3. Otherwise, if the name starts with the series folder's title, cut the title off, skip the folder's year if it follows, and take the first number that stands alone. A version suffix such as `05v2` is allowed, and so is `E` or `EP` before the number. Class **anchored**.
+   - Where a number follows ` - ` after the title and differs from that first number, the first one is not trusted. If it is the season folder's own number, as `2` in `[Group] Series 2 - 05` inside `Season 02`, the number after the dash is the episode, still **anchored**. Otherwise the number after the dash is taken, class **guess**, and the report says that the two differ.
+4. Otherwise accept a number that follows ` - ` (or `_-_`, the dash between underscores), perhaps after `E` or `EP`. Class **dash**.
 5. Otherwise take the last number that stands alone. Class **guess**. The file goes to the review list.
 6. Otherwise there is no number: class **none**. The file makes no item, and is listed in the report.
 
 An episode number has 1 to 4 digits.
+
+**Decimals are not read.** Where the number a step takes is part of a decimal, such as `12.5`, the file is in the none class with a note. Read as 12, in any class, it would join episode 12 as a second file. A dot between two numbers in a name whose words are joined by dots is not a decimal point: `quiet.station.12.5` gives 12.
 
 Comparison is on a normalised form: lower case, every run of other characters turned into one space. So `Unit No. 8` in a folder name matches `Unit No 8` in a file name.
 
@@ -145,18 +153,21 @@ A Go prototype of this rule was run on 11,423 synthetic names in eight forms, in
 
 | Form | Names | Right |
 |---|---|---|
-| The six forms above, with and without group tags and dashes | 10,761 | 10,761 |
+| The first three forms above, with and without group tags and dashes | 10,761 | 10,761 |
 | File title differs from the folder's, with a dash | 592 | 592 |
 | File title differs from the folder's, no dash | 70 | 64 |
 
-All six errors were in the **guess** class, the one that goes to review. The names and the parser came from the same author, so this shows the rule is sound, not that it is complete. The test table should grow from real names.
+All six errors were in the **guess** class, the one that goes to review. The names and the parser came from the same author, so this shows the rule is sound, not that it is complete. The prototype ran the rule before the additions of 21 November 2026: underscores, the forms of a file that holds several episodes, `E` and `EP`, the second number of step 3 and decimals.
 
-Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brackets, decimals such as `12.5`.
+The test table, `internal/parse/testdata/names.tsv`, holds every form here and every shape found to parse wrongly. It grows from real names, each added with its title replaced by an invented one of the same shape.
+
+Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brackets, and decimals, which are in the none class (above).
 
 ### 4.4 Versions and parts
 
-- **Versions.** Two files that resolve to the same film or episode are versions of it. What follows the common name, after ` - `, is the label: `Film (2001) - 1080p.mkv`.
-- **Parts.** `cd`, `dvd`, `part`, `pt`, `disc` or `disk`, then a number or a letter a to d, split a film into parts that play in order.
+- **Versions.** Two files that resolve to the same film or episode are versions of it. What follows the common name is the label: `Film (2001) - 1080p.mkv`, `Series S01E01 - 720p.mkv`. In Jellyfin's documentation the label follows a film's folder name after a dash, a dot or an underscore, or stands in square brackets, and an episode's versions are named the same way after the episode [checked: its pages on films and shows, 21 November 2026].
+- **Parts.** At the end of a name, after a space, a dot, a dash or an underscore, or straight after a closing bracket: `cd`, `dvd`, `part`, `pt`, `disc` or `disk`, perhaps in brackets, then a number or a letter a to d. Parts split a film or an episode into files that play in order: `Film (2001) - cd1.mkv`, `Series S02E03 Part 1.mkv`. That is Jellyfin's rule for files that split a video, in its documentation and its naming code (version 12.4). A part counts only where another file of the same item has the same name before its part: alone, `Part 2` is as likely the end of a title.
+- **The note.** The names of the files that make one item should tell them apart, each by its label or by its part. Every file of an item gets a note in the parse report when two of the item's files have names that differ in nothing, such as one name in two folders or with two extensions, or differ only by a number, such as `Series 2 - 05` and `Series 2 - 06`. Those files are more likely episodes that parsed to one number than versions of one. What is compared is what is left of each name once the part and the beginning and the end that all the names share are taken off.
 
 ### 4.5 Ids in names
 

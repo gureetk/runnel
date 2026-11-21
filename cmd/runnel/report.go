@@ -12,12 +12,16 @@ import (
 	"strings"
 )
 
-const reportUsage = `Usage: runnel report [--library <id>] [--class explicit|anchored|dash|guess|none|all]
+const reportUsage = `Usage: runnel report [--library <id>] [--class explicit|anchored|dash|guess|none|all] [--noted]
 
 Prints how the running server parsed every file's name: the count in each
-class for each library, then one line for each file of the classes asked
-for (guess and none when left out), then the files ffprobe could not read.
-Lines are separated by tabs: class, file id, what the name gave, path.
+class for each library, then one line for each file asked for, then the
+files ffprobe could not read. Left out, the files asked for are those in
+guess and none, and the files of the other classes that have a note: one
+that several files make whose names do not tell them apart, or one in a
+folder that is not a season folder. --noted lists only those with a note.
+Lines are separated by tabs: class, file id, what the name gave, path,
+and the note when there is one.
 `
 
 func reportCmd(args []string, stdout, stderr io.Writer) int {
@@ -25,13 +29,14 @@ func reportCmd(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	library := fs.Int64("library", 0, "one library; all when left out")
 	class := fs.String("class", "", "the class to list, or all")
+	noted := fs.Bool("noted", false, "only the files with a note")
 	rest, err := parseArgs(fs, args)
 	if err != nil || len(rest) > 0 {
 		fmt.Fprint(stderr, reportUsage)
 		return 2
 	}
 	return subcommand(stderr, func(ctx context.Context, c *adminClient) error {
-		return report(ctx, c, *library, *class, stdout)
+		return report(ctx, c, *library, *class, *noted, stdout)
 	})
 }
 
@@ -42,6 +47,7 @@ type reportBody struct {
 		Kind       string         `json:"kind"`
 		Files      int            `json:"files"`
 		Counts     map[string]int `json:"counts"`
+		Noted      int            `json:"noted"`
 		Unreadable int            `json:"unreadable"`
 	} `json:"libraries"`
 	Files []struct {
@@ -64,7 +70,7 @@ type reportBody struct {
 }
 
 // report reads GET /admin/parse-report and prints it.
-func report(ctx context.Context, c *adminClient, library int64, class string, stdout io.Writer) error {
+func report(ctx context.Context, c *adminClient, library int64, class string, noted bool, stdout io.Writer) error {
 	q := url.Values{}
 	if library > 0 {
 		q.Set("library", strconv.FormatInt(library, 10))
@@ -72,14 +78,17 @@ func report(ctx context.Context, c *adminClient, library int64, class string, st
 	if class != "" {
 		q.Set("class", class)
 	}
+	if noted {
+		q.Set("noted", "1")
+	}
 	var b reportBody
 	if err := c.do(ctx, "GET", "/admin/parse-report?"+q.Encode(), nil, &b); err != nil {
 		return err
 	}
 	for _, l := range b.Libraries {
-		fmt.Fprintf(stdout, "Library %d, %s (%s): %d files. explicit %d, anchored %d, dash %d, guess %d, none %d. ffprobe could not read %d.\n",
+		fmt.Fprintf(stdout, "Library %d, %s (%s): %d files. explicit %d, anchored %d, dash %d, guess %d, none %d. With a note %d. ffprobe could not read %d.\n",
 			l.ID, l.Name, l.Kind, l.Files, l.Counts["explicit"], l.Counts["anchored"], l.Counts["dash"],
-			l.Counts["guess"], l.Counts["none"], l.Unreadable)
+			l.Counts["guess"], l.Counts["none"], l.Noted, l.Unreadable)
 	}
 	if len(b.Files) > 0 {
 		fmt.Fprintln(stdout)

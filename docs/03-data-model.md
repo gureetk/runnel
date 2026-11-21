@@ -750,6 +750,7 @@ DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - 1000;
 
 - Numbered SQL files in the binary (`embed`). `meta.schema_version` records the last one applied.
 - At start the server applies what is missing, each file in its own transaction, and refuses to start on a database newer than itself.
+- A merged migration is never edited, not even a comment in it. A database made with it may exist anywhere, and the server never applies a migration twice, so an edit would go unnoticed where it has run. A change to the schema is a new migration. A test holds every merged migration to the SHA-256 it was merged with, and a new migration adds its own in the pull request that adds it.
 - A migration never rewrites watch state in a way that cannot be reversed from a backup. Before a migration that rebuilds a table, the server copies the database file into `backup/` in the data directory (`02-architecture.md`, section 7).
 - Anything derived from the media or from providers (`files`, `streams`, `chapters`, `items`, `images`, `people`, `credits`, `provider_cache`) can be rebuilt by a rescan. Only `users`, `tokens`, `user_state`, `user_list`, `series_prefs`, `overrides` and the settings in `meta` are irreplaceable. A backup is those, or the whole file.
 

@@ -55,12 +55,53 @@ episode	Harbor Lantern (2021)/Season 01/Lantern of the Harbor - 06.mkv	dash	Harb
 episode	Harbor Lantern (2021)/Season 01/[Group] Lantern of the Harbor - 06v3 [1080p].mkv	dash	Harbor Lantern	2021	1	6	0
 episode	Harbor Lantern (2021)/Season 01/Lantern of the Harbor 06.mkv	guess	Harbor Lantern	2021	1	6	0
 episode	Harbor Lantern (2021)/Season 01/Episode 7.mkv	guess	Harbor Lantern	2021	1	7	0
+# Underscores between the words: the token follows one as it follows a space.
+episode	Amber Letters (2020)/Season 01/[Grp]_Amber_Letters_-_S01E02_[1080p].mkv	explicit	Amber Letters	2020	1	2	0
+episode	Amber Letters (2020)/Amber_Letters_S01E02.mkv	explicit	Amber Letters	2020	1	2	0
+episode	Amber Letters (2020)/Season 01/Amber_Letters_-_05.mkv	anchored	Amber Letters	2020	1	5	0
+# The season's own number after the title, then the episode after the dash.
+episode	Winter Kitchen (2019)/Season 02/[Grp] Winter Kitchen 2 - 05.mkv	anchored	Winter Kitchen	2019	2	5	0
+episode	Winter Kitchen (2019)/Season 02/[Grp] Winter Kitchen 2 - 16 [1080p].mkv	anchored	Winter Kitchen	2019	2	16	0
+# The number after the title and the one after the dash differ, and the first
+# is not the season folder's: not trusted.
+episode	Winter Kitchen (2019)/Season 01/[Grp] Winter Kitchen 3 - 05.mkv	guess	Winter Kitchen	2019	1	5	0
+episode	Winter Kitchen (2019)/[Grp] Winter Kitchen 2 - 05.mkv	guess	Winter Kitchen	2019	1	5	0
+# A decimal is not read, and does not join the episode of its whole part.
+episode	Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv	none	Quiet Station	2018	1	0	0
+episode	Quiet Station (2018)/Season 01/Other Name - 12.5.mkv	none	Quiet Station	2018	1	0	0
+episode	Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12 [1080p].mkv	anchored	Quiet Station	2018	1	12	0
+# Dots between the words are not decimal points.
+episode	Quiet Station (2018)/Season 01/quiet.station.12.5.mkv	anchored	Quiet Station	2018	1	12	0
+# Files that hold several episodes: Jellyfin's documented form S01E02-E03, the
+# forms its naming code also reads, and the token repeated with its season.
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02-E03.mkv	explicit	Glass Harbor	2020	1	2	3
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02-03.mkv	explicit	Glass Harbor	2020	1	2	3
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02-S01E03.mkv	explicit	Glass Harbor	2020	1	2	3
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02 - E03.mkv	explicit	Glass Harbor	2020	1	2	3
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02E03E04.mkv	explicit	Glass Harbor	2020	1	2	4
+# Not a range: a resolution, another season, an end before the start.
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E14-1080p.mkv	explicit	Glass Harbor	2020	1	14	0
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E02-S02E03.mkv	explicit	Glass Harbor	2020	1	2	0
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - S01E05-03.mkv	explicit	Glass Harbor	2020	1	5	0
+# Folders that are not season folders: season 1, and the report says so.
+episode	Glass Harbor (2020)/S01/Glass Harbor - 05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Season 01 (2020)/Glass Harbor - 05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Glass Harbor Season 2/Glass Harbor - 05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/S02/Glass Harbor - S02E05.mkv	explicit	Glass Harbor	2020	2	5	0
+# A season folder with four digits.
+episode	Daily Notes (2019)/Season 2019/Daily Notes - 05.mkv	anchored	Daily Notes	2019	2019	5	0
+# E and EP before the number, as Jellyfin's naming code reads them.
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - E05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - EP05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Season 01/Glass Harbor - Episode 05.mkv	anchored	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Season 01/Lantern Story - EP05.mkv	dash	Glass Harbor	2020	1	5	0
+episode	Glass Harbor (2020)/Season 01/E07.mkv	guess	Glass Harbor	2020	1	7	0
 # Nothing to place, or no number: the none class.
 episode	Harbor Lantern - S01E05.mkv	none		0	-	-	-
 episode	Harbor Lantern (2021)/Season 01/Harbor Lantern.mkv	none	Harbor Lantern	2021	1	0	0
 episode	Harbor Lantern (2021)/Season 01/Pilot.mkv	none	Harbor Lantern	2021	1	0	0
 episode	[Group]/Season 01/Something - S01E01.mkv	none		0	-	-	-
 # Not handled in version 1 (docs/06-library-and-metadata.md, section 4.3):
-# 1x02, dates, numbers inside brackets, decimals. They fall to a lower class.
+# 1x02, dates, numbers inside brackets. They fall to a lower class.
 episode	Harbor Lantern (2021)/Season 01/Harbor Lantern 1x02.mkv	none	Harbor Lantern	2021	1	0	0
 episode	Harbor Lantern (2021)/Season 01/Other Title [05].mkv	none	Harbor Lantern	2021	1	0	0

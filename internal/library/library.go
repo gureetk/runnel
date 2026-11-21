@@ -116,6 +116,12 @@ type ReportRow struct {
 // Report parses the names of every video file of the given libraries
 // again and returns how each parsed. Nothing about parsing is stored, so
 // the report is always that of the parser that is running.
+//
+// Files are grouped into the items they make, as building does. Where
+// several files make one item and their names do not tell them apart as
+// versions or parts, every one of them gets a note: that is how a wrong
+// number in a trusted class shows (docs/06-library-and-metadata.md,
+// section 4.4).
 func Report(ctx context.Context, d *db.DB, libs []model.Library) ([]ReportRow, error) {
 	var rows []ReportRow
 	for _, lib := range libs {
@@ -123,18 +129,57 @@ func Report(ctx context.Context, d *db.DB, libs []model.Library) ([]ReportRow, e
 		if err != nil {
 			return nil, fmt.Errorf("report: %w", err)
 		}
+		type item struct {
+			root            int64
+			key             string
+			season, episode int
+		}
+		groups := map[item][]int{} // rows of the files that make each item
 		for _, f := range files {
 			r := ReportRow{FileID: f.ID, LibraryID: lib.ID, Path: f.RelPath}
+			it := item{root: f.RootID}
 			if lib.Kind == "movies" {
 				p := parse.ParseFilm(f.RelPath)
 				r.Class, r.Title, r.Year = p.Class, p.Title, p.Year
+				it.key = p.Key
 			} else {
 				p := parse.ParseEpisode(f.RelPath)
 				r.Class, r.Title, r.Year, r.Note = p.Class, p.SeriesTitle, p.SeriesYear, p.Note
 				r.Season, r.Episode, r.EpisodeEnd = p.Season, p.Episode, p.EpisodeEnd
+				it.key, it.season, it.episode = p.SeriesKey, p.Season, p.Episode
 			}
 			rows = append(rows, r)
+			if r.Class != parse.None {
+				groups[it] = append(groups[it], len(rows)-1)
+			}
+		}
+		for it, at := range groups {
+			if len(at) < 2 {
+				continue
+			}
+			bases := make([]string, len(at))
+			for i, n := range at {
+				bases[i] = parse.Base(rows[n].Path)
+			}
+			if parse.Distinct(bases) {
+				continue
+			}
+			what := "the film"
+			if lib.Kind == "shows" {
+				what = fmt.Sprintf("S%02dE%02d", it.season, it.episode)
+			}
+			note := fmt.Sprintf("one of %d files that make %s, and their names do not tell them apart as versions or parts", len(at), what)
+			for _, n := range at {
+				rows[n].Note = joinNotes(rows[n].Note, note)
+			}
 		}
 	}
 	return rows, nil
+}
+
+func joinNotes(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + "; " + b
 }

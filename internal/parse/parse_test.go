@@ -83,6 +83,105 @@ func TestSeasonDisagreementIsNoted(t *testing.T) {
 	}
 }
 
+// TestNotes checks what the report is told about a name: a folder that is
+// not a season folder, two numbers that disagree, a decimal.
+func TestNotes(t *testing.T) {
+	for rel, want := range map[string]string{
+		"Glass Harbor (2020)/S01/Glass Harbor - 05.mkv":                         `in the folder "S01", which is not a season folder`,
+		"Glass Harbor (2020)/Season 01 (2020)/Glass Harbor - 05.mkv":            `in the folder "Season 01 (2020)", which is not a season folder`,
+		"Glass Harbor (2020)/Season 01/Disc 1/Glass Harbor - 05.mkv":            `in the folder "Disc 1", which is not a season folder`,
+		"Glass Harbor (2020)/S03/Glass Harbor - S03E05.mkv":                     `in the folder "S03", which is not a season folder`,
+		"Winter Kitchen (2019)/Season 01/[Grp] Winter Kitchen 3 - 05.mkv":       "the number after the title, 3, and the number after the dash, 5, differ",
+		"Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv": "a decimal episode number, which is not read",
+		"Harbor Lantern (2021)/Season 03/Harbor Lantern - S01E13.mkv":           "the name says season 01, its folder season 3",
+		"Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05.mkv":           "",
+		"Harbor Lantern (2021)/Harbor Lantern - 05.mkv":                         "",
+		"Harbor Lantern (2021)/Specials/Harbor Lantern - 05.mkv":                "",
+		"Winter Kitchen (2019)/Season 02/[Grp] Winter Kitchen 2 - 05.mkv":       "",
+	} {
+		if got := ParseEpisode(rel).Note; got != want {
+			t.Errorf("%s\n note %q\n want %q", rel, got, want)
+		}
+	}
+}
+
+func TestSeasonFolder(t *testing.T) {
+	for dir, want := range map[string]int{"Season 01": 1, "Season 1": 1, "season 12": 12, "Season00": 0, "Season 2019": 2019, "Specials": 0, "specials": 0} {
+		if n, ok := SeasonFolder(dir); !ok || n != want {
+			t.Errorf("%q: %d %v, want %d", dir, n, ok, want)
+		}
+	}
+	// Jellyfin's documentation names Season and a number; these are not.
+	for _, dir := range []string{"S01", "SE01", "Season 01 (2020)", "Glass Harbor Season 2", "Extras", "1"} {
+		if _, ok := SeasonFolder(dir); ok {
+			t.Errorf("%q read as a season folder", dir)
+		}
+	}
+}
+
+func TestPart(t *testing.T) {
+	type want struct {
+		n      int
+		before string
+	}
+	for in, w := range map[string]want{
+		"Paper Comets-cd1":                       {1, "Paper Comets"},
+		"Paper Comets - CD2":                     {2, "Paper Comets"},
+		"Paper Comets (2019) - part2":            {2, "Paper Comets (2019)"},
+		"Paper Comets (2019) [Part 3]":           {3, "Paper Comets (2019)"},
+		"Paper Comets (2019)(disc 1)":            {1, "Paper Comets (2019)"},
+		"Paper Comets (2019).dvd_2":              {2, "Paper Comets (2019)"},
+		"Paper Comets (2019) - pt b":             {2, "Paper Comets (2019)"},
+		"Paper Comets (2019) - Disk D":           {4, "Paper Comets (2019)"},
+		"Harbor Lantern S02E03 Part 1":           {1, "Harbor Lantern S02E03"},
+		"Harbor Lantern (2021) S01E01-part-2":    {2, "Harbor Lantern (2021) S01E01"},
+		"Harbor Lantern S01E01 - 1080p - part1":  {1, "Harbor Lantern S01E01 - 1080p"},
+		"Paper Comets (2019)":                    {0, "Paper Comets (2019)"},
+		"Paper Comets (2019) - part2 [1080p]":    {0, "Paper Comets (2019) - part2 [1080p]"},
+		"Departure 2":                            {0, "Departure 2"},
+		"The Second Part":                        {0, "The Second Part"},
+		"Paper Comets (2019) - Director's Cut 2": {0, "Paper Comets (2019) - Director's Cut 2"},
+	} {
+		if n, before := Part(in); n != w.n || before != w.before {
+			t.Errorf("Part(%q) = %d %q, want %d %q", in, n, before, w.n, w.before)
+		}
+	}
+}
+
+func TestDistinct(t *testing.T) {
+	for _, c := range []struct {
+		names []string
+		want  bool
+	}{
+		{[]string{"Paper Comets (2019)"}, true},
+		{[]string{"Paper Comets (2019)", "Paper Comets (2019) - 1080p"}, true},
+		// Jellyfin's examples of versions, of a film and of an episode.
+		{[]string{"Paper Comets (2019) - 2160p", "Paper Comets (2019) - 1080p", "Paper Comets (2019) - Directors Cut"}, true},
+		{[]string{"Harbor Lantern S01E01 - 1080p", "Harbor Lantern S01E01 - 720p", "Harbor Lantern S01E01 - Extended"}, true},
+		{[]string{"Paper Comets (2019) - Directors Cut", "Paper Comets (2019) - Theatrical Cut"}, true},
+		{[]string{"Paper Comets (2019) [1080p]", "Paper Comets (2019) [720p]"}, true},
+		// Parts, and parts of one version beside another version.
+		{[]string{"Paper Comets-cd1", "Paper Comets-cd2"}, true},
+		{[]string{"S01E01 - 720p - Part 1", "S01E01 - 720p - Part 2", "S01E01 - 1080p"}, true},
+		{[]string{"Harbor Lantern S01E01 - 1080p - part1", "Harbor Lantern S01E01 - 1080p - part2", "Harbor Lantern S01E01 - 4K"}, true},
+		// Names that differ by a number only: episodes, more likely.
+		{[]string{"[Grp] Winter Kitchen 2 - 05", "[Grp] Winter Kitchen 2 - 06", "[Grp] Winter Kitchen 2 - 07"}, false},
+		{[]string{"[Grp] Winter Kitchen 2 - 05 [1080p]", "[Grp] Winter Kitchen 2 - 06 [1080p]"}, false},
+		{[]string{"Harbor Lantern - S01E05", "Harbor Lantern - 05"}, false},
+		{[]string{"Harbor Lantern - S01E05", "Harbor Lantern - S01E05-E06"}, false},
+		{[]string{"Quiet Station - 12", "Quiet Station - 12.5"}, false},
+		{[]string{"Salt Road - 05", "Salt Road - 05v2"}, false},
+		// Names that do not differ: two folders, or two extensions.
+		{[]string{"Harbor Lantern - S01E05", "Harbor Lantern - S01E05"}, false},
+		// Two parts with the same number.
+		{[]string{"Paper Comets-cd1", "Paper Comets - cd1"}, false},
+	} {
+		if got := Distinct(c.names); got != c.want {
+			t.Errorf("Distinct(%q) = %v, want %v", c.names, got, c.want)
+		}
+	}
+}
+
 func TestSeriesKey(t *testing.T) {
 	a := ParseEpisode("Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv")
 	b := ParseEpisode("Harbor Lantern (2021)/Harbor Lantern - S02E01.mkv")
