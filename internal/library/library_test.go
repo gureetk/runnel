@@ -241,8 +241,8 @@ func TestSeries(t *testing.T) {
 	if len(eps) != 4 || eps[[2]int{1, 2}].Title != "Episode 2" || eps[[2]int{0, 1}].ID == 0 || eps[[2]int{2, 1}].ID == 0 {
 		t.Fatalf("episodes of Harbor Lantern: %+v", eps)
 	}
-	if n := len(items); n != 7 {
-		t.Fatalf("%d items, want 2 series and 5 episodes", n)
+	if n := len(items); n != 11 {
+		t.Fatalf("%d items, want 2 series, 4 seasons and 5 episodes", n)
 	}
 	var running db.ItemSummary
 	for _, it := range items {
@@ -283,7 +283,7 @@ func TestSeriesFolderRenamed(t *testing.T) {
 	e.move("Harbor Lanterns (2021)", "Harbor Lantern (2021)")
 	e.scan()
 	after := e.items()
-	if len(after) != 3 {
+	if len(after) != 4 {
 		t.Fatalf("%+v", after)
 	}
 	for _, it := range after {

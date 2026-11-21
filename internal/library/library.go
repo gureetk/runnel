@@ -2,22 +2,24 @@
 
 // Package library builds items from files (docs/06-library-and-metadata.md,
 // section 5), and reports how every file's name parsed.
-//
-// What stage 1 builds: films, series and episodes, titled from their
-// names. Every file of an item is attached as part 0 without a label.
-// Seasons, versions, parts, files that hold several episodes and absolute
-// numbering come with stage 2's full item model (docs/01-roadmap.md).
 package library
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/model"
 	"github.com/gureetk/runnel/internal/parse"
 )
+
+// runningPast is the highest number one season holds: a series with an
+// episode numbered higher without an SxxEyy token is numbered in one
+// running count (docs/06-library-and-metadata.md, section 5).
+const runningPast = 99
 
 // Build makes the items of a library what its files say. Running it twice
 // changes nothing the second time.
@@ -30,73 +32,152 @@ func Build(ctx context.Context, d *db.DB, libraryID int64, now int64) (db.BuildR
 	if err != nil {
 		return db.BuildResult{}, err
 	}
-	films, series := plan(lib, files)
-	return d.BuildItems(ctx, libraryID, films, series, parse.SortTitle, now)
+	p := plan(lib, files)
+	return d.BuildItems(ctx, libraryID, p.films, p.series, parse.SortTitle, now)
+}
+
+// planned is what a library's files say its items should be.
+type planned struct {
+	films  []db.DesiredFilm
+	series []db.DesiredSeries
+	// groups are the files that make each film and episode, as indexes
+	// into the files given to plan, for the report's notes.
+	groups []group
+}
+
+type group struct {
+	files []int
+	what  string // how the report names the item: "the film", "S01E05", "episode 112"
 }
 
 // plan parses every file and groups the files into the items they make.
 // A file in the none class makes no item.
-func plan(lib model.Library, files []db.LibraryFile) ([]db.DesiredFilm, []db.DesiredSeries) {
-	type key struct {
-		root int64
-		key  string
-	}
+func plan(lib model.Library, files []db.LibraryFile) planned {
+	var p planned
 	switch lib.Kind {
 	case "movies":
-		byKey := map[key]*db.DesiredFilm{}
+		type key struct {
+			root int64
+			key  string
+		}
+		byKey := map[key][]int{}
+		parsed := map[key]parse.Film{}
 		var order []key
-		for _, f := range files {
-			p := parse.ParseFilm(f.RelPath)
-			if p.Class == parse.None {
+		for i, f := range files {
+			pf := parse.ParseFilm(f.RelPath)
+			if pf.Class == parse.None {
 				continue
 			}
-			k := key{f.RootID, p.Key}
-			if byKey[k] == nil {
-				byKey[k] = &db.DesiredFilm{RootID: f.RootID, Key: p.Key, Title: p.Title, Year: p.Year}
+			k := key{f.RootID, pf.Key}
+			if _, ok := byKey[k]; !ok {
 				order = append(order, k)
+				parsed[k] = pf
 			}
-			byKey[k].FileIDs = append(byKey[k].FileIDs, f.ID)
+			byKey[k] = append(byKey[k], i)
 		}
-		out := make([]db.DesiredFilm, 0, len(order))
 		for _, k := range order {
-			out = append(out, *byKey[k])
+			pf, at := parsed[k], byKey[k]
+			// A film in a folder is named after it; a lone file is a film by
+			// itself, with no versions or parts.
+			folder := ""
+			if pf.Key != files[at[0]].RelPath {
+				folder = pf.Key
+			}
+			p.films = append(p.films, db.DesiredFilm{RootID: k.root, Key: pf.Key, Title: pf.Title, Year: pf.Year,
+				Files: versions(files, at, folder)})
+			p.groups = append(p.groups, group{files: at, what: "the film"})
 		}
-		return out, nil
 
 	case "shows":
-		type ep struct{ season, episode int }
-		bySeries := map[key]*db.DesiredSeries{}
-		episodes := map[key]map[ep][]int64{}
+		type key struct {
+			root int64
+			key  string
+		}
+		type ep struct {
+			at int
+			p  parse.Episode
+		}
+		bySeries := map[key][]ep{}
 		var order []key
-		for _, f := range files {
-			p := parse.ParseEpisode(f.RelPath)
-			if p.Class == parse.None {
+		for i, f := range files {
+			pe := parse.ParseEpisode(f.RelPath)
+			if pe.Class == parse.None {
 				continue
 			}
-			k := key{f.RootID, p.SeriesKey}
-			if bySeries[k] == nil {
-				bySeries[k] = &db.DesiredSeries{RootID: f.RootID, Key: p.SeriesKey, Title: p.SeriesTitle, Year: p.SeriesYear}
-				episodes[k] = map[ep][]int64{}
+			k := key{f.RootID, pe.SeriesKey}
+			if _, ok := bySeries[k]; !ok {
 				order = append(order, k)
 			}
-			e := ep{p.Season, p.Episode}
-			episodes[k][e] = append(episodes[k][e], f.ID)
+			bySeries[k] = append(bySeries[k], ep{i, pe})
 		}
-		out := make([]db.DesiredSeries, 0, len(order))
 		for _, k := range order {
-			s := *bySeries[k]
-			for e, ids := range episodes[k] {
-				s.Episodes = append(s.Episodes, db.DesiredEpisode{Season: e.season, Episode: e.episode, FileIDs: ids})
+			eps := bySeries[k]
+			first := eps[0].p
+			s := db.DesiredSeries{RootID: k.root, Key: first.SeriesKey, Title: first.SeriesTitle, Year: first.SeriesYear}
+			// A number past what a season holds, without a token, makes the
+			// series one running count: then every such number is the
+			// episode's running number, which is its key. A token, or the
+			// specials' folder, says where an episode is, and its number
+			// is not in the count.
+			counted := func(p parse.Episode) bool { return p.Class != parse.Explicit && p.Season != 0 }
+			for _, e := range eps {
+				if counted(e.p) && e.p.Episode > runningPast {
+					s.Absolute = true
+				}
+			}
+			type ekey struct{ season, episode, absolute int }
+			byEp := map[ekey][]ep{}
+			var eorder []ekey
+			for _, e := range eps {
+				k := ekey{season: e.p.Season, episode: e.p.Episode}
+				if s.Absolute && counted(e.p) {
+					k = ekey{absolute: e.p.Episode}
+				}
+				if _, ok := byEp[k]; !ok {
+					eorder = append(eorder, k)
+				}
+				byEp[k] = append(byEp[k], e)
+			}
+			for _, k := range eorder {
+				members := byEp[k]
+				de := db.DesiredEpisode{Season: members[0].p.Season, Episode: members[0].p.Episode, Absolute: k.absolute}
+				at := make([]int, len(members))
+				for i, m := range members {
+					at[i] = m.at
+					de.EpisodeEnd = max(de.EpisodeEnd, m.p.EpisodeEnd)
+				}
+				de.Files = versions(files, at, "")
+				s.Episodes = append(s.Episodes, de)
+				what := fmt.Sprintf("S%02dE%02d", de.Season, de.Episode)
+				if de.Absolute != 0 {
+					what = fmt.Sprintf("episode %d", de.Absolute)
+				}
+				p.groups = append(p.groups, group{files: at, what: what})
 			}
 			sort.Slice(s.Episodes, func(i, j int) bool {
 				a, b := s.Episodes[i], s.Episodes[j]
-				return a.Season < b.Season || (a.Season == b.Season && a.Episode < b.Episode)
+				return a.Season < b.Season || (a.Season == b.Season && (a.Episode < b.Episode || (a.Episode == b.Episode && a.Absolute < b.Absolute)))
 			})
-			out = append(out, s)
+			p.series = append(p.series, s)
 		}
-		return nil, out
 	}
-	return nil, nil
+	return p
+}
+
+// versions tells the files of one item apart as versions and parts
+// (docs/06-library-and-metadata.md, section 4.4).
+func versions(files []db.LibraryFile, at []int, folder string) []db.DesiredFile {
+	rels := make([]string, len(at))
+	for i, n := range at {
+		rels[i] = files[n].RelPath
+	}
+	vs := parse.Versions(rels, folder)
+	out := make([]db.DesiredFile, len(at))
+	for i, n := range at {
+		out[i] = db.DesiredFile{ID: files[n].ID, Label: vs[i].Label, Part: vs[i].Part}
+	}
+	slices.SortFunc(out, func(a, b db.DesiredFile) int { return cmp.Compare(a.ID, b.ID) })
+	return out
 }
 
 // ReportRow is how one file's name parsed.
@@ -129,48 +210,33 @@ func Report(ctx context.Context, d *db.DB, libs []model.Library) ([]ReportRow, e
 		if err != nil {
 			return nil, fmt.Errorf("report: %w", err)
 		}
-		type item struct {
-			root            int64
-			key             string
-			season, episode int
-		}
-		groups := map[item][]int{} // rows of the files that make each item
+		start := len(rows)
 		for _, f := range files {
 			r := ReportRow{FileID: f.ID, LibraryID: lib.ID, Path: f.RelPath}
-			it := item{root: f.RootID}
 			if lib.Kind == "movies" {
 				p := parse.ParseFilm(f.RelPath)
 				r.Class, r.Title, r.Year = p.Class, p.Title, p.Year
-				it.key = p.Key
 			} else {
 				p := parse.ParseEpisode(f.RelPath)
 				r.Class, r.Title, r.Year, r.Note = p.Class, p.SeriesTitle, p.SeriesYear, p.Note
 				r.Season, r.Episode, r.EpisodeEnd = p.Season, p.Episode, p.EpisodeEnd
-				it.key, it.season, it.episode = p.SeriesKey, p.Season, p.Episode
 			}
 			rows = append(rows, r)
-			if r.Class != parse.None {
-				groups[it] = append(groups[it], len(rows)-1)
-			}
 		}
-		for it, at := range groups {
-			if len(at) < 2 {
+		for _, g := range plan(lib, files).groups {
+			if len(g.files) < 2 {
 				continue
 			}
-			bases := make([]string, len(at))
-			for i, n := range at {
-				bases[i] = parse.Base(rows[n].Path)
+			bases := make([]string, len(g.files))
+			for i, n := range g.files {
+				bases[i] = parse.Base(files[n].RelPath)
 			}
 			if parse.Distinct(bases) {
 				continue
 			}
-			what := "the film"
-			if lib.Kind == "shows" {
-				what = fmt.Sprintf("S%02dE%02d", it.season, it.episode)
-			}
-			note := fmt.Sprintf("one of %d files that make %s, and their names do not tell them apart as versions or parts", len(at), what)
-			for _, n := range at {
-				rows[n].Note = joinNotes(rows[n].Note, note)
+			note := fmt.Sprintf("one of %d files that make %s, and their names do not tell them apart as versions or parts", len(g.files), g.what)
+			for _, n := range g.files {
+				rows[start+n].Note = joinNotes(rows[start+n].Note, note)
 			}
 		}
 	}

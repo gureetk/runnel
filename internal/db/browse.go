@@ -3,18 +3,21 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gureetk/runnel/internal/model"
 )
 
-// Card is the short form of an item, as far as stage 1 knows it
-// (docs/04-api.md, section 2.1).
+// Card is the short form of an item (docs/04-api.md, section 2.1), as far
+// as it is the same for everyone: what belongs to one user is the API's.
 type Card struct {
 	ID          int64
 	Type        string
@@ -23,30 +26,56 @@ type Card struct {
 	Title       string
 	SortTitle   string
 	Year        int
-	SeriesID    int64 // episodes
+	ParentID    int64 // seasons and episodes
+	SeriesID    int64
 	SeriesTitle string
 	Season      int
 	Episode     int
+	EpisodeEnd  int // a file that holds several episodes
+	Absolute    int // the running number, in a series numbered in one
+	Available   bool
+	Episodes    int // a series: its episodes outside the specials; a season: its episodes
+	Seasons     int // a series: its seasons outside the specials
 	AddedAt     int64
 	Seq         int64
 }
 
-const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_title, i.year, i.series_id,
-  (SELECT s.title FROM items s WHERE s.id = i.series_id), i.season_number, i.episode_number, i.added_at, i.updated_seq`
+// cardColumns reads a card. available is whether any of the item's own
+// files is there, or for a series or a season any of its episodes'. A
+// folder that is away does not change it: that is said once, for the
+// folder (docs/04-api.md, section 2.1).
+const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_title, i.year, i.parent_id, i.series_id,
+  (SELECT s.title FROM items s WHERE s.id = i.series_id), i.season_number, i.episode_number,
+  i.episode_number_end, i.absolute_number,
+  CASE i.type
+    WHEN 'series' THEN EXISTS (SELECT 1 FROM items e JOIN item_files l ON l.item_id = e.id JOIN files f ON f.id = l.file_id
+                               WHERE e.series_id = i.id AND e.type = 'episode' AND f.missing_since IS NULL)
+    WHEN 'season' THEN EXISTS (SELECT 1 FROM items e JOIN item_files l ON l.item_id = e.id JOIN files f ON f.id = l.file_id
+                               WHERE e.parent_id = i.id AND f.missing_since IS NULL)
+    ELSE EXISTS (SELECT 1 FROM item_files l JOIN files f ON f.id = l.file_id WHERE l.item_id = i.id AND f.missing_since IS NULL)
+  END,
+  CASE i.type
+    WHEN 'series' THEN (SELECT count(*) FROM items e WHERE e.series_id = i.id AND e.type = 'episode' AND e.season_number > 0)
+    WHEN 'season' THEN (SELECT count(*) FROM items e WHERE e.parent_id = i.id AND e.type = 'episode')
+    ELSE 0 END,
+  CASE i.type
+    WHEN 'series' THEN (SELECT count(*) FROM items e WHERE e.series_id = i.id AND e.type = 'season' AND e.season_number > 0)
+    ELSE 0 END,
+  i.added_at, i.updated_seq`
 
 func scanCards(rows *sql.Rows) ([]Card, error) {
 	defer rows.Close()
 	var out []Card
 	for rows.Next() {
 		var c Card
-		var root, year, series, season, episode sql.NullInt64
+		var root, year, parent, series, season, episode, end, absolute sql.NullInt64
 		var seriesTitle sql.NullString
-		if err := rows.Scan(&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &series,
-			&seriesTitle, &season, &episode, &c.AddedAt, &c.Seq); err != nil {
+		if err := rows.Scan(&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
+			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &c.AddedAt, &c.Seq); err != nil {
 			return nil, err
 		}
-		c.RootID, c.Year, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), series.Int64, seriesTitle.String
-		c.Season, c.Episode = int(season.Int64), int(episode.Int64)
+		c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
+		c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -120,6 +149,113 @@ func (d *DB) CountEpisodes(ctx context.Context, seriesID int64) (int, error) {
 	return n, err
 }
 
+// SeasonKey is where a page of seasons continues: in season order,
+// specials last.
+type SeasonKey struct {
+	Specials bool
+	Season   int
+	ID       int64
+}
+
+// SeasonsOf is a page of a series' seasons after key.
+func (d *DB) SeasonsOf(ctx context.Context, seriesID int64, after SeasonKey, limit int) ([]Card, error) {
+	rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
+		WHERE i.parent_id = ? AND i.type = 'season' AND (i.season_number = 0, i.season_number, i.id) > (?, ?, ?)
+		ORDER BY i.season_number = 0, i.season_number, i.id LIMIT ?`, seriesID, after.Specials, after.Season, after.ID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("db: read seasons: %w", err)
+	}
+	return scanCards(rows)
+}
+
+// NumberKey is where a page of a season's episodes continues.
+type NumberKey struct {
+	Episode, Absolute int
+	ID                int64
+}
+
+// EpisodesOfSeason is a page of a season's episodes after key, in order.
+func (d *DB) EpisodesOfSeason(ctx context.Context, seasonID int64, after NumberKey, limit int) ([]Card, error) {
+	rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
+		WHERE i.parent_id = ? AND i.type = 'episode'
+		  AND (i.episode_number, COALESCE(i.absolute_number, 0), i.id) > (?, ?, ?)
+		ORDER BY i.episode_number, COALESCE(i.absolute_number, 0), i.id LIMIT ?`, seasonID, after.Episode, after.Absolute, after.ID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("db: read episodes: %w", err)
+	}
+	return scanCards(rows)
+}
+
+// CountChildren counts an item's children of one type.
+func (d *DB) CountChildren(ctx context.Context, parentID int64, typ string) (int, error) {
+	var n int
+	err := d.r.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE parent_id = ? AND type = ?`, parentID, typ).Scan(&n)
+	return n, err
+}
+
+// Neighbours are the episodes before and after one in its series' order:
+// season and episode, specials last. An empty card stands for none.
+func (d *DB) Neighbours(ctx context.Context, c Card) (prev, next Card, err error) {
+	here := []any{c.SeriesID, c.Season == 0, c.Season, c.Episode, c.Absolute, c.ID}
+	for _, q := range []struct {
+		cmp, dir string
+		out      *Card
+	}{{"<", " DESC", &prev}, {">", "", &next}} {
+		rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
+			WHERE i.series_id = ? AND i.type = 'episode'
+			  AND (i.season_number = 0, i.season_number, i.episode_number, COALESCE(i.absolute_number, 0), i.id) `+q.cmp+` (?, ?, ?, ?, ?)
+			ORDER BY i.season_number = 0`+q.dir+`, i.season_number`+q.dir+`, i.episode_number`+q.dir+`,
+			  COALESCE(i.absolute_number, 0)`+q.dir+`, i.id`+q.dir+` LIMIT 1`, here...)
+		if err != nil {
+			return Card{}, Card{}, fmt.Errorf("db: read neighbours: %w", err)
+		}
+		cards, err := scanCards(rows)
+		if err != nil {
+			return Card{}, Card{}, err
+		}
+		if len(cards) == 1 {
+			*q.out = cards[0]
+		}
+	}
+	return prev, next, nil
+}
+
+// Match is an item's match to a metadata provider, with its ids there.
+type Match struct {
+	State       string
+	Confidence  float64 // 0 when not known
+	Numbering   string  // a series': seasons or absolute
+	ExternalIDs map[string]string
+}
+
+// MatchOf reads an item's match and its provider ids, or ErrNotFound.
+func (d *DB) MatchOf(ctx context.Context, id int64) (Match, error) {
+	m := Match{ExternalIDs: map[string]string{}}
+	var conf sql.NullFloat64
+	var numbering sql.NullString
+	err := d.r.QueryRowContext(ctx, `SELECT match_state, match_confidence, numbering FROM items WHERE id = ?`, id).Scan(&m.State, &conf, &numbering)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Match{}, ErrNotFound
+	}
+	if err != nil {
+		return Match{}, fmt.Errorf("db: read match: %w", err)
+	}
+	m.Confidence, m.Numbering = conf.Float64, numbering.String
+	rows, err := d.r.QueryContext(ctx, `SELECT provider, value FROM external_ids WHERE item_id = ? AND provider <> 'tmdb_collection'`, id)
+	if err != nil {
+		return Match{}, fmt.Errorf("db: read external ids: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p, v string
+		if err := rows.Scan(&p, &v); err != nil {
+			return Match{}, err
+		}
+		m.ExternalIDs[p] = v
+	}
+	return m, rows.Err()
+}
+
 // Item is one item's card, or ErrNotFound.
 func (d *DB) Item(ctx context.Context, id int64) (Card, error) {
 	rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i WHERE i.id = ?`, id)
@@ -181,6 +317,12 @@ func (d *DB) ItemFiles(ctx context.Context, itemID int64) ([]FileDetail, error) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	slices.SortStableFunc(out, func(a, b FileDetail) int {
+		if c := compareLabels(a.Label, b.Label); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Part, b.Part)
+	})
 	for i := range out {
 		if out[i].Streams, err = d.streams(ctx, out[i].ID); err != nil {
 			return nil, err
@@ -190,6 +332,32 @@ func (d *DB) ItemFiles(ctx context.Context, itemID int64) ([]FileDetail, error) 
 		}
 	}
 	return out, nil
+}
+
+// compareLabels orders versions (docs/04-api.md, section 2.2): the main
+// version, without a label, first; then labels that name a resolution, a
+// number with a p or an i, from the highest; then the others by name.
+func compareLabels(a, b string) int {
+	rank := func(l string) (int, int) {
+		if l == "" {
+			return 0, 0
+		}
+		if n := len(l); n > 1 && strings.ContainsRune("pPiI", rune(l[n-1])) {
+			if v, err := strconv.Atoi(l[:n-1]); err == nil {
+				return 1, -v
+			}
+		}
+		return 2, 0
+	}
+	ra, va := rank(a)
+	rb, vb := rank(b)
+	if ra != rb {
+		return cmp.Compare(ra, rb)
+	}
+	if va != vb {
+		return cmp.Compare(va, vb)
+	}
+	return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
 }
 
 func (d *DB) streams(ctx context.Context, fileID int64) ([]model.Stream, error) {

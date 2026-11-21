@@ -5,14 +5,23 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
+
+// StampBatch is the most rows that one sequence value is stamped on. A
+// transaction that stamps more takes another value for every StampBatch
+// rows, so that a page of /changes, which ends at a sequence boundary, is
+// never larger than its limit or StampBatch rows (docs/03-data-model.md,
+// section 5).
+const StampBatch = 500
 
 // Tx is a write transaction. It is only valid inside the function given to
 // Write.
 type Tx struct {
-	tx  *sql.Tx
-	seq int64 // 0 until Seq is first called
+	tx   *sql.Tx
+	seq  int64 // 0 until Seq is first called
+	used int   // rows stamped with seq so far
 }
 
 // Write runs fn in a write transaction and commits it if fn returns nil.
@@ -55,21 +64,51 @@ func (d *DB) Write(ctx context.Context, fn func(ctx context.Context, tx *Tx) err
 	return nil
 }
 
-// Seq returns this transaction's value of the change sequence, taking the
-// next value the first time it is called. A transaction that changes
-// nothing a client can see never calls it, so it uses up no value
+// Seq returns the sequence value to stamp on one row that this transaction
+// changes. The first call takes the next value of the change sequence, and
+// so does the first call after every StampBatch rows. A transaction that
+// changes nothing a client can see never calls it, so it uses up no value
 // (docs/03-data-model.md, section 5).
 func (t *Tx) Seq(ctx context.Context) (int64, error) {
-	if t.seq != 0 {
-		return t.seq, nil
+	seq, _, err := t.seqFor(ctx, 1)
+	return seq, err
+}
+
+// seqFor returns the value to stamp on up to n rows, and on how many of
+// them it may go.
+func (t *Tx) seqFor(ctx context.Context, n int) (int64, int, error) {
+	if t.seq == 0 || t.used >= StampBatch {
+		err := t.tx.QueryRowContext(ctx,
+			`UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'seq' RETURNING CAST(value AS INTEGER) AS seq`,
+		).Scan(&t.seq)
+		if err != nil {
+			return 0, 0, fmt.Errorf("db: next sequence: %w", err)
+		}
+		t.used = 0
 	}
-	err := t.tx.QueryRowContext(ctx,
-		`UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'seq' RETURNING CAST(value AS INTEGER) AS seq`,
-	).Scan(&t.seq)
-	if err != nil {
-		return 0, fmt.Errorf("db: next sequence: %w", err)
+	room := min(n, StampBatch-t.used)
+	t.used += room
+	return t.seq, room, nil
+}
+
+// stampItems stamps items with this transaction's sequence values, no more
+// than StampBatch rows to a value.
+func (t *Tx) stampItems(ctx context.Context, ids []int64) error {
+	for len(ids) > 0 {
+		seq, room, err := t.seqFor(ctx, len(ids))
+		if err != nil {
+			return err
+		}
+		chunk, err := json.Marshal(ids[:room])
+		if err != nil {
+			return err
+		}
+		if _, err := t.tx.ExecContext(ctx, `UPDATE items SET updated_seq = ? WHERE id IN (SELECT value FROM json_each(?))`, seq, string(chunk)); err != nil {
+			return err
+		}
+		ids = ids[room:]
 	}
-	return t.seq, nil
+	return nil
 }
 
 // Seq reads the current value of the change sequence.

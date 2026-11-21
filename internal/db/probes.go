@@ -127,23 +127,9 @@ func clearStreams(ctx context.Context, tx *Tx, fileID int64) error {
 }
 
 // bumpItemsOfFile stamps the items that play a file with this
-// transaction's sequence number: a file change is a change to its items.
+// transaction's sequence value: a file change is a change to its items.
 func bumpItemsOfFile(ctx context.Context, tx *Tx, fileID int64) error {
-	var linked bool
-	if err := tx.tx.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM item_files WHERE file_id = ?)`, fileID).Scan(&linked); err != nil {
-		return err
-	}
-	if !linked {
-		return nil
-	}
-	seq, err := tx.Seq(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = tx.tx.ExecContext(ctx,
-		`UPDATE items SET updated_seq = ? WHERE id IN (SELECT item_id FROM item_files WHERE file_id = ?)`, seq, fileID)
-	return err
+	return bumpItemsOfFiles(ctx, tx, []int64{fileID})
 }
 
 // nullInt stores 0 as NULL: unknown.

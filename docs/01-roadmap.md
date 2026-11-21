@@ -114,6 +114,10 @@ Build:
 - The admin endpoints for libraries, the folder browser, scans with their results, background work with progress, people and devices.
 - `play_log`, `GET /admin/playlog` and `GET /admin/stats`.
 
+Where one call carries data that a later stage brings, stage 2 builds the part it has data for and leaves the rest absent, or refuses it plainly:
+
+- An item's detail (`GET /items/{id}`) has no metadata, `credits` or `collection` until stage 4. Its `match.state` is `unmatched` and its `external_ids` are empty. A series' `numbering` comes from its files: setting it by hand is in stage 4's match dialog, and so is mapping a running count to the provider's seasons, so until then a running count's episodes carry provisional season and episode numbers (`06-library-and-metadata.md`, section 5).
+
 **Exit:**
 
 1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, sessions and `GET /admin/sessions` (a session is an ffmpeg child's, `05-playback.md`, section 5), `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, collections, credits and people. Stage 5: `GET /admin/update` (`04-api.md`, section 8.8). Stage 6, with the TV app: discovery. Stage 7: playing in a browser (`04-api.md`, section 7.9). Stage 10: the sidecar.

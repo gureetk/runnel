@@ -107,7 +107,7 @@ A film's card, to show the fields an episode does not have:
 | `collection_id` | Films only: the collection the film belongs to, when the library shows one (2.3). |
 | `images` | By kind: `poster`, `backdrop`, `thumb`, `logo`. Each has a `key`, the widths stored, the aspect ratio and a placeholder colour. The URL is `/img/{key}/{w}`. A kind that is missing is absent. |
 | `state` | The signed-in user's. Absent on seasons and collections. On a series it is replaced by `counts`. |
-| `counts` | Series and seasons: `{"episodes": 24, "unplayed": 20, "seasons": 2}`. Collections: `{"films": 2}`. |
+| `counts` | Series and seasons: `{"episodes": 24, "unplayed": 20, "seasons": 2}`. Collections: `{"films": 2}`. A series counts its episodes and seasons without the specials. The specials' season counts its own episodes. |
 | `listed_at` | Films and series only: when the signed-in user put the item on My list (4.7). Absent when it is not on it. |
 | `seq` | The change sequence at which this card last changed. |
 
@@ -184,7 +184,9 @@ Everything on the card, and what a detail screen and the player need besides: th
 | Field | Notes |
 |---|---|
 | `prefs` | The track choice to start with: the user's choice for this series if there is one, otherwise the user's defaults. `sub_mode` is `off`, `forced`, `auto` or `on`. `auto` means subtitles are shown when the audio is not in `audio_lang`. |
-| `files` | Versions and parts. `part` 0 is a whole item. Parts 1..n play in order. |
+| `files` | Versions and parts. `part` 0 is a whole item. Parts 1..n play in order. The main version, whose `label` is null, comes first, then versions whose label is a number and a `p` or an `i`, such as `1080p`, the highest first, then the others by label. A version's parts follow each other. |
+| `numbering` | Series only: `seasons`, or `absolute` when its files carry one running count (`06-library-and-metadata.md`, section 5). |
+| `seasons` | Series only: its seasons in order, the specials last, each with its id, number, title and counts. |
 | `files[].available` | False while the file is missing or its disk is away. |
 | `files[].attachments_bytes` | Fonts and other attachments. A client on a slow link can use it to decide whether to ask for fonts. |
 | `files[].video.fps` | Frames per second as a number. |
@@ -458,7 +460,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 |---|---|
 | `library` | Library id. Required unless `parent`, `series`, `ids`, `genre`, `list`, `collection` or `person` is given. |
 | `type` | `movie` or `series` at the top of a library; left out, the library's own kind. `season` or `episode` below a parent. With `genre`, `list` or `person`: `movie` or `series` to narrow it, both when left out. |
-| `parent` | Children of an item: seasons of a series, episodes of a season. |
+| `parent` | Children of an item: the seasons of a series, the specials last, or the episodes of a season, in order. |
 | `series` | With `type=episode`: every episode of a series in one list. |
 | `ids` | Comma-separated ids, at most 200. For refreshing a few cards. |
 | `genre` | One genre name. Without `library`: the films and series of every library. |
@@ -543,7 +545,7 @@ How a client uses it:
 
 Rules on the server side:
 
-- Everything returned has a `seq` above `since` and at or below `upto`. A page ends at a sequence boundary, so no change is ever split across two pages.
+- Everything returned has a `seq` above `since` and at or below `upto`. A page ends at a sequence boundary, so the rows of one sequence value are never split across two pages. One value is on at most 500 rows (`03-data-model.md`, section 5), so a page holds at most `limit` rows, or 500 when `limit` is lower. A transaction that changes more than 500 rows, such as the first build of a large library, takes several values, and its changes can arrive over several pages. A parent comes before its children, so a page applied on its own never leaves an episode without its season.
 - `items` are cards without the parts that belong to a user: no `state`, no `listed_at`, and `counts` without `unplayed`. Those arrive in `state` and `list`, for the signed-in user only. A client counts unplayed episodes from its own copy.
 - A new episode also returns its season and series, because their counts changed.
 - A `list` row with `listed_at` null was taken off the list. A `prefs` row with `sub_mode` null was reset (7.8).
