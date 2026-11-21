@@ -26,12 +26,26 @@ var containerOfExtension = map[string]string{
 // range, copied from disk to socket by the kernel (docs/04-api.md,
 // section 7.2; docs/05-playback.md, section 3). It has no write deadline:
 // a paused player may keep it open for hours.
+//
+// A playback starts with this request: it holds the playback gate from
+// its arrival until firstByteHold after its first byte, and takes over
+// from its token's prepare of the same file (docs/02-architecture.md,
+// section 5).
 func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
+	release := s.gate.Hold()
+	var sending bool
+	defer func() {
+		if !sending {
+			release()
+		}
+	}()
+
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		s.fail(w, r, http.StatusNotFound, "not_found", "no such file")
 		return
 	}
+	s.handOver(callerOf(r.Context()).tokenID, id)
 	f, err := s.db.RawFileOf(r.Context(), id)
 	switch {
 	case errors.Is(err, db.ErrNotFound):
@@ -72,5 +86,9 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 	if f.Fingerprint != "" {
 		w.Header().Set("ETag", `"`+f.Fingerprint+`"`)
 	}
-	http.ServeContent(w, r, "", fi.ModTime(), file)
+	gw := &gateWriter{ResponseWriter: w, first: func() {
+		sending = true
+		time.AfterFunc(s.firstByteHold, release)
+	}}
+	http.ServeContent(gw, r, "", fi.ModTime(), file)
 }

@@ -32,8 +32,9 @@ const (
 // caller is who made a request: a signed-in user, or the subcommands with
 // the local admin token, which have no user.
 type caller struct {
-	user  model.User
-	local bool
+	user    model.User
+	tokenID int64 // the token the user signed in with
+	local   bool
 }
 
 func callerOf(ctx context.Context) caller {
@@ -68,11 +69,11 @@ func (s *Server) authenticate(h http.HandlerFunc, query bool) http.HandlerFunc {
 		if token == "" && query {
 			token = r.URL.Query().Get("t")
 		}
-		u, ok := s.userOf(w, r, token)
+		t, ok := s.userOf(w, r, token)
 		if !ok {
 			return
 		}
-		h(w, r.WithContext(context.WithValue(r.Context(), callerKey, caller{user: u})))
+		h(w, r.WithContext(context.WithValue(r.Context(), callerKey, caller{user: t.User, tokenID: t.TokenID})))
 	}
 }
 
@@ -90,35 +91,35 @@ func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r.WithContext(context.WithValue(r.Context(), callerKey, caller{local: true})))
 			return
 		}
-		u, ok := s.userOf(w, r, token)
+		t, ok := s.userOf(w, r, token)
 		if !ok {
 			return
 		}
-		if !u.IsAdmin {
+		if !t.User.IsAdmin {
 			s.fail(w, r, http.StatusForbidden, "forbidden", "this needs an admin")
 			return
 		}
-		h(w, r.WithContext(context.WithValue(r.Context(), callerKey, caller{user: u})))
+		h(w, r.WithContext(context.WithValue(r.Context(), callerKey, caller{user: t.User, tokenID: t.TokenID})))
 	}
 }
 
 // userOf looks up the user of a token, or answers 401 and reports false.
-func (s *Server) userOf(w http.ResponseWriter, r *http.Request, token string) (model.User, bool) {
+func (s *Server) userOf(w http.ResponseWriter, r *http.Request, token string) (db.TokenUser, bool) {
 	if !auth.LooksLikeToken(token) {
 		s.fail(w, r, http.StatusUnauthorized, "unauthorized", "a token is needed")
-		return model.User{}, false
+		return db.TokenUser{}, false
 	}
 	t, err := s.db.UserByToken(r.Context(), auth.HashToken(token))
 	if errors.Is(err, db.ErrNotFound) {
 		s.fail(w, r, http.StatusUnauthorized, "unauthorized", "the token is unknown or signed out")
-		return model.User{}, false
+		return db.TokenUser{}, false
 	}
 	if err != nil {
 		s.internal(w, r, err)
-		return model.User{}, false
+		return db.TokenUser{}, false
 	}
 	s.touch(t)
-	return t.User, true
+	return t, true
 }
 
 // touch writes a token's last_used_at when it is ten minutes old or more,

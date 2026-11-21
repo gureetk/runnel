@@ -15,6 +15,7 @@ import (
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/model"
 	"github.com/gureetk/runnel/internal/probe"
+	"github.com/gureetk/runnel/internal/tasks"
 	tm "github.com/gureetk/runnel/internal/testmedia"
 )
 
@@ -44,7 +45,7 @@ func newEnv(t *testing.T, kind string) *env {
 		t.Fatal(err)
 	}
 	e := &env{t: t, db: d, root: root, lib: lib, now: time.Unix(1_800_000_000, 0)}
-	e.s = New(d, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e.s = New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	e.s.now = func() time.Time { return e.now }
 	return e
 }
@@ -104,6 +105,34 @@ func (e *env) fingerprintAll() {
 	}
 }
 
+// toProbe lists the files whose probe is missing or behind, by path.
+func (e *env) toProbe() []string {
+	e.t.Helper()
+	ids, err := e.db.Unprobed(context.Background(), probe.Version)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	byID := map[int64]string{}
+	for _, k := range e.known() {
+		byID[k.ID] = filepath.Join(e.root, filepath.FromSlash(k.RelPath))
+	}
+	var out []string
+	for _, id := range ids {
+		out = append(out, byID[id])
+	}
+	return out
+}
+
+// queue is a background queue that runs probes with prober.
+func (e *env) queue(prober *probe.Prober) *tasks.Queue {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	q := tasks.New(e.db, tasks.NewGate(), log)
+	p := NewProbes(e.db, prober, log)
+	p.now = func() time.Time { return e.now }
+	q.Register(p.Kind())
+	return q
+}
+
 func (e *env) available() bool {
 	e.t.Helper()
 	lib, err := e.db.Library(context.Background(), e.lib.ID)
@@ -157,8 +186,7 @@ func TestFirstScanAndRescan(t *testing.T) {
 	// Nothing changed: nothing found.
 	want(t, e.scan(), 0, 0, 0)
 	// Only videos are probed; extras are not.
-	targets, _ := e.db.FilesToProbe(context.Background(), probe.Version, 0, 100)
-	if len(targets) != 2 {
+	if targets := e.toProbe(); len(targets) != 2 {
 		t.Fatalf("%d files to probe, want the 2 videos", len(targets))
 	}
 }
@@ -178,8 +206,7 @@ func TestChangeAndMissing(t *testing.T) {
 	if after["A Film (2001)/A Film (2001).mkv"].ID != before["A Film (2001)/A Film (2001).mkv"].ID {
 		t.Fatal("a changed file got a new id")
 	}
-	targets, _ := e.db.FilesToProbe(context.Background(), probe.Version, 0, 100)
-	if len(targets) != 1 || targets[0].Path != a {
+	if targets := e.toProbe(); len(targets) != 1 || targets[0] != a {
 		t.Fatalf("to probe after the change: %+v", targets)
 	}
 
@@ -245,7 +272,7 @@ func TestRenameKeepsTheID(t *testing.T) {
 		t.Fatalf("a renamed file got a new id: %v, before %v", k, ids)
 	}
 	// Its probe stays: the content is the same.
-	if targets, _ := e.db.FilesToProbe(context.Background(), probe.Version, 0, 100); len(targets) != 0 {
+	if targets := e.toProbe(); len(targets) != 0 {
 		t.Fatalf("a moved file is to be probed again: %+v", targets)
 	}
 }
@@ -364,7 +391,7 @@ func TestScanStopsWithItsContext(t *testing.T) {
 func TestProbeAfterScan(t *testing.T) {
 	_, ffprobe := tm.Tools(t)
 	e := newEnv(t, "movies")
-	e.s.prober = probe.New(ffprobe, 2)
+	q := e.queue(probe.New(ffprobe, 2))
 	for _, rel := range []string{"A Film (2001)/A Film (2001).mkv", "B Film (2002)/B Film (2002).mp4"} {
 		p := filepath.Join(e.root, rel)
 		os.MkdirAll(filepath.Dir(p), 0o755)
@@ -375,7 +402,7 @@ func TestProbeAfterScan(t *testing.T) {
 	e.scan()
 	os.WriteFile(changed, []byte("changed after the scan"), 0o644)
 
-	if err := e.s.ProbePending(context.Background()); err != nil {
+	if err := q.Drain(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	k := e.known()
@@ -387,15 +414,18 @@ func TestProbeAfterScan(t *testing.T) {
 	if k["D Film (2004)/D Film (2004).mkv"].Fingerprint != "" {
 		t.Error("a file that changed after the scan was probed")
 	}
-	targets, _ := e.db.FilesToProbe(context.Background(), probe.Version, 0, 100)
-	if len(targets) != 1 || filepath.Base(targets[0].Path) != "D Film (2004).mkv" {
+	if targets := e.toProbe(); len(targets) != 1 || filepath.Base(targets[0]) != "D Film (2004).mkv" {
 		t.Fatalf("left to probe: %+v; want only the changed file", targets)
+	}
+	// Done tasks go once their kind and library have nothing left.
+	if ts, _ := e.db.Tasks(context.Background()); len(ts) != 0 {
+		t.Fatalf("tasks left after the pass: %+v", ts)
 	}
 
 	// The next scan sees the change, and the next pass probes it.
 	want(t, e.scan(), 0, 1, 0)
-	e.s.ProbePending(context.Background())
-	if targets, _ := e.db.FilesToProbe(context.Background(), probe.Version, 0, 100); len(targets) != 0 {
+	q.Drain(context.Background())
+	if targets := e.toProbe(); len(targets) != 0 {
 		t.Fatalf("left to probe: %+v", targets)
 	}
 }

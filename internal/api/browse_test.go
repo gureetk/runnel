@@ -21,6 +21,7 @@ import (
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
+	"github.com/gureetk/runnel/internal/tasks"
 	tm "github.com/gureetk/runnel/internal/testmedia"
 )
 
@@ -55,7 +56,10 @@ func newBrowse(t *testing.T) *browse {
 	mk(b.shows, "Harbor Lantern (2021)/Specials/Harbor Lantern - S00E01.mkv")
 
 	ctx := context.Background()
-	s := scan.New(ts.db, probe.New(ffprobe, 2), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := scan.New(ts.db, logger)
+	q := tasks.New(ts.db, tasks.NewGate(), logger)
+	q.Register(scan.NewProbes(ts.db, probe.New(ffprobe, 2), logger).Kind())
 	s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, ts.db, id, 1); return err }
 	for i, root := range []string{b.films, b.shows} {
 		lib, err := ts.db.CreateLibrary(ctx, []string{"Films", "Shows"}[i], []string{"movies", "shows"}[i], "default", []string{root}, 1)
@@ -66,7 +70,7 @@ func newBrowse(t *testing.T) *browse {
 			t.Fatal(err)
 		}
 	}
-	if err := s.ProbePending(ctx); err != nil {
+	if err := q.Drain(ctx); err != nil {
 		t.Fatal(err)
 	}
 	ts.addUser(t, "ada", "correct horse", true)
@@ -249,7 +253,7 @@ func TestRaw(t *testing.T) {
 		t.Fatalf("a file gone but not yet marked missing: %d", rec.Code)
 	}
 	ctx := context.Background()
-	s := scan.New(b.db, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := scan.New(b.db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	lib, _ := b.db.Library(ctx, 1)
 	s.ScanLibrary(ctx, lib)
 	os.Rename(path+".away", path) // back on disk, but still marked missing until the next scan

@@ -40,6 +40,9 @@ type Config struct {
 	Now func() time.Time
 	// Scans is the scanner, which admin calls ask to scan.
 	Scans Scans
+	// Gate is the playback gate, which a starting playback holds. Nil
+	// holds nothing.
+	Gate Gate
 }
 
 // Server is the API. Build one with New and serve its Handler.
@@ -50,8 +53,13 @@ type Server struct {
 	adminHash []byte
 	now       func() time.Time
 	scans     Scans
+	gate      Gate
 	mux       *http.ServeMux
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
+
+	warm          warmups
+	firstByteHold time.Duration // firstByteHold, shorter in tests
+	prepareHold   time.Duration // prepareHold, shorter in tests
 
 	logins *auth.Limiter // wrong sign-ins by address
 
@@ -65,17 +73,25 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 	if now == nil {
 		now = time.Now
 	}
+	var gate Gate = noGate{}
+	if c.Gate != nil {
+		gate = c.Gate
+	}
 	s := &Server{
-		db:        d,
-		log:       log,
-		info:      c.Info,
-		adminHash: c.AdminTokenHash,
-		now:       now,
-		scans:     c.Scans,
-		mux:       http.NewServeMux(),
-		deadline:  jsonDeadline,
-		logins:    auth.NewLimiter(loginTries, time.Minute, now),
-		touched:   map[int64]int64{},
+		db:            d,
+		log:           log,
+		info:          c.Info,
+		adminHash:     c.AdminTokenHash,
+		now:           now,
+		scans:         c.Scans,
+		gate:          gate,
+		mux:           http.NewServeMux(),
+		deadline:      jsonDeadline,
+		warm:          warmups{by: map[int64]*warmup{}},
+		firstByteHold: firstByteHold,
+		prepareHold:   prepareHold,
+		logins:        auth.NewLimiter(loginTries, time.Minute, now),
+		touched:       map[int64]int64{},
 	}
 	s.routes()
 	return s
@@ -88,7 +104,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/libraries", s.json(s.signedIn(s.handleLibraries)))
 	s.mux.Handle("GET "+Prefix+"/items", s.json(s.signedIn(s.handleItems)))
 	s.mux.Handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
+	s.mux.Handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
+	s.mux.Handle("POST "+Prefix+"/files/{id}/prepare", s.json(s.signedIn(s.handlePrepare)))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))

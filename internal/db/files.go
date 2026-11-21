@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -90,6 +91,11 @@ func (d *DB) ApplyScan(ctx context.Context, rootID int64, c ScanChanges, now, pu
 			if _, err := tx.tx.ExecContext(ctx,
 				`UPDATE files SET kind = ?, size = ?, mtime_ns = ?, fingerprint = NULL, probe_version = 0, missing_since = NULL WHERE id = ?`,
 				f.Kind, f.Size, f.MtimeNS, f.ID); err != nil {
+				return err
+			}
+			// A probe that failed was of the file as it was: the changed
+			// file is probed afresh.
+			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM tasks WHERE kind = 'probe' AND key = ? AND state = 'failed'`, FileKey(f.ID)); err != nil {
 				return err
 			}
 			touched = append(touched, f.ID)
@@ -202,42 +208,47 @@ func bumpItemsOfFiles(ctx context.Context, tx *Tx, fileIDs []int64) error {
 	return tx.stampItems(ctx, items)
 }
 
-// FilesToProbe lists up to limit files, after afterID in id order, whose
-// probe is missing or older than version. Missing files, files on a root
-// that is away, and extras are left out.
-func (d *DB) FilesToProbe(ctx context.Context, version int, afterID int64, limit int) ([]ProbeTarget, error) {
-	rows, err := d.r.QueryContext(ctx,
+// ProbeTargetOf is the file a probe task names, as the database has it
+// now, or ErrNotFound when there is nothing to probe: the file is gone,
+// missing, on a root that is away, an extra, or probed with this version
+// already.
+func (d *DB) ProbeTargetOf(ctx context.Context, fileID int64, version int) (ProbeTarget, error) {
+	var t ProbeTarget
+	var root, rel string
+	err := d.r.QueryRowContext(ctx,
 		`SELECT f.id, r.path, f.rel_path, f.size, f.mtime_ns
 		 FROM files f JOIN roots r ON r.id = f.root_id
-		 WHERE f.id > ? AND f.probe_version < ? AND f.missing_since IS NULL AND f.kind = 'video' AND r.available = 1
-		 ORDER BY f.id LIMIT ?`, afterID, version, limit)
+		 WHERE f.id = ? AND f.probe_version < ? AND f.missing_since IS NULL AND f.kind = 'video' AND r.available = 1`,
+		fileID, version).Scan(&t.FileID, &root, &rel, &t.Size, &t.MtimeNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProbeTarget{}, ErrNotFound
+	}
+	if err != nil {
+		return ProbeTarget{}, fmt.Errorf("db: file to probe: %w", err)
+	}
+	t.Path = filepath.Join(root, filepath.FromSlash(rel))
+	return t, nil
+}
+
+// Unprobed lists the ids of the video files that are there and whose
+// probe is missing or older than version.
+func (d *DB) Unprobed(ctx context.Context, version int) ([]int64, error) {
+	rows, err := d.r.QueryContext(ctx,
+		`SELECT f.id FROM files f JOIN roots r ON r.id = f.root_id
+		 WHERE f.probe_version < ? AND f.missing_since IS NULL AND f.kind = 'video' AND r.available = 1 ORDER BY f.id`, version)
 	if err != nil {
 		return nil, fmt.Errorf("db: files to probe: %w", err)
 	}
 	defer rows.Close()
-	var out []ProbeTarget
+	var out []int64
 	for rows.Next() {
-		var t ProbeTarget
-		var root, rel string
-		if err := rows.Scan(&t.FileID, &root, &rel, &t.Size, &t.MtimeNS); err != nil {
-			return nil, fmt.Errorf("db: files to probe: %w", err)
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		t.Path = filepath.Join(root, filepath.FromSlash(rel))
-		out = append(out, t)
+		out = append(out, id)
 	}
 	return out, rows.Err()
-}
-
-// CountToProbe is how many files FilesToProbe would list in all.
-func (d *DB) CountToProbe(ctx context.Context, version int) (int, error) {
-	var n int
-	err := d.r.QueryRowContext(ctx,
-		`SELECT count(*) FROM files f JOIN roots r ON r.id = f.root_id
-		 WHERE f.probe_version < ? AND f.missing_since IS NULL AND f.kind = 'video' AND r.available = 1`, version).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("db: count files to probe: %w", err)
-	}
-	return n, nil
 }
 
 // UnreadableFile is a file ffprobe could not read.

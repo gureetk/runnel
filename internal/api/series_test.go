@@ -112,7 +112,7 @@ func TestAvailableFollowsTheFiles(t *testing.T) {
 	b := newBrowse(t)
 	os.Remove(filepath.Join(b.shows, "Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E01.mkv"))
 	ctx := context.Background()
-	s := scan.New(b.db, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := scan.New(b.db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, b.db, id, 2); return err }
 	lib, _ := b.db.Library(ctx, 2)
 	if _, err := s.ScanLibrary(ctx, lib); err != nil {

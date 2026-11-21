@@ -24,6 +24,7 @@ import (
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
+	"github.com/gureetk/runnel/internal/tasks"
 )
 
 // shutdownHTTP is how long open requests get to finish after SIGTERM. What
@@ -81,9 +82,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
-	// The scanner, and the prober it hands new and changed files to. Without
-	// ffprobe the server still indexes, and probes nothing.
-	var prober *probe.Prober
+	// The background queue, paused while a playback starts, and the probes
+	// it runs. Without ffprobe the server still indexes, and probes
+	// nothing: the probes wait in the queue.
+	gate := tasks.NewGate()
+	queue := tasks.New(database, gate, log)
 	ffprobe := cfg.FFprobe
 	if ffprobe == "" {
 		ffprobe, _ = exec.LookPath("ffprobe")
@@ -91,9 +94,10 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	if ffprobe == "" {
 		log.Warn("ffprobe is not on PATH: nothing will be probed; set RUNNEL_FFPROBE to its path")
 	} else {
-		prober = probe.New(ffprobe, 2)
+		queue.Register(scan.NewProbes(database, probe.New(ffprobe, scan.ProbeWorkers), log).Kind())
 	}
-	scanner := scan.New(database, prober, log)
+	scanner := scan.New(database, log)
+	scanner.Queued = queue.Wake
 	scanner.Built = func(ctx context.Context, libraryID int64) error {
 		start := time.Now()
 		res, err := library.Build(ctx, database, libraryID, time.Now().UnixMilli())
@@ -111,11 +115,19 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		defer close(scanning)
 		scanner.Run(background)
 	}()
+	queueing := make(chan struct{})
+	go func() {
+		defer close(queueing)
+		if err := queue.Run(background); err != nil {
+			log.Error("background work stopped", "err", err)
+		}
+	}()
 
 	handler := api.New(database, log, api.Config{
 		Info:           api.Info{Name: name, Version: version, InstanceID: instanceID},
 		AdminTokenHash: adminHash,
 		Scans:          scanner,
+		Gate:           gate,
 	}).Handler()
 	srv := &http.Server{
 		Handler:           handler,
@@ -151,10 +163,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 	log.Debug("requests stopped", "ms", time.Since(start).Milliseconds())
-	// Stop the scanner and the prober: ffprobe children are killed, and a
+	// Stop the scanner and the queue: ffprobe children are killed, and a
 	// write in progress ends before the database closes.
 	stopBackground()
 	<-scanning
+	<-queueing
 	log.Debug("background work stopped", "ms", time.Since(start).Milliseconds())
 	if err := database.Close(); err != nil {
 		return err

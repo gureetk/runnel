@@ -26,12 +26,12 @@ import (
 const Version = 1
 
 // Timeout is the longest one probe may take. A disk that has to spin up
-// takes seconds; a probe that takes longer than this is stopped and tried
-// again on a later pass, and is not recorded as an error.
+// takes seconds; a probe that takes longer than this is stopped, and the
+// queue tries it again later, as it does a failed task.
 const Timeout = time.Minute
 
 // ErrNoFFprobe is returned when ffprobe cannot be run at all. Nothing can
-// be probed until that is fixed, so the caller stops.
+// be probed until that is fixed, so the caller waits before it tries again.
 var ErrNoFFprobe = errors.New("probe: ffprobe cannot be run")
 
 // UnreadableError says that ffprobe ran and could not read the file. The

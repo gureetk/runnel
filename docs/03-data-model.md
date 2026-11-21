@@ -459,7 +459,9 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 - A task carries the library it works for, where it has one. Removing a library removes its queued work.
 - A `done` row stays until no row of its kind and library is queued or running. Then all of them are deleted together. Progress is counted from that: the `done` rows out of all rows.
-- A `failed` row stays until it is retried or cancelled.
+- A `failed` row stays until it is retried or cancelled. A failed probe of a file that has changed since goes when the scan sees the change, and the file is probed afresh.
+- A row left `running` by a server that stopped is queued again at the next start, and that run does not count in `attempts`.
+- A probe queued again while it runs, for a file that changed meanwhile, stays queued when the run ends, and runs again.
 - `play_log` keeps its newest 1,000 rows (P7). Inserting a row deletes what is older.
 
 **Search index**

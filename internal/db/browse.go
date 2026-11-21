@@ -292,14 +292,52 @@ type FileDetail struct {
 // left out: it is not offered for playback
 // (docs/06-library-and-metadata.md, section 3).
 func (d *DB) ItemFiles(ctx context.Context, itemID int64) ([]FileDetail, error) {
-	rows, err := d.r.QueryContext(ctx,
-		`SELECT f.id, l.label, l.part, f.missing_since IS NULL AND r.available = 1, f.container, f.size,
-		   f.duration_ms, f.bit_rate, f.attachments_bytes
+	out, err := d.fileDetails(ctx,
+		`SELECT `+fileColumns+`
 		 FROM item_files l JOIN files f ON f.id = l.file_id JOIN roots r ON r.id = f.root_id
 		 WHERE l.item_id = ? AND f.probe_version > 0 AND f.probe_error IS NULL
 		 ORDER BY l.part, f.id`, itemID)
 	if err != nil {
-		return nil, fmt.Errorf("db: read item files: %w", err)
+		return nil, err
+	}
+	slices.SortStableFunc(out, func(a, b FileDetail) int {
+		if c := compareLabels(a.Label, b.Label); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Part, b.Part)
+	})
+	return out, nil
+}
+
+// FileDetailOf is one file as the detail shows it, with the label and
+// part it has in its item, or ErrNotFound for a file that does not exist
+// or is not offered for playback: an extra, a file not probed yet, or one
+// that ffprobe could not read.
+func (d *DB) FileDetailOf(ctx context.Context, fileID int64) (FileDetail, error) {
+	out, err := d.fileDetails(ctx,
+		`SELECT `+fileColumns+`
+		 FROM files f JOIN roots r ON r.id = f.root_id LEFT JOIN item_files l ON l.file_id = f.id
+		 WHERE f.id = ? AND f.kind = 'video' AND f.probe_version > 0 AND f.probe_error IS NULL
+		 LIMIT 1`, fileID)
+	if err != nil {
+		return FileDetail{}, err
+	}
+	if len(out) == 0 {
+		return FileDetail{}, ErrNotFound
+	}
+	return out[0], nil
+}
+
+// fileColumns reads a FileDetail, from files f, roots r and item_files l.
+const fileColumns = `f.id, l.label, COALESCE(l.part, 0), f.missing_since IS NULL AND r.available = 1, f.container, f.size,
+  f.duration_ms, f.bit_rate, f.attachments_bytes`
+
+// fileDetails runs a query of fileColumns and reads each file's streams
+// and chapters.
+func (d *DB) fileDetails(ctx context.Context, query string, args ...any) ([]FileDetail, error) {
+	rows, err := d.r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("db: read files: %w", err)
 	}
 	var out []FileDetail
 	for rows.Next() {
@@ -317,12 +355,6 @@ func (d *DB) ItemFiles(ctx context.Context, itemID int64) ([]FileDetail, error) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	slices.SortStableFunc(out, func(a, b FileDetail) int {
-		if c := compareLabels(a.Label, b.Label); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Part, b.Part)
-	})
 	for i := range out {
 		if out[i].Streams, err = d.streams(ctx, out[i].ID); err != nil {
 			return nil, err
