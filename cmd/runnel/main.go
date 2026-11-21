@@ -1,24 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Command runnel is the Runnel media server.
+// Command runnel is the Runnel media server, and the tool that manages it.
 //
-// Nothing is implemented yet. The stages in docs/01-roadmap.md say what is
-// built, and in which order.
+// What it does so far is the work of stage 1 in docs/01-roadmap.md, as far
+// as it has been built.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 )
 
 // version is set at build time with -ldflags "-X main.version=<tag>".
 var version = "dev"
 
+const usage = `Usage: runnel <command>
+
+Commands:
+  serve     Run the server.
+  version   Print the version.
+
+Settings are environment variables that start with RUNNEL_. They are listed
+in docs/02-architecture.md, section 6.
+`
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(version)
-		return
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run runs one command and returns the process's exit status.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
-	fmt.Fprintln(os.Stderr, "runnel: nothing is implemented yet. See docs/01-roadmap.md.")
-	os.Exit(2)
+	switch args[0] {
+	case "serve":
+		return serve(args[1:], stderr)
+	case "version":
+		fmt.Fprintln(stdout, version)
+		return 0
+	case "help", "-h", "-help", "--help":
+		fmt.Fprint(stdout, usage)
+		return 0
+	}
+	fmt.Fprintf(stderr, "runnel: unknown command %q\n\n%s", args[0], usage)
+	return 2
 }

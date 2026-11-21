@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/gureetk/runnel/internal/api"
+	"github.com/gureetk/runnel/internal/config"
+	"github.com/gureetk/runnel/internal/db"
+)
+
+// shutdownHTTP is how long open requests get to finish after SIGTERM. What
+// is still open then, such as a player's stream, is cut, so that the whole
+// shutdown takes under 5 seconds (docs/02-architecture.md, section 5).
+const shutdownHTTP = 3 * time.Second
+
+func serve(args []string, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "runnel serve takes no arguments: its settings are RUNNEL_ environment variables")
+		return 2
+	}
+	cfg, err := config.FromEnv(os.Getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "runnel: %v\n", err)
+		return 1
+	}
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	if err := runServer(ctx, cfg, log); err != nil {
+		log.Error("stopped", "err", err)
+		return 1
+	}
+	return 0
+}
+
+// runServer runs the server until ctx ends, then shuts it down in order:
+// stop taking requests, cut what is still open, close the database once
+// its writer is done.
+func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return fmt.Errorf("data directory: %w", err)
+	}
+	database, err := db.Open(ctx, filepath.Join(cfg.DataDir, "runnel.db"))
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	instanceID, err := database.InstanceID(ctx)
+	if err != nil {
+		return err
+	}
+	name := cfg.Name
+	if name == "" {
+		if name, err = os.Hostname(); err != nil || name == "" {
+			name = "runnel"
+		}
+	}
+
+	srv := &http.Server{
+		Handler:           api.New(database, log, api.Info{Name: name, Version: version, InstanceID: instanceID}).Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// No WriteTimeout: a player keeps a file's stream open for as long
+		// as it plays. JSON routes set their own deadline.
+		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
+	ln, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		return err
+	}
+	log.Info("listening", "addr", ln.Addr().String(), "version", version,
+		"data", cfg.DataDir, "schema", db.SchemaVersion())
+
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+
+	log.Info("stopping")
+	start := time.Now()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTP)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		srv.Close()
+	}
+	if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	log.Debug("requests stopped", "ms", time.Since(start).Milliseconds())
+	if err := database.Close(); err != nil {
+		return err
+	}
+	log.Info("stopped", "ms", time.Since(start).Milliseconds())
+	return nil
+}
