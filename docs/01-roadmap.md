@@ -4,7 +4,7 @@ The stages in which the server and its clients get built, what each one must pro
 
 Nothing here is to be started until it is asked for.
 
-**Revised, 20 November 2026,** after the design review (`11-design-review.md`, D29 to D37): the designs exist, their asks are in `04-api.md` and `03-data-model.md`, and the stages below say where each new piece lands. Revised again the same day after the research that closed the planning: the licence (D38), how a browser is fed (D39, D40), what the clients are built with (D41 to D44), and discovery (P6).
+**Revised, 20 November 2026,** after the design review (`11-design-review.md`, D29 to D37): the designs exist, their asks are in `04-api.md` and `03-data-model.md`, and the stages below say where each new piece lands. Revised again the same day after the research that closed the planning: the licence (D38), how a browser is fed (D39, D40), what the clients are built with (D41 to D44), and discovery (P6). Revised on 21 November 2026: installing and updating join stage 5 (D46, D47).
 
 ## 1. Order
 
@@ -162,6 +162,11 @@ Setup, administration and browsing, in any browser, served by the server itself.
 
 The screens are those of `design/web.md`. It is built with Svelte, TypeScript and Vite, and embedded in the binary (D41). It must work on a plain-HTTP address (D45). Do first: a spike that measures the first load against the brief's aim.
 
+Installing and updating come with it:
+
+- **The install script** (D46): `deploy/install.sh`, attached to each release. It installs, updates and removes the server as a systemd service.
+- **The update check** (D47): once a day the server asks GitHub whether a newer release exists, and the web interface tells an admin, with `GET /admin/update` (`04-api.md`, section 8.8). It is on by default, and `RUNNEL_UPDATE_CHECK=off` stops it. The server never replaces its own binary: the update is the install script.
+
 **Exit:**
 
 1. A fresh install can be set up from the browser alone, by someone who holds the setup code and nothing else: the first person, a library chosen in the folder browser, the metadata key, a check of what the server can encode.
@@ -169,6 +174,7 @@ The screens are those of `design/web.md`. It is built with Svelte, TypeScript an
 3. The library can be browsed and searched, items marked played with Undo, and films and series put on My list.
 4. It works at phone width and with a keyboard alone.
 5. The server's resident memory is not measurably higher for serving it.
+6. A release installed with `deploy/install.sh` is updated to the next one by the same command, keeping its data, after the web interface has shown an admin that the newer release exists.
 
 ## 8. Stage 6: the Android TV app
 

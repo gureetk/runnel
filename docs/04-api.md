@@ -981,6 +981,23 @@ A row is a snapshot: it keeps the device's name and the title as they were, also
 
 `GET /healthz`, outside `/api/v1`, answers `200` with no authentication.
 
+### 8.8 A newer release
+
+From stage 5 (D47). `GET /admin/update`:
+
+```json
+{"check": true, "current": "v0.5.0", "newest": "v0.6.0", "newer": true,
+ "url": "https://github.com/gureetk/runnel/releases/tag/v0.6.0", "checked_at": 1795200000000, "error": null}
+```
+
+- The server asks GitHub for the list of releases a few minutes after it starts, then once a day. The request sends nothing about the server or its library, not even its version.
+- `check` is false when the environment sets `RUNNEL_UPDATE_CHECK=off` (`02-architecture.md`, section 6). Then nothing is asked, and `newest`, `newer`, `url`, `checked_at` and `error` are null.
+- On a pre-release, `newest` counts pre-releases too. On a release, it counts releases only.
+- `newer` is null for a build that is not a release, such as one built from source, whose version cannot be ordered against the releases.
+- `error` is the message of the last check that failed. The last good answer is kept.
+- The update itself is `deploy/install.sh` (D46). The server never replaces its own binary.
+- It is not in `GET /server` (3.1), which needs no sign-in: how far behind a server is, is for its admins.
+
 ## 9. Status and error codes
 
 | HTTP | `code` | When |
