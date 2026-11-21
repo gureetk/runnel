@@ -40,7 +40,7 @@ func newEnv(t *testing.T, kind string) *env {
 		t.Fatal(err)
 	}
 	e := &env{t: t, db: d, root: root, lib: lib}
-	e.s = scan.New(d, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e.s = scan.New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	e.s.Built = func(ctx context.Context, id int64) error { _, err := Build(ctx, d, id, 1); return err }
 	return e
 }

@@ -584,7 +584,7 @@ The file as it is on disk.
 
 `GET /files/{id}/external/{external_id}` returns a subtitle or audio file that sits next to the video, the same way.
 
-`GET /files/{id}` returns the one `files[]` object, for a client that wants to see whether a sidecar has finished.
+`GET /files/{id}` returns the one `files[]` object, for a client that wants to see whether a sidecar has finished. A file that is not offered for playback is `404`: an extra, a file not probed yet, or one that ffprobe could not read.
 
 ### 7.3 `GET /files/{id}/transcode.mkv`
 
@@ -632,7 +632,7 @@ For a file that will be played as it is:
 {"mode": "direct", "start_ms": 512000}
 ```
 
-The server reads the file's header and index, which also wakes a sleeping disk. `204`.
+The server answers `204` at once, and reads the file's header and index in the background, which also wakes a sleeping disk (`05-playback.md`, section 3). Background work waits until the file's playback starts, or for 30 seconds when none does (`02-architecture.md`, section 5). `404` for a file that does not exist, and `503 unavailable` for one that is missing or whose disk is away.
 
 For a file that will be transcoded, the body carries the transcode parameters:
 
@@ -640,7 +640,7 @@ For a file that will be transcoded, the body carries the transcode parameters:
 {"mode": "transcode", "v": "hevc", "depth": 10, "start_ms": 512000, "seek": "key", "audio": "all", "subs": "all", "fonts": 1}
 ```
 
-The server starts ffmpeg now and holds its first output in memory. `200`:
+The server starts ffmpeg now and holds its first output in memory. A server that cannot encode what is asked answers `409 unsupported`, as one that encodes nothing does to any transcode. `200`:
 
 ```json
 {"ticket": "p_7c1e4a90b2d3", "expires_in": 30, "sidecar": {"ready": false}}

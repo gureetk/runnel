@@ -25,30 +25,29 @@ import (
 const missingFor = 30 * 24 * time.Hour
 
 // Scanner is the one scanner of the server. It scans one root at a time,
-// writes what it found, and then has the files that need it probed.
+// writes what it found, and queues probes for the files that need one.
 type Scanner struct {
-	db     *db.DB
-	prober *probe.Prober // nil: nothing is probed
-	log    *slog.Logger
-	now    func() time.Time
+	db  *db.DB
+	log *slog.Logger
+	now func() time.Time
 
 	// Built, when set, is called after a library has been scanned. It
 	// builds the library's items.
 	Built func(ctx context.Context, libraryID int64) error
+	// Queued, when set, is called after probes were queued.
+	Queued func()
 
 	mu      sync.Mutex
 	pending map[int64]bool // library ids to scan; 0 means all
 	wake    chan struct{}
-	probes  chan struct{}
 }
 
-// New makes the scanner. prober may be nil, when ffprobe cannot be found.
-func New(d *db.DB, prober *probe.Prober, log *slog.Logger) *Scanner {
+// New makes the scanner.
+func New(d *db.DB, log *slog.Logger) *Scanner {
 	return &Scanner{
-		db: d, prober: prober, log: log, now: time.Now,
+		db: d, log: log, now: time.Now,
 		pending: map[int64]bool{},
 		wake:    make(chan struct{}, 1),
-		probes:  make(chan struct{}, 1),
 	}
 }
 
@@ -65,17 +64,10 @@ func (s *Scanner) Request(libraryID int64) {
 	}
 }
 
-// Run scans when asked, and probes in the background, until ctx ends. At
-// start it probes what an earlier run left unprobed.
+// Run scans when asked, until ctx ends. At start it queues the probes
+// that an earlier run left undone, or that a newer probe version needs.
 func (s *Scanner) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.probeLoop(ctx)
-	}()
-	defer wg.Wait()
-
+	s.queueProbes(ctx, 0)
 	for {
 		select {
 		case <-ctx.Done():
@@ -101,15 +93,22 @@ func (s *Scanner) Run(ctx context.Context) {
 				}
 			}
 		}
-		s.wakeProbes()
 		debug.FreeOSMemory()
 	}
 }
 
-func (s *Scanner) wakeProbes() {
-	select {
-	case s.probes <- struct{}{}:
-	default:
+// queueProbes queues a probe for the files of a root, or of every root
+// with 0, that need one, and says so.
+func (s *Scanner) queueProbes(ctx context.Context, rootID int64) {
+	n, err := s.db.QueueProbes(ctx, rootID, probe.Version, s.now().UnixMilli())
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("scan: cannot queue probes", "err", err)
+		}
+		return
+	}
+	if n > 0 && s.Queued != nil {
+		s.Queued()
 	}
 }
 
@@ -192,6 +191,7 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root) (model.ScanResu
 	if err := s.db.ApplyScan(ctx, root.ID, changes, now.UnixMilli(), now.Add(-missingFor).UnixMilli()); err != nil {
 		return model.ScanResult{}, err
 	}
+	s.queueProbes(ctx, root.ID)
 	s.log.Info("scan done", "root", root.Path, "ms", changes.Result.MS,
 		"files", len(w.seen)+len(w.new), "added", len(changes.New), "back", len(changes.Back),
 		"changed", len(changes.Changed), "moved", len(changes.Moved), "missing", len(changes.Missing))

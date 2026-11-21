@@ -109,6 +109,7 @@ Build:
 - A person's own account: devices, password, track defaults.
 - Watching for changes with inotify, the nightly walk, and the walk at start.
 - The background queue, with the playback gate. Probes move into it.
+- `POST /files/{id}/prepare` for direct play, which holds the gate, and `GET /files/{id}`.
 - Subtitle and audio files that sit next to a video (`06-library-and-metadata.md`, section 4.7), and `GET /files/{id}/external/{external_id}`.
 - The Jellyfin import, dry run first.
 - The admin endpoints for libraries, the folder browser, scans with their results, background work with progress, people and devices.
@@ -116,6 +117,7 @@ Build:
 
 Where one call carries data that a later stage brings, stage 2 builds the part it has data for and leaves the rest absent, or refuses it plainly:
 
+- `POST /files/{id}/prepare` for a transcode is answered `409 unsupported` until stage 3: the server encodes nothing, and `GET /server` lists nothing to transcode, so a client does not ask.
 - An item's detail (`GET /items/{id}`) has no metadata, `credits` or `collection` until stage 4. Its `match.state` is `unmatched` and its `external_ids` are empty. A series' `numbering` comes from its files: setting it by hand is in stage 4's match dialog, and so is mapping a running count to the provider's seasons, so until then a running count's episodes carry provisional season and episode numbers (`06-library-and-metadata.md`, section 5).
 
 **Exit:**

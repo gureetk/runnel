@@ -44,7 +44,7 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		API: apiBody{
 			Version: 1,
 			// A feature is listed once this server implements it.
-			Features: []string{},
+			Features: []string{"prepare"},
 		},
 		// This server encodes nothing yet, so it lists nothing a client
 		// could ask for.

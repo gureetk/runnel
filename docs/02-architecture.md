@@ -105,6 +105,9 @@ Rules for the code:
 
 **The playback gate.** A counter of sessions that are starting. While it is above zero, task workers finish what they hold and take nothing new. A session counts as starting from its request, or its `prepare`, until 10 seconds after its first byte.
 
+- For direct play the request is `GET /files/{id}/raw`. Each one holds the gate from its arrival until 10 seconds after its first byte. One that is refused, or sends no body, lets it go when it ends.
+- A `prepare` holds the gate from its arrival until the raw request for its file comes from the same token, which then holds it itself; until the token's next `prepare` replaces it; or for 30 seconds, when no playback follows.
+
 **Shutdown.** On SIGTERM or an interrupt: stop accepting requests, kill every child, let the writer finish its transaction, close the database. Within 5 seconds. A request still open after 3 seconds, such as a player's stream, is cut.
 
 ## 6. Configuration

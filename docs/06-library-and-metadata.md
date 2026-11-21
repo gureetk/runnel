@@ -36,7 +36,7 @@ For each root of a library:
    - A folder below the root that cannot be read is skipped, and nothing in it is marked missing. The scan's result says how many could not be read.
 4. **Moves.** A new path whose fingerprint equals that of a file of the same root that is marked missing, or that was not seen in this walk, is that file at a new path: the row keeps its id and its probe, and takes the new path. Only new paths with the size of such a file are read for their fingerprint, so a scan reads no file's content otherwise. A file not probed yet has no fingerprint, so a rename before its first probe is a new file and a missing one. A move across roots is a new file and a missing one too.
 5. **What was not seen**, and did not move, gets `missing_since`. A file missing for more than 30 days is deleted (`03-data-model.md`, section 4).
-6. **Write** all of it in one transaction, then queue probes for new and changed files.
+6. **Write** all of it in one transaction, then queue a probe for each of the root's files whose probe is missing or older than the code's: the new and changed ones, and any still waiting. The server does the same for every root at start.
 7. **Record what the scan found** on the root: files added (new, and back from missing), changed (including moved) and removed (newly missing), how long it took, or the error that stopped it. The administration page shows it (`04-api.md`, section 8.2), and the server logs it.
 
 Measured with a Go prototype on a synthetic tree of 14,720 video files in 3,818 folders:
@@ -94,7 +94,8 @@ What is kept:
 
 - The raw JSON is not kept. `probe_version` in the code is raised when this mapping changes, and every file is probed again. It is 1.
 - A file ffprobe cannot read keeps `probe_error`, ffprobe's reason without the file's path, and is not offered for playback. It is retried when its size or time changes.
-- A probe that takes longer than a minute is stopped, and so is one whose server stops. Neither is an error: the file is probed again on a later pass.
+- A probe that takes longer than a minute is stopped, and tried again later as a failed task is (section 9). One whose server stops is queued again at the next start, and that run does not count.
+- When ffprobe cannot be run at all, probing waits a minute and tries again, and the server logs it once. Those runs do not count either.
 - A result is stored only while the file's size and time in the database are still those that were probed. A file that changed during its probe is probed again.
 - The fingerprint is computed in the same task: the size, and a hash of the first and last 64 KiB.
 
@@ -341,7 +342,7 @@ One queue in the `tasks` table, so work survives a restart.
 
 | Kind | Runs | At once |
 |---|---|---|
-| `probe` | after a scan, per new or changed file | 2 |
+| `probe` | after a scan, per new or changed file, and at start for any file still to probe | 2 |
 | `match` | after items are built, per unmatched film or series | 2, sharing the provider limit |
 | `fetch` | after a match, and on refresh | 2, sharing the provider limit |
 | `image` | after a fetch | 2 |
@@ -349,8 +350,9 @@ One queue in the `tasks` table, so work survives a restart.
 | `import` | on request | 1 |
 | `extract` | when a browser first asks for a file's subtitles or fonts, or a `prepare` says so | 1 |
 
-- A failed task is retried with a growing delay, five times, then left as failed for `GET /admin/tasks`.
-- Everything here pauses while a playback session is starting.
+- A failed task is retried five times, after 1, 2, 4, 8 and 16 minutes, then left as failed for `GET /admin/tasks`. A probe of a file that ffprobe cannot read has not failed: it is done, and the file keeps the reason (section 3).
+- A run that the server's stop cut short is queued again at the next start, and is not counted. Neither is a run that could not work for a reason that is not the task's own, such as an ffprobe that cannot be run: its whole kind waits, and then tries again.
+- Everything here pauses while a playback session is starting (the playback gate, `02-architecture.md`, section 5).
 - A provider that answers 429 pauses its queue for the time it asks.
 - A task carries the library it works for. Finished tasks stay until their kind and library have nothing queued or running, and are then deleted together. `GET /admin/tasks` counts progress from that: done out of all (`03-data-model.md`, section 4).
 - An admin can cancel what is queued and retry what failed. Cancelled work is found again by the next scan or refresh.
