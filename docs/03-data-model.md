@@ -399,6 +399,11 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A root going away or coming back bumps its library's `updated_seq`, and nothing else. That one record is how a client knows that everything under the folder is unavailable (`04-api.md`, sections 2.1 and 5).
 - A file that is gone from a healthy root gets `missing_since`. It stays, shown as unavailable, for 30 days. After that the file row goes, and any item left with no file goes with it.
 
+**External tracks**
+
+- A row of `external_tracks` is a subtitle or audio file beside a video, named for it (`06-library-and-metadata.md`, section 4.7). Its `id` is the `external_id` that clients fetch it by, so a row that stays keeps it.
+- A scan of a folder replaces the rows of the videos in it with what it found there, writing only what differs. A row that came, went or changed bumps the `updated_seq` of its video's items.
+
 **Items**
 
 - Movies and series are keyed by `(root_id, path_key)`: the folder they were built from, or the lone file for a film that has no folder.

@@ -18,6 +18,7 @@ import (
 
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/model"
+	"github.com/gureetk/runnel/internal/parse"
 	"github.com/gureetk/runnel/internal/probe"
 )
 
@@ -350,6 +351,10 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root, folders []strin
 	if err := s.db.ApplyScan(ctx, root.ID, changes, now.UnixMilli(), now.Add(-missingFor).UnixMilli()); err != nil {
 		return model.ScanResult{}, err
 	}
+	inScope := func(rel string) bool { return w.expected(rel) && !underFailed(rel, w.failed) }
+	if err := s.db.SyncTracks(ctx, root.ID, inScope, w.byVideo()); err != nil {
+		return model.ScanResult{}, err
+	}
 	s.queueProbes(ctx, root.ID)
 	attrs := []any{"root", root.Path, "ms", changes.Result.MS,
 		"files", len(w.seen) + len(w.new), "added", len(changes.New), "back", len(changes.Back),
@@ -398,12 +403,18 @@ type walkResult struct {
 	// to scan each again.
 	young      map[string]int64
 	youngFiles int
-	err        error
+	// videos and tracks are, for each folder, the videos in it and the
+	// files beside them that are their tracks (docs/06-library-and-metadata.md,
+	// section 4.7).
+	videos map[string][]string // folder -> paths of its videos
+	tracks map[string][]db.ExternalTrack
+	err    error
 }
 
 // walkAll walks the whole root, or each of the folders.
 func (s *Scanner) walkAll(ctx context.Context, rootPath string, folders []string, known map[string]db.KnownFile, now time.Time) walkResult {
-	w := walkResult{seen: map[string]bool{}, young: map[string]int64{}, under: folders}
+	w := walkResult{seen: map[string]bool{}, young: map[string]int64{}, under: folders,
+		videos: map[string][]string{}, tracks: map[string][]db.ExternalTrack{}}
 	if folders == nil {
 		w.err = s.walk(ctx, &w, rootPath, "", known, now)
 		return w
@@ -420,6 +431,35 @@ func (s *Scanner) walkAll(ctx context.Context, rootPath string, folders []string
 		}
 	}
 	return w
+}
+
+// byVideo gives each video the track files beside it whose names are its
+// own. Two videos with one base name, such as one name with two
+// extensions, both have the track.
+func (w *walkResult) byVideo() map[string][]db.ExternalTrack {
+	out := map[string][]db.ExternalTrack{}
+	for dir, tracks := range w.tracks {
+		bases := make([]string, 0, len(w.videos[dir]))
+		for _, v := range w.videos[dir] {
+			bases = append(bases, parse.Base(v))
+		}
+		for _, t := range tracks {
+			name := path.Base(t.RelPath)
+			owner := parse.TrackOwner(name, bases)
+			if owner == "" {
+				continue
+			}
+			p, _ := parse.ParseTrack(name, owner)
+			t.Kind, t.Codec, t.Lang, t.Title = p.Kind, p.Codec, p.Lang, p.Title
+			t.Default, t.Forced, t.HearingImpaired = p.Default, p.Forced, p.HearingImpaired
+			for _, v := range w.videos[dir] {
+				if parse.Base(v) == owner {
+					out[v] = append(out[v], t)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // expected reports whether a known file is under what was walked.
@@ -471,9 +511,22 @@ func (s *Scanner) walk(ctx context.Context, w *walkResult, rootPath, from string
 			}
 			return nil
 		}
-		if ignoredFile(d.Name()) || !isVideo(d.Name()) {
+		if ignoredFile(d.Name()) {
 			return nil
 		}
+		dir := path.Dir(rel)
+		if dir == "." {
+			dir = ""
+		}
+		if !isVideo(d.Name()) {
+			if parse.TrackKind(d.Name()) != "" {
+				if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() {
+					w.tracks[dir] = append(w.tracks[dir], db.ExternalTrack{RelPath: rel, Size: info.Size(), MtimeNS: info.ModTime().UnixNano()})
+				}
+			}
+			return nil
+		}
+		w.videos[dir] = append(w.videos[dir], rel)
 		info, err := d.Info()
 		if err == nil && d.Type()&fs.ModeSymlink != 0 {
 			info, err = os.Stat(p) // a link to a file counts as the file
@@ -497,10 +550,6 @@ func (s *Scanner) walk(ctx context.Context, w *walkResult, rootPath, from string
 		}
 		changed := ok && (k.Size != f.Size || k.MtimeNS != f.MtimeNS || k.Kind != f.Kind)
 		if (!ok || changed) && young(info.ModTime(), now) {
-			dir := path.Dir(rel)
-			if dir == "." {
-				dir = ""
-			}
 			w.young[dir] = max(w.young[dir], info.ModTime().Add(youngFor).UnixMilli()+500)
 			w.youngFiles++
 			return nil

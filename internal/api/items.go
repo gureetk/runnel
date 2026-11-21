@@ -324,20 +324,25 @@ type videoBody struct {
 	HDR      *string `json:"hdr"`
 }
 
+// audioBody and subtitleBody are a file's tracks: its own streams, by
+// idx, and the files beside it, by external_id, with idx null. Such a file
+// is not probed: its codec is what its extension says, or null, and its
+// channels are not known.
 type audioBody struct {
-	Idx      int     `json:"idx"`
-	Codec    string  `json:"codec"`
-	Channels int     `json:"channels"`
-	Layout   *string `json:"layout"`
-	Lang     *string `json:"lang"`
-	Title    *string `json:"title"`
-	Default  bool    `json:"default"`
-	Forced   bool    `json:"forced"`
+	Idx        *int    `json:"idx"`
+	Codec      *string `json:"codec"`
+	Channels   *int    `json:"channels"`
+	Layout     *string `json:"layout"`
+	Lang       *string `json:"lang"`
+	Title      *string `json:"title"`
+	Default    bool    `json:"default"`
+	Forced     bool    `json:"forced"`
+	ExternalID *int64  `json:"external_id"`
 }
 
 type subtitleBody struct {
-	Idx             int     `json:"idx"`
-	Codec           string  `json:"codec"`
+	Idx             *int    `json:"idx"`
+	Codec           *string `json:"codec"`
 	Lang            *string `json:"lang"`
 	Title           *string `json:"title"`
 	Default         bool    `json:"default"`
@@ -406,10 +411,10 @@ func fileJSON(f db.FileDetail) fileBody {
 			}
 			b.Video = &v
 		case "audio":
-			b.Audio = append(b.Audio, audioBody{Idx: s.Index, Codec: s.Codec, Channels: s.Channels, Layout: strOrNil(s.ChannelLayout),
+			b.Audio = append(b.Audio, audioBody{Idx: &s.Index, Codec: &s.Codec, Channels: &s.Channels, Layout: strOrNil(s.ChannelLayout),
 				Lang: strOrNil(s.Lang), Title: strOrNil(s.Title), Default: s.Default, Forced: s.Forced})
 		case "subtitle":
-			b.Subtitles = append(b.Subtitles, subtitleBody{Idx: s.Index, Codec: s.Codec, Lang: strOrNil(s.Lang), Title: strOrNil(s.Title),
+			b.Subtitles = append(b.Subtitles, subtitleBody{Idx: &s.Index, Codec: &s.Codec, Lang: strOrNil(s.Lang), Title: strOrNil(s.Title),
 				Default: s.Default, Forced: s.Forced, HearingImpaired: s.HearingImpaired})
 		case "attachment":
 			b.Attachments = append(b.Attachments, attachmentBody{Idx: s.Index, Filename: strOrNil(s.Filename), MIME: strOrNil(s.MIME), Size: s.Size})
@@ -417,6 +422,16 @@ func fileJSON(f db.FileDetail) fileBody {
 	}
 	for _, c := range f.Chapters {
 		b.Chapters = append(b.Chapters, chapterBody{StartMS: c.StartMS, Title: strOrNil(c.Title)})
+	}
+	for _, t := range f.Tracks {
+		id := t.ID
+		if t.Kind == "audio" {
+			b.Audio = append(b.Audio, audioBody{Codec: strOrNil(t.Codec), Lang: strOrNil(t.Lang), Title: strOrNil(t.Title),
+				Default: t.Default, Forced: t.Forced, ExternalID: &id})
+		} else {
+			b.Subtitles = append(b.Subtitles, subtitleBody{Codec: strOrNil(t.Codec), Lang: strOrNil(t.Lang), Title: strOrNil(t.Title),
+				Default: t.Default, Forced: t.Forced, HearingImpaired: t.HearingImpaired, ExternalID: &id})
+		}
 	}
 	return b
 }

@@ -192,7 +192,7 @@ Everything on the card, and what a detail screen and the player need besides: th
 | `files[].video.fps` | Frames per second as a number. |
 | `mp4_codecs` | On the video and on each audio stream: the stream's name as a browser asks about it, for the `codecs` part of `video/mp4; codecs="…"`. Null when the codec cannot be carried in MP4. For a page (7.9). |
 | `files[].attachments` | Fonts and other files attached to the video. A page fetches the fonts it needs for styled subtitles (7.9). |
-| `files[].subtitles[].external_id` | Set when the track is a file next to the video. It is fetched from `/files/{id}/external/{external_id}`. |
+| `files[].subtitles[].external_id`, `files[].audio[].external_id` | Set when the track is a file next to the video. It is fetched from `/files/{id}/external/{external_id}`. Such a track has `idx` null. It is not probed: its `codec` comes from its extension, and is null where that does not say, and an audio file's `channels` and `layout` are null (`06-library-and-metadata.md`, section 4.7). The file's own streams come first. |
 | `files[].sidecar` | Whether the audio-and-subtitles file exists yet (section 7.4). |
 | `prev`, `next` | Episodes only, in season and episode order, specials last. |
 | `match.state` | `unmatched`, `matched`, `manual`, `review`, or `ignored` for an item left unmatched on purpose (8.4). |
@@ -582,7 +582,7 @@ The file as it is on disk.
 - `404` if the file is unknown. `503` with code `unavailable` while the file is missing or its disk is away.
 - The server copies from disk to socket in the kernel. It holds no buffer of its own.
 
-`GET /files/{id}/external/{external_id}` returns a subtitle or audio file that sits next to the video, the same way.
+`GET /files/{id}/external/{external_id}` returns a subtitle or audio file that sits next to the video, the same way: by range, without an `ETag`, as `application/x-subrip`, `text/x-ssa`, `text/vtt`, `audio/x-matroska`, `audio/ac3`, `audio/flac`, `audio/ogg` for Opus, `audio/vnd.dts`, `audio/mpeg` or `audio/aac` by its extension, and `application/octet-stream` for `.sub` and `.sup`. `404` for a track that is not that file's. `503` with code `unavailable` while the video is missing, its disk is away, or the track's file is gone.
 
 `GET /files/{id}` returns the one `files[]` object, for a client that wants to see whether a sidecar has finished. A file that is not offered for playback is `404`: an extra, a file not probed yet, or one that ffprobe could not read.
 
