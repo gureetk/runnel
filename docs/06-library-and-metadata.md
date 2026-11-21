@@ -53,10 +53,13 @@ Peak memory was 13–15 MB. On spinning disks a cold walk costs about one seek p
 ### 2.2 When scans run
 
 - **On change.** The server watches every folder under each root with inotify. Events are collected for 5 seconds, then the affected folders are scanned. This keeps disks asleep when nothing changes.
-- **Nightly**, a full walk as a safety net, and at start.
+  - A scan of some folders walks them and what they hold, and compares only what is known under them, so a file outside them is neither missing nor moved. A file that moved between two of them keeps its id, as in a scan of the whole root. A folder that is gone holds nothing: what was known under it is missing, unless it moved.
+  - Folders that a scan leaves out (2.3) are not watched, and events for the files it leaves out are dropped.
+  - Reading a file reports nothing, so the server's own probes and streams set off no scan [checked in the development sandbox: Linux 6.18, ext4 with `relatime`].
+- **Nightly**, a full walk as a safety net, at 04:00 in the server's local time, and at start.
 - **On request**: `POST /admin/scan`, and when a library is created.
-- A file that is still being copied is left alone until its size has stopped changing for 10 seconds.
-- If a root cannot be watched (a network mount, or the system's watch limit), the server logs it once and scans that root every 15 minutes.
+- **A file still being written** is left alone: one modified less than 10 seconds before the scan. Its folder is scanned again once the file is 10 seconds old. Every write moves a file's time, so one look at it does what two looks at its size, 10 seconds apart, would do. A new file is then playable about 10 seconds after it was written, inside the 15 seconds of stage 2's exit criterion: 10.6 s in the development sandbox, with the test of that criterion. A time more than 2 seconds in the future does not count as being written.
+- **A root that cannot be watched** is scanned every 15 minutes, and the server logs why, once. That is a root that is away; one on a network file system, where changes made by another machine are not reported (NFS, SMB, 9p, Ceph, GlusterFS, and FUSE file systems that reach another machine, such as sshfs and rclone); and one past the system's limit of watches, `fs.inotify.max_user_watches`. Once a scan finds it there and watchable, it is watched again. A local FUSE file system, such as a union of disks, is watched. Untested: whether such a union reports changes made on its disks directly. The nightly walk finds them in any case.
 
 ### 2.3 What counts
 

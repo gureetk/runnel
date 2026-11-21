@@ -144,6 +144,8 @@ func TestTheBuiltBinary(t *testing.T) {
 		os.MkdirAll(filepath.Dir(p), 0o755)
 		tm.Make(t, p, tm.Join(tm.Video(seconds), tm.Tone("440", seconds), []string{"-c:v", "libx264", "-c:a", "aac"})...)
 	}
+	tm.Settle(t, films)
+	tm.Settle(t, shows)
 
 	out, errOut, status := run("", "library", "add", "--name", "Films", "--kind", "movies", "--root", films)
 	if status != 0 || !strings.HasPrefix(out, "Added library 1, Films (movies), with folders: 1 "+films+".") {

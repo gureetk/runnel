@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/model"
@@ -53,6 +54,10 @@ func (e *env) put(rel string) {
 	if err := os.WriteFile(p, b, 0o644); err != nil {
 		e.t.Fatal(err)
 	}
+	// A file modified in the last 10 seconds is left alone as one still
+	// being written.
+	then := time.Now().Add(-time.Hour)
+	os.Chtimes(p, then, then)
 }
 
 func (e *env) move(from, to string) {

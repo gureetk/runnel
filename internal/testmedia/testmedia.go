@@ -9,10 +9,13 @@
 package testmedia
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tools returns the paths of ffmpeg and ffprobe.
@@ -38,6 +41,23 @@ func Make(t testing.TB, out string, args ...string) {
 	full = append(full, out)
 	if b, err := exec.Command(ffmpeg, full...).CombinedOutput(); err != nil {
 		t.Fatalf("ffmpeg %s: %v\n%s", strings.Join(full, " "), err, b)
+	}
+}
+
+// Settle makes every file under dir an hour old. A scan leaves a file
+// modified in the last 10 seconds alone, as one still being written: a
+// test that writes files and scans them at once settles them first.
+func Settle(t testing.TB, dir string) {
+	t.Helper()
+	then := time.Now().Add(-time.Hour)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		return os.Chtimes(p, then, then)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

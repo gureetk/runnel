@@ -98,6 +98,10 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 	scanner := scan.New(database, log)
 	scanner.Queued = queue.Wake
+	// The watcher follows each root the scanner has checked, and asks it
+	// to scan what changed.
+	watcher := scan.NewWatcher(scanner, log)
+	scanner.Checked = watcher.Watch
 	scanner.Built = func(ctx context.Context, libraryID int64) error {
 		start := time.Now()
 		res, err := library.Build(ctx, database, libraryID, time.Now().UnixMilli())
@@ -121,6 +125,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		if err := queue.Run(background); err != nil {
 			log.Error("background work stopped", "err", err)
 		}
+	}()
+	watching := make(chan struct{})
+	go func() {
+		defer close(watching)
+		watcher.Run(background)
 	}()
 
 	handler := api.New(database, log, api.Config{
@@ -168,6 +177,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	stopBackground()
 	<-scanning
 	<-queueing
+	<-watching
 	log.Debug("background work stopped", "ms", time.Since(start).Milliseconds())
 	if err := database.Close(); err != nil {
 		return err

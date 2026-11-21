@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -24,6 +25,15 @@ import (
 // before its row goes (docs/03-data-model.md, section 4).
 const missingFor = 30 * 24 * time.Hour
 
+// youngFor is how recently a file may have been modified and still be
+// left alone, as one that is being written. Its folder is scanned again
+// once the file is that old (docs/06-library-and-metadata.md, section
+// 2.2).
+const youngFor = 10 * time.Second
+
+// nightlyAt is the hour of the nightly walk, in the server's local time.
+const nightlyAt = 4
+
 // Scanner is the one scanner of the server. It scans one root at a time,
 // writes what it found, and queues probes for the files that need one.
 type Scanner struct {
@@ -36,9 +46,15 @@ type Scanner struct {
 	Built func(ctx context.Context, libraryID int64) error
 	// Queued, when set, is called after probes were queued.
 	Queued func()
+	// Checked, when set, is called each time a scan has checked a root,
+	// before it walks it, with the root as the check found it: available,
+	// or away. The watcher watches it from then on.
+	Checked func(root model.Root)
 
 	mu      sync.Mutex
-	pending map[int64]bool // library ids to scan; 0 means all
+	pending map[int64]bool             // library ids to scan; 0 means all
+	folders map[int64]map[string]bool  // root id -> folders to scan, relative to the root; "" is all of it
+	later   map[int64]map[string]int64 // root id -> folder -> when to scan it, for files still being written
 	wake    chan struct{}
 }
 
@@ -47,6 +63,8 @@ func New(d *db.DB, log *slog.Logger) *Scanner {
 	return &Scanner{
 		db: d, log: log, now: time.Now,
 		pending: map[int64]bool{},
+		folders: map[int64]map[string]bool{},
+		later:   map[int64]map[string]int64{},
 		wake:    make(chan struct{}, 1),
 	}
 }
@@ -58,6 +76,24 @@ func (s *Scanner) Request(libraryID int64) {
 	s.mu.Lock()
 	s.pending[libraryID] = true
 	s.mu.Unlock()
+	s.poke()
+}
+
+// RequestFolders asks for a scan of some folders of a root, given
+// relative to it, with "" for the whole root. It does not wait.
+func (s *Scanner) RequestFolders(rootID int64, folders []string) {
+	s.mu.Lock()
+	if s.folders[rootID] == nil {
+		s.folders[rootID] = map[string]bool{}
+	}
+	for _, f := range folders {
+		s.folders[rootID][f] = true
+	}
+	s.mu.Unlock()
+	s.poke()
+}
+
+func (s *Scanner) poke() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -65,36 +101,149 @@ func (s *Scanner) Request(libraryID int64) {
 }
 
 // Run scans when asked, until ctx ends. At start it queues the probes
-// that an earlier run left undone, or that a newer probe version needs.
+// that an earlier run left undone, or that a newer probe version needs,
+// and walks every library. It walks them all again each night at
+// nightlyAt.
 func (s *Scanner) Run(ctx context.Context) {
 	s.queueProbes(ctx, 0)
+	s.Request(0)
+	nightly := time.NewTimer(untilNightly(s.now()))
+	defer nightly.Stop()
 	for {
+		wait := time.Hour
+		if at, ok := s.nextLater(); ok {
+			wait = max(0, time.Duration(at-s.now().UnixMilli())*time.Millisecond)
+		}
+		soon := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			soon.Stop()
 			return
 		case <-s.wake:
+		case <-soon.C:
+		case <-nightly.C:
+			s.log.Info("scan: the nightly walk")
+			s.Request(0)
+			nightly.Reset(untilNightly(s.now()))
 		}
-		s.mu.Lock()
-		asked := s.pending
-		s.pending = map[int64]bool{}
-		s.mu.Unlock()
+		soon.Stop()
+		if s.runAsked(ctx) {
+			debug.FreeOSMemory()
+		}
+	}
+}
 
-		libs, err := s.db.Libraries(ctx)
-		if err != nil {
-			if ctx.Err() == nil {
-				s.log.Error("scan: cannot read the libraries", "err", err)
+// untilNightly is how long it is from now to the next nightlyAt o'clock.
+func untilNightly(now time.Time) time.Duration {
+	next := time.Date(now.Year(), now.Month(), now.Day(), nightlyAt, 0, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next.Sub(now)
+}
+
+// nextLater is the earliest time a folder is to be scanned again for
+// files that were still being written.
+func (s *Scanner) nextLater() (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var at int64
+	for _, folders := range s.later {
+		for _, t := range folders {
+			if at == 0 || t < at {
+				at = t
+			}
+		}
+	}
+	return at, at != 0
+}
+
+// runAsked runs the scans asked for, and those of folders whose files
+// were being written and are old enough now. It reports whether it ran
+// any.
+func (s *Scanner) runAsked(ctx context.Context) bool {
+	now := s.now().UnixMilli()
+	s.mu.Lock()
+	for root, folders := range s.later {
+		for f, at := range folders {
+			if at <= now {
+				if s.folders[root] == nil {
+					s.folders[root] = map[string]bool{}
+				}
+				s.folders[root][f] = true
+				delete(folders, f)
+			}
+		}
+		if len(folders) == 0 {
+			delete(s.later, root)
+		}
+	}
+	asked, folders := s.pending, s.folders
+	s.pending, s.folders = map[int64]bool{}, map[int64]map[string]bool{}
+	s.mu.Unlock()
+	if len(asked) == 0 && len(folders) == 0 {
+		return false
+	}
+
+	libs, err := s.db.Libraries(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("scan: cannot read the libraries", "err", err)
+		}
+		return false
+	}
+	for _, lib := range libs {
+		if asked[0] || asked[lib.ID] {
+			if _, err := s.ScanLibrary(ctx, lib); err != nil && ctx.Err() == nil {
+				s.log.Error("scan failed", "library", lib.ID, "err", err)
 			}
 			continue
 		}
-		for _, lib := range libs {
-			if asked[0] || asked[lib.ID] {
-				if _, err := s.ScanLibrary(ctx, lib); err != nil && ctx.Err() == nil {
-					s.log.Error("scan failed", "library", lib.ID, "err", err)
+		scanned := false
+		for _, root := range lib.Roots {
+			f := folders[root.ID]
+			if f == nil {
+				continue
+			}
+			var list []string
+			if !f[""] {
+				list = outermost(f)
+			}
+			if _, err := s.scanRoot(ctx, root, list); err != nil {
+				if ctx.Err() == nil {
+					s.log.Error("scan failed", "root", root.Path, "err", err)
 				}
+				continue
+			}
+			scanned = true
+		}
+		if scanned && s.Built != nil {
+			if err := s.Built(ctx, lib.ID); err != nil && ctx.Err() == nil {
+				s.log.Error("scan: cannot build items", "library", lib.ID, "err", err)
 			}
 		}
-		debug.FreeOSMemory()
 	}
+	return true
+}
+
+// outermost lists the folders that lie inside none of the others, in
+// order: scanning a folder scans what it holds.
+func outermost(folders map[string]bool) []string {
+	var out []string
+	for f := range folders {
+		inside := false
+		for g := range folders {
+			if g != f && strings.HasPrefix(f, g+"/") {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // queueProbes queues a probe for the files of a root, or of every root
@@ -117,7 +266,7 @@ func (s *Scanner) queueProbes(ctx context.Context, rootID int64) {
 func (s *Scanner) ScanLibrary(ctx context.Context, lib model.Library) ([]model.ScanResult, error) {
 	var results []model.ScanResult
 	for _, root := range lib.Roots {
-		r, err := s.scanRoot(ctx, root)
+		r, err := s.scanRoot(ctx, root, nil)
 		if err != nil {
 			return results, err
 		}
@@ -130,8 +279,9 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib model.Library) ([]model.S
 }
 
 // scanRoot is one scan of one root (docs/06-library-and-metadata.md,
-// section 2.1).
-func (s *Scanner) scanRoot(ctx context.Context, root model.Root) (model.ScanResult, error) {
+// section 2.1): of all of it, or only of the given folders below it and
+// what they hold.
+func (s *Scanner) scanRoot(ctx context.Context, root model.Root, folders []string) (model.ScanResult, error) {
 	start := time.Now()
 	now := s.now()
 	known, err := s.db.KnownFiles(ctx, root.ID)
@@ -161,13 +311,22 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root) (model.ScanResu
 			return model.ScanResult{}, err
 		}
 		s.log.Warn("scan: the folder is away; nothing under it is marked missing", "root", root.Path, "reason", away)
+		if s.Checked != nil {
+			root.Available = false
+			s.Checked(root)
+		}
 		return r, nil
 	}
+	if s.Checked != nil {
+		root.Available = true
+		s.Checked(root)
+	}
 
-	// 2 and 3. Walk the tree and compare it with what is known.
-	w, err := s.walk(ctx, root.Path, known)
-	if err != nil {
-		return model.ScanResult{}, err
+	// 2 and 3. Walk the tree, or the folders, and compare it with what is
+	// known.
+	w := s.walkAll(ctx, root.Path, folders, known, now)
+	if w.err != nil {
+		return model.ScanResult{}, w.err
 	}
 
 	// 4. What was not seen is missing, unless it moved: a new path whose
@@ -192,11 +351,31 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root) (model.ScanResu
 		return model.ScanResult{}, err
 	}
 	s.queueProbes(ctx, root.ID)
-	s.log.Info("scan done", "root", root.Path, "ms", changes.Result.MS,
-		"files", len(w.seen)+len(w.new), "added", len(changes.New), "back", len(changes.Back),
-		"changed", len(changes.Changed), "moved", len(changes.Moved), "missing", len(changes.Missing))
+	attrs := []any{"root", root.Path, "ms", changes.Result.MS,
+		"files", len(w.seen) + len(w.new), "added", len(changes.New), "back", len(changes.Back),
+		"changed", len(changes.Changed), "moved", len(changes.Moved), "missing", len(changes.Missing)}
+	if folders != nil {
+		attrs = append(attrs, "folders", len(folders))
+	}
+	if len(w.young) > 0 {
+		attrs = append(attrs, "being_written", w.youngFiles)
+	}
+	s.log.Info("scan done", attrs...)
 	if changes.Result.Error != "" {
 		s.log.Warn("scan: some folders could not be read", "root", root.Path, "err", changes.Result.Error)
+	}
+	// Files still being written: their folders again, once they are old
+	// enough.
+	if len(w.young) > 0 {
+		s.mu.Lock()
+		if s.later[root.ID] == nil {
+			s.later[root.ID] = map[string]int64{}
+		}
+		for f, at := range w.young {
+			s.later[root.ID][f] = max(s.later[root.ID][f], at)
+		}
+		s.mu.Unlock()
+		s.poke()
 	}
 	return changes.Result, nil
 }
@@ -212,13 +391,60 @@ type walkResult struct {
 	changed []db.SeenFile
 	back    []db.SeenFile
 	failed  []failedDir
+	// under is the folders walked, when not the whole root: only what is
+	// known under them is expected to be seen.
+	under []string
+	// young is the folders that hold files still being written, and when
+	// to scan each again.
+	young      map[string]int64
+	youngFiles int
+	err        error
 }
 
-// walk goes through the tree under rootPath and sorts each video file
-// into new, changed, back or unchanged.
-func (s *Scanner) walk(ctx context.Context, rootPath string, known map[string]db.KnownFile) (walkResult, error) {
-	w := walkResult{seen: map[string]bool{}}
-	err := filepath.WalkDir(rootPath, func(p string, d fs.DirEntry, err error) error {
+// walkAll walks the whole root, or each of the folders.
+func (s *Scanner) walkAll(ctx context.Context, rootPath string, folders []string, known map[string]db.KnownFile, now time.Time) walkResult {
+	w := walkResult{seen: map[string]bool{}, young: map[string]int64{}, under: folders}
+	if folders == nil {
+		w.err = s.walk(ctx, &w, rootPath, "", known, now)
+		return w
+	}
+	for _, f := range folders {
+		// A folder that is gone holds nothing now: what was known under it
+		// is missing, or moved.
+		fi, err := os.Lstat(filepath.Join(rootPath, filepath.FromSlash(f)))
+		if err != nil || !fi.IsDir() {
+			continue
+		}
+		if w.err = s.walk(ctx, &w, rootPath, f, known, now); w.err != nil {
+			return w
+		}
+	}
+	return w
+}
+
+// expected reports whether a known file is under what was walked.
+func (w *walkResult) expected(rel string) bool {
+	if w.under == nil {
+		return true
+	}
+	for _, f := range w.under {
+		if strings.HasPrefix(rel, f+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// walk goes through the tree under rootPath, or under the folder from
+// below it, and sorts each video file into new, changed, back or
+// unchanged. A new or changed file modified less than youngFor ago is
+// left alone, and its folder noted for a later scan.
+func (s *Scanner) walk(ctx context.Context, w *walkResult, rootPath, from string, known map[string]db.KnownFile, now time.Time) error {
+	start := rootPath
+	if from != "" {
+		start = filepath.Join(rootPath, filepath.FromSlash(from))
+	}
+	err := filepath.WalkDir(start, func(p string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -265,14 +491,24 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, known map[string]db
 			f.Kind = "extra"
 		}
 		k, ok := known[rel]
-		if !ok {
-			w.new = append(w.new, f)
+		if ok {
+			w.seen[rel] = true
+			f.ID = k.ID
+		}
+		changed := ok && (k.Size != f.Size || k.MtimeNS != f.MtimeNS || k.Kind != f.Kind)
+		if (!ok || changed) && young(info.ModTime(), now) {
+			dir := path.Dir(rel)
+			if dir == "." {
+				dir = ""
+			}
+			w.young[dir] = max(w.young[dir], info.ModTime().Add(youngFor).UnixMilli()+500)
+			w.youngFiles++
 			return nil
 		}
-		w.seen[rel] = true
-		f.ID = k.ID
 		switch {
-		case k.Size != f.Size || k.MtimeNS != f.MtimeNS || k.Kind != f.Kind:
+		case !ok:
+			w.new = append(w.new, f)
+		case changed:
 			w.changed = append(w.changed, f)
 		case k.MissingSince != 0:
 			w.back = append(w.back, f)
@@ -280,9 +516,16 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, known map[string]db
 		return nil
 	})
 	if err != nil {
-		return walkResult{}, fmt.Errorf("scan %s: %w", rootPath, err)
+		return fmt.Errorf("scan %s: %w", start, err)
 	}
-	return w, nil
+	return nil
+}
+
+// young reports whether a file modified at mtime is still being written:
+// modified less than youngFor before now. A time in the future, past a
+// little drift between clocks, is not.
+func young(mtime, now time.Time) bool {
+	return mtime.After(now.Add(-youngFor)) && !mtime.After(now.Add(2*time.Second))
 }
 
 // underFailed reports whether rel is a folder that could not be read, or
@@ -307,10 +550,13 @@ func (s *Scanner) matchMoves(rootPath string, known map[string]db.KnownFile, w w
 		if w.seen[k.RelPath] || underFailed(k.RelPath, w.failed) {
 			continue
 		}
-		if k.MissingSince == 0 {
+		// A file outside the folders walked was not looked at: it is not
+		// missing, and did not move.
+		expected := w.expected(k.RelPath)
+		if k.MissingSince == 0 && expected {
 			unseen = append(unseen, k)
 		}
-		if k.Fingerprint != "" {
+		if k.Fingerprint != "" && (expected || k.MissingSince != 0) {
 			bySize[k.Size] = append(bySize[k.Size], k)
 		}
 	}
