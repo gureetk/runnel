@@ -38,6 +38,8 @@ type Config struct {
 	AdminTokenHash []byte
 	// Now is the clock: time.Now outside tests.
 	Now func() time.Time
+	// Scans is the scanner, which admin calls ask to scan.
+	Scans Scans
 }
 
 // Server is the API. Build one with New and serve its Handler.
@@ -47,6 +49,7 @@ type Server struct {
 	info      Info
 	adminHash []byte
 	now       func() time.Time
+	scans     Scans
 	mux       *http.ServeMux
 
 	logins *auth.Limiter // wrong sign-ins by address
@@ -67,6 +70,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		info:      c.Info,
 		adminHash: c.AdminTokenHash,
 		now:       now,
+		scans:     c.Scans,
 		mux:       http.NewServeMux(),
 		logins:    auth.NewLimiter(loginTries, time.Minute, now),
 		touched:   map[int64]int64{},
@@ -80,6 +84,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST "+Prefix+"/auth/login", s.json(s.handleLogin))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
+	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
+	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 }
 
 // Handler is the whole server: every route inside the middleware that every

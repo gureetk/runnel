@@ -20,6 +20,9 @@ const usage = `Usage: runnel <command>
 Commands:
   serve                        Run the server.
   user add <name> [--admin]    Add a user to the running server.
+  library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
+                               Add a library to the running server.
+  scan [--library <id>]        Ask the running server to scan.
   version                      Print the version.
 
 Settings are environment variables that start with RUNNEL_. They are listed
@@ -41,6 +44,10 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return serve(args[1:], stderr)
 	case "user":
 		return userCmd(args[1:], stdin, stdout, stderr)
+	case "library":
+		return libraryCmd(args[1:], stdout, stderr)
+	case "scan":
+		return scanCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

@@ -72,7 +72,7 @@ Build:
 - `runnel user add`, password sign-in, tokens, the authentication middleware.
 - `runnel library add`, roots.
 - The scanner without watching: walk, compare, fingerprint, moves, missing, root availability.
-- The prober and its mapping.
+- The prober and its mapping. Until the queue of stage 2, the files table is the queue: a file waits while its `probe_version` is behind, and the scanner probes two at a time after each scan and at start.
 - The parser for films and episodes, and item building with titles taken from names.
 - `GET /server`, `POST /auth/login`, `GET /libraries`, `GET /items`, `GET /items/{id}`, `GET /files/{id}/raw`.
 - A report of how every file parsed, by class.
@@ -103,8 +103,9 @@ Build:
 - Pairing by code, with the code lookup, the list of devices waiting and `runnel pair approve`.
 - The first run: the setup code, `runnel setup-code` and `POST /setup` (D35). The server's name as a setting (D34).
 - A person's own account: devices, password, track defaults.
-- Watching for changes with inotify, and the nightly walk.
-- The background queue, with the playback gate.
+- Watching for changes with inotify, the nightly walk, and the walk at start.
+- The background queue, with the playback gate. Probes move into it.
+- Subtitle and audio files that sit next to a video (`06-library-and-metadata.md`, section 4.7), and `GET /files/{id}/external/{external_id}`.
 - The Jellyfin import, dry run first.
 - The admin endpoints for libraries, the folder browser, scans with their results, background work with progress, people and devices.
 - `play_log`, `GET /admin/playlog` and `GET /admin/stats`.

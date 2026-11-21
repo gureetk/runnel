@@ -78,3 +78,31 @@ type Chapter struct {
 	EndMS   *int64 // nil when unknown
 	Title   string
 }
+
+// Library is a named set of roots holding one kind of media.
+type Library struct {
+	ID         int64
+	Name       string
+	Kind       string // "movies" or "shows"
+	Profile    string // "default" or "anime"
+	Roots      []Root
+	UpdatedSeq int64
+}
+
+// Root is a folder that a library scans.
+type Root struct {
+	ID        int64
+	LibraryID int64
+	Path      string // absolute, no trailing slash
+	Available bool
+}
+
+// ScanResult is what one scan of a root found, as the root records it.
+type ScanResult struct {
+	At      int64
+	MS      int64
+	Added   int // new files
+	Changed int // files whose size or time changed, and files that moved
+	Removed int // files newly marked missing
+	Error   string
+}

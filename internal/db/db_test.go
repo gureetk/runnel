@@ -408,3 +408,33 @@ func TestSetupDone(t *testing.T) {
 		t.Fatalf("SetupDone = %v, %v with a user", done, err)
 	}
 }
+
+func TestLibraries(t *testing.T) {
+	d, _ := openTemp(t)
+	ctx := context.Background()
+	lib, err := d.CreateLibrary(ctx, "Films", "movies", "default", []string{"/srv/media/films/", "/srv/more"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lib.UpdatedSeq != 1 || len(lib.Roots) != 2 || lib.Roots[0].Path != "/srv/media/films" {
+		t.Fatalf("%+v", lib)
+	}
+	for _, roots := range [][]string{{"/srv/media/films"}, {"/srv/media/films/new"}, {"/srv/media"}, {"/"}, {"/srv/x", "/srv/x/y"}} {
+		if _, err := d.CreateLibrary(ctx, "Other", "shows", "default", roots, 5); !errors.Is(err, ErrRootOverlap) {
+			t.Errorf("%v: %v, want ErrRootOverlap", roots, err)
+		}
+	}
+	if _, err := d.CreateLibrary(ctx, "Films", "shows", "default", []string{"/srv/shows"}, 5); !errors.Is(err, ErrNameTaken) {
+		t.Errorf("a taken name: %v", err)
+	}
+	if _, err := d.CreateLibrary(ctx, "Shows", "shows", "anime", []string{"/srv/media/films-2"}, 5); err != nil {
+		t.Errorf("a folder whose name only starts like another's: %v", err)
+	}
+	all, err := d.Libraries(ctx)
+	if err != nil || len(all) != 2 || all[1].Profile != "anime" || len(all[1].Roots) != 1 {
+		t.Fatalf("%+v %v", all, err)
+	}
+	if _, err := d.Library(ctx, 99); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("an unknown library: %v", err)
+	}
+}

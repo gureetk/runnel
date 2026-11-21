@@ -791,10 +791,10 @@ Two settings can be changed while the server runs, and are kept in the database.
 | Endpoint | Purpose |
 |---|---|
 | `GET /admin/libraries` | Libraries with their folders, what a scan is doing now, and each folder's last scan. |
-| `POST /admin/libraries` | Create: `{"name": "Anime", "kind": "shows", "profile": "anime", "roots": ["/media/anime"]}`. |
+| `POST /admin/libraries` | Create: `{"name": "Anime", "kind": "shows", "profile": "anime", "roots": ["/media/anime"]}`. Returns `201` with `{"id": 2, "name": "Anime", "kind": "shows", "profile": "anime", "roots": [{"id": 2, "path": "/media/anime", "available": true}]}`, and the library's first scan starts. |
 | `PATCH /admin/libraries/{id}`, `DELETE /admin/libraries/{id}` | Change or remove. Removing a library removes its items and watch state. |
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
-| `POST /admin/scan` | `{"library_id": 2}` or `{}` for all. Returns `202`. |
+| `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
 
 `GET /admin/libraries`:
@@ -811,6 +811,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 ]}
 ```
 
+- Creating a library: `kind` is `movies` or `shows`, `profile` is `default` (when left out) or `anime`. A library has 1 to 32 folders, each an absolute path to a folder the server can open, stored without a trailing slash. A folder that is, contains or lies inside one that a library already scans is `409` with code `conflict`, and so is a name that is taken. Library names are compared with their case.
 - `scan.state` is `idle`, `walking` (going through the folders, with no numbers yet), `probing` (reading what was found: `done` of `total` files) or `failed`.
 - `last_scan` is the folder's last scan of any kind: asked for, nightly, or set off by a change on disk. `added`, `changed` and `removed` count files.
 
