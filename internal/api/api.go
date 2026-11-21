@@ -51,6 +51,7 @@ type Server struct {
 	now       func() time.Time
 	scans     Scans
 	mux       *http.ServeMux
+	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
 
 	logins *auth.Limiter // wrong sign-ins by address
 
@@ -72,6 +73,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		now:       now,
 		scans:     c.Scans,
 		mux:       http.NewServeMux(),
+		deadline:  jsonDeadline,
 		logins:    auth.NewLimiter(loginTries, time.Minute, now),
 		touched:   map[int64]int64{},
 	}
@@ -82,6 +84,11 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/server", s.json(s.handleServer))
 	s.mux.Handle("POST "+Prefix+"/auth/login", s.json(s.handleLogin))
+
+	s.mux.Handle("GET "+Prefix+"/libraries", s.json(s.signedIn(s.handleLibraries)))
+	s.mux.Handle("GET "+Prefix+"/items", s.json(s.signedIn(s.handleItems)))
+	s.mux.Handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
+	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))

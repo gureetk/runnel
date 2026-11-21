@@ -74,9 +74,9 @@ Build:
 - The scanner without watching: walk, compare, fingerprint, moves, missing, root availability.
 - The prober and its mapping. Until the queue of stage 2, the files table is the queue: a file waits while its `probe_version` is behind, and the scanner probes two at a time after each scan and at start.
 - The parser for films and episodes, and item building with titles taken from names: films, series and episodes, with every file of an item attached as part 0 without a label. Seasons, versions, parts, files that hold several episodes and absolute numbering are the full item model of stage 2.
-- `GET /server`, `POST /auth/login`, `GET /libraries`, `GET /items`, `GET /items/{id}`, `GET /files/{id}/raw`.
+- `GET /server`, `POST /auth/login`, `GET /libraries`, `GET /items`, `GET /items/{id}`, `GET /files/{id}/raw`. As far as stage 1 has the data: cards carry the id, type, library and folder, title, year, an episode's series and numbers, `added_at` and `seq`, and the detail adds the files with their streams and chapters. `GET /items` takes `library` and `type`, or `series`, sorted by title or in episode order, with `limit` and `cursor`. Any other parameter is refused with `400`, so that a client knows. The rest of `04-api.md`, sections 2.1, 2.2 and 4.3, arrives with stage 2.
 - A report of how every file parsed, by class: `runnel report`, which reads `GET /admin/parse-report` (`04-api.md`, section 8.2). It also lists the files ffprobe could not read.
-- The systemd unit.
+- The systemd unit: `deploy/runnel.service`.
 
 **Exit, on real hardware with a real library:**
 

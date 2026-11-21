@@ -70,10 +70,10 @@ func (s *Server) json(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Not every ResponseWriter can take a deadline (a test recorder
 		// cannot); without one the context still ends.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(jsonDeadline))
-		ctx, cancel := context.WithTimeout(r.Context(), jsonDeadline)
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.deadline))
+		ctx, cancel := context.WithTimeout(r.Context(), s.deadline)
 		defer cancel()
-		h(w, r.WithContext(ctx))
+		gzipJSON(h).ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

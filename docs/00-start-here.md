@@ -8,7 +8,7 @@ Read this file first. Then read the document for the part being worked on.
 
 ## 1. Where things stand (20 November 2026)
 
-- **Planning is finished. Stage 1 is being built:** a server that serves files (`01-roadmap.md`, section 3).
+- **Stage 1 is built:** a server that serves files (`01-roadmap.md`, section 3). It is being checked against its exit criteria on real hardware.
 - **Decided:** the server's design (D1 to D19), the name and the logo (D20, D21), the order of the stages (D22, D25), official clients and their designs (D23 to D26, D29 to D37), the licence (D38), how a browser is fed (D39, D40), and what each client is built with (D41 to D44).
 - **Proposed, to confirm in use:** encoder arguments, limits, thresholds, discovery on the local network (P1 to P8).
 - **Open:** O5, O6, O8, O12 and O13 in `08-decisions.md`. None of them blocks the server.
