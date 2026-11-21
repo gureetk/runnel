@@ -1,0 +1,236 @@
+# Roadmap
+
+The stages in which the server and its clients get built, what each one must prove before the next starts, and why they are in this order. Durations are rough guesses for evenings and weekends, and exist only for the server stages. The client stages cannot be estimated before they are designed and before it is decided what they are built with.
+
+Nothing here is to be started until it is asked for.
+
+**Revised, 20 November 2026,** after the design review (`11-design-review.md`, D29 to D37): the designs exist, their asks are in `04-api.md` and `03-data-model.md`, and the stages below say where each new piece lands. Revised again the same day after the research that closed the planning: the licence (D38), how a browser is fed (D39, D40), what the clients are built with (D41 to D44), and discovery (P6).
+
+## 1. Order
+
+```
+Design    done, from 10-clients.md ─────────────────────► needed before stage 5
+
+Server    0 prepare ─► 1 files ─► 2 library ─► 3 transcoding ─► 4 metadata
+
+Clients                             5 web interface ─► 6 TV app ─► 7 web player ─► 8 phones and tablets ─► 9 desktop apps
+
+Later     10 polish
+```
+
+What depends on what:
+
+- Stage 5 needs stage 2 and the web design.
+- Stage 6 needs stage 3, the TV design, and artwork from stage 4 to look right.
+- Stage 7 needs stage 3. How a browser is fed is designed (D39, D40).
+- Stage 8 starts with a spike (D43) and, for iOS, with O13. Stage 9 starts with the choice of a shell (O12).
+- The designs for every client exist and were reviewed (D29). No stage waits for design any more, except the iOS drawings before the iOS half of stage 8.
+
+Why this order:
+
+- **Transcoding is stage 3 in every case** (D22). Browsers, older phones and any player without the right decoder need it, whatever one TV can do.
+- **The web interface comes first among the clients** (D25). Setup and administration are needed by everything, and it is the smallest client.
+- **The TV app is second.** It is where most watching happens.
+- **The web player is third.** Once it exists, every device with a browser can watch. The apps after it make that better. They are no longer the only way in.
+
+Seven client surfaces are more work than the server. Each stage is meant to leave something usable behind.
+
+## 2. Stage 0: decide and prepare
+
+| Task | State |
+|---|---|
+| Research, measurements and server design documents | Done |
+| Language: Go. API: own, not Jellyfin-compatible | Decided |
+| Name: Runnel. Logo and brand files (`09-brand.md`) | Decided (D20, D21) |
+| The repository, with its rules (D27, D28) | Created |
+| Order of the stages and of the clients | Decided (D22, D25) |
+| Check the name for collisions: GitHub, package registries, domains | To do |
+| Licence | Decided: GPL-3.0-or-later (D38) |
+| Design the clients, from `10-clients.md` | Done, reviewed and accepted (D29, `11-design-review.md`). iOS has its manners in words and no drawings of its own (`design/mobile.md`, section 12). |
+| Fold what the designs ask of the server into `04-api.md` and `03-data-model.md` | Done, 20 November 2026 |
+| Decide what the native clients and the web interface are built with | Decided (D41 to D44). Each choice has a spike at the start of its stage. The desktop shell is open (O12). |
+| Design browser delivery and add it to `04-api.md` and `05-playback.md` | Done (D39, D40). Tested in Chrome only. |
+| Research discovery on the local network | Done on paper (P6). The responder is prototyped at the start of stage 6. |
+| Revise the remaining documents for the official clients and the design review | Done |
+| First pull request: public editions of the server documents, a README, the licence, a `CLAUDE.md`, and a CI workflow that builds an empty module | Done with the pull request that added this file |
+| Second pull request: the design documents, the design review and the brand files | To do, before stage 5 |
+| Tests on real hardware: software decoding on a TV (`00-start-here.md`, section 6), and the memory of one hardware transcode (`05-playback.md`, section 12, item 1) | To do. The results are kept outside the repository (D28). |
+
+**Exit:** the licence is chosen, the designs for the web interface and the TV app exist, and the public editions of the documents are merged.
+
+State on 20 November 2026: everything but the second pull request and the tests on real hardware. Neither blocks stage 1.
+
+## 3. Stage 1: a server that serves files
+
+The smallest thing that is useful and that proves the memory and scan goals on real hardware. About 2 to 3 weekends.
+
+Build:
+
+- The module, layout and CI from `02-architecture.md`.
+- Configuration, logging, the data directory.
+- Database open, pragmas, migration `0001`, the write lock, the sequence.
+- `runnel user add`, password sign-in, tokens, the authentication middleware.
+- `runnel library add`, roots.
+- The scanner without watching: walk, compare, fingerprint, moves, missing, root availability.
+- The prober and its mapping.
+- The parser for films and episodes, and item building with titles taken from names.
+- `GET /server`, `POST /auth/login`, `GET /libraries`, `GET /items`, `GET /items/{id}`, `GET /files/{id}/raw`.
+- A report of how every file parsed, by class.
+- The systemd unit.
+
+**Exit, on real hardware with a real library:**
+
+1. A first index and probe of the whole library completes without a failed file that Jellyfin can play.
+2. A rescan with nothing changed takes under 2 s with a warm cache.
+3. The server's resident memory is under 30 MB after the scan, idle.
+4. A desktop plays a file with `mpv "http://<server>:8610/api/v1/files/<id>/raw?t=<token>"`, and seeking works.
+5. A renamed file keeps its id. Unmounting a root marks nothing missing.
+6. The parse report has no file in the `none` class, and every file in the `guess` class has been looked at.
+
+## 4. Stage 2: a library a client can use
+
+Everything a client needs for browsing and direct play, and the existing watch history brought over. About 3 to 4 weekends.
+
+Build:
+
+- The full item model: seasons, versions, parts, specials, files that hold several episodes, the absolute-numbering flag.
+- Local artwork, scaled by ffmpeg, and `GET /img`.
+- `GET /home`, `GET /search`, `GET /genres` for one library or all, the rest of `GET /items`, letters and pages by position.
+- Cards as `04-api.md`, section 2.1, has them: with `available`, and with their library folder, so that a folder that is away is one record.
+- Watch state: `POST /progress` with its rules, played and unplayed for one item or many, putting state back for Undo, series preferences and their reset.
+- My list.
+- The change sequence, tombstones, `GET /changes`, ETags.
+- Pairing by code, with the code lookup, the list of devices waiting and `runnel pair approve`.
+- The first run: the setup code, `runnel setup-code` and `POST /setup` (D35). The server's name as a setting (D34).
+- A person's own account: devices, password, track defaults.
+- Watching for changes with inotify, and the nightly walk.
+- The background queue, with the playback gate.
+- The Jellyfin import, dry run first.
+- The admin endpoints for libraries, the folder browser, scans with their results, background work with progress, people and devices.
+- `play_log`, `GET /admin/playlog` and `GET /admin/stats`.
+
+**Exit:**
+
+1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, collections, credits and people. Stage 6, with the TV app: discovery. Stage 10: the sidecar.
+2. The import's dry run joins at least 99% of Jellyfin's films and episodes to local items by path. What is left is explained.
+3. After the import, played flags and positions equal Jellyfin's for a sample of 50 items per user.
+4. A copy built from `GET /changes?since=0` equals a copy built later from zero, after a day of scans and playback in between.
+5. Resident memory stays under 30 MB while a client browses. `GET /home` answers in under 20 ms on real hardware.
+6. A new file dropped into a library is playable through the API within 15 seconds, without a manual scan.
+
+## 5. Stage 3: transcoding
+
+The piped transcode and its warm-up, on the server, with mpv on a desktop standing in for a client. About 1 to 2 weekends. Browser delivery (`04-api.md`, section 7.9) shares this stage's argument builder. It is built at the start of stage 7, or here if there is room.
+
+Do first, by hand: the checklist in `05-playback.md`, section 12. It settles the encoder arguments on real hardware before any code depends on them.
+
+Build: the argument builder with its fallback ladder, sessions, relaying, killing on disconnect, slots, the memory limit, finding out what the server can encode and checking again on request (`GET /admin/encoders`), `GET /files/{id}/transcode.mkv`, `POST /files/{id}/prepare` with tickets, and the memory of each ffmpeg child in `GET /admin/sessions`.
+
+**Exit, on real hardware:**
+
+1. Request to first byte sent: within 0.8 s cold.
+2. With mpv on a desktop: load to first frame within 1.5 s cold, within 0.5 s after a warm-up.
+3. Restarting the stream at the current position with another audio track: within 1.5 s.
+4. No ffmpeg process is left one second after a player disconnects, in 20 tries.
+5. A transcode with every hazard file from the test set (a subtitle track with long gaps, tens of megabytes of fonts, image-based subtitles) starts within the same limits or is listed as a known exception.
+6. The server's own memory stays under 30 MB during a transcode. The child's memory is measured and written into `05-playback.md`.
+
+## 6. Stage 4: metadata
+
+About 2 to 4 weekends, then a long tail of odd cases. In two parts, because the Jellyfin import already supplies provider ids for most of the library:
+
+1. **Fetch by known id**: the metadata key as a setting with its check (D34), the TMDB client and the provider cache, fetching films, series and seasons, artwork downloads, refresh. With them: collections, and cast and crew with people, whose photos are fetched only when a client asks (D33). This is what makes a client look right, and it is the easy half.
+2. **Match what has no id**: search and score, the review list with why each item is on it, manual match and unmatch, leaving an item unmatched, the preview of a series match, then the anime profile: the offline title index, the Anime-Lists mapping, and mapping a running count to seasons.
+
+**Exit:**
+
+1. Every item that came with an id has its title, overview and artwork.
+2. With the Jellyfin import ignored, at least 90% of a real library's films and series match by themselves.
+3. In an audit of 100 automatic matches, none is wrong. If one is, the threshold goes up until none is.
+4. The series that is numbered in one running count shows the right title for every episode.
+5. Everything unmatched is on the review list, is still playable, and can be fixed from the list.
+6. No provider request is made twice for the same thing: a second full refresh of an unchanged library makes none.
+7. A collection appears when a library holds two of its films, and goes when one is left.
+8. A film's and a series' credits arrive with its details. After the whole library is matched, no person's photo has been downloaded. The first request for one fetches it.
+
+Check first, when this stage is specified: how wide the provider's episode stills are. The TV's episode rows are 400 px wide (`11-design-review.md`, U5).
+
+## 7. Stage 5: the web interface
+
+Setup, administration and browsing, in any browser, served by the server itself. No player yet.
+
+The screens are those of `design/web.md`. It is built with Svelte, TypeScript and Vite, and embedded in the binary (D41). It must work on a plain-HTTP address (D45). Do first: a spike that measures the first load against the brief's aim.
+
+**Exit:**
+
+1. A fresh install can be set up from the browser alone, by someone who holds the setup code and nothing else: the first person, a library chosen in the folder browser, the metadata key, a check of what the server can encode.
+2. Everything the subcommands do can be done here: libraries, scans, users, devices, approving a pairing code, the review list and manual matches, the Jellyfin import with its dry-run report.
+3. The library can be browsed and searched, items marked played with Undo, and films and series put on My list.
+4. It works at phone width and with a keyboard alone.
+5. The server's resident memory is not measurably higher for serving it.
+
+## 8. Stage 6: the Android TV app
+
+The screens are those of `design/tv.md`. Kotlin, Compose for TV and libmpv (D42). Do first: write the discovery responder and test it against Android's and Apple's browsers and against Avahi (P6), and decide whether the apps live in this repository.
+
+**Exit, on a real TV:**
+
+1. Sign in by pairing code. Browse, search, play, resume and move to the next episode, with the remote alone.
+2. For files the TV decodes: Play to first frame within 0.5 s, median of 20 starts from `play_log`. Audio switch within 0.1 s.
+3. For files it does not: Play to first frame within 1.5 s cold and 0.5 s after a warm-up. Audio switch within 1.5 s.
+4. A position saved on the TV shows up on a second device after its next sync.
+5. With the server stopped, Home still draws from the local copy and says the server is away.
+6. A format the TV decodes only in software is re-encoded by default, and is played as it is once its switch is on (D37).
+7. The app finds the server on the local network without an address being typed, and takes a typed address where it cannot.
+
+## 9. Stage 7: the web player
+
+Playback inside the web interface: browser delivery on the server, a player page, subtitles drawn by the page.
+
+Do first: the browser tests of `05-playback.md`, section 12, item 10, in Firefox and Safari, and the choice of the package that wraps libass (D40).
+
+**Exit:**
+
+1. An episode plays in current Firefox, Chromium and Safari, on a desktop and on a phone, with styled subtitles.
+2. On the home network: Play to first frame within 0.5 s with the video copied and 1.5 s re-encoded, a seek within 1.5 s, an audio switch within 0.5 s.
+3. Progress is reported as from any other client.
+4. All of it on a plain-HTTP address (D45).
+
+## 10. Stage 8: phones and tablets
+
+Android first, then iOS. Kotlin Multiplatform with Compose Multiplatform, on the core the TV app uses (D43). Do first: the spike of D43, mpv drawing inside a Compose screen on iOS. Settle O13 before anything goes to the App Store.
+
+The screens are those of `design/mobile.md`. iOS uses the same screens with its own manners, described in words (section 12 there): it needs drawings before it is built. Away from home the apps use whatever address reaches the server (D32).
+
+## 11. Stage 9: desktop apps
+
+Linux first, then Windows and macOS. Until then a desktop has the web player, and mpv for anything a browser cannot play well.
+
+The screens are those of `design/desktop.md`. The desktop app is the web interface in a native window, with libmpv for playback (D44). Do first: choose the shell (O12).
+
+## 12. Stage 10: polish
+
+In whatever order is wanted. Each is its own small project.
+
+- The sidecar file and local track switching during a transcode. Target: audio switch within 0.15 s.
+- Preparing the next episode while the credits run.
+- A skip button from chapter names, where the files have them.
+- A font cache on the clients.
+- Watching away from home, beyond what D32 gives: a transcode mode with a bitrate cap and re-encoded audio, and downloads for offline viewing.
+- A memory cap on ffmpeg children through cgroups, counting GPU memory.
+
+## 13. Running beside Jellyfin
+
+Runnel can run beside Jellyfin on the same files for as long as wanted, and a switch can wait until the stages have held in daily use. The server writes nothing Jellyfin reads, so there is nothing to undo.
+
+## 14. Not being built
+
+Keeping these out is what keeps the project small: live TV, DLNA, plugins, device profiles on the server, burned-in subtitles, tone mapping, music, compatibility with Jellyfin's API. Each one costs more than it looks. Bringing one in needs an entry in `08-decisions.md` first.
+
+## 15. How work is tracked
+
+- One GitHub milestone per stage. One issue per task in the lists above. A pull request names the issue it closes.
+- Every change reaches `main` by pull request, merged with Squash and merge. The repository's rules are in `00-start-here.md`, section 7.
+- A change in behaviour updates the document that describes it, in the same pull request.
+- A decision that changes a document's premise is written into `08-decisions.md` first.
+- Every exit criterion is checked on real hardware before the next stage starts. The results are kept outside the repository (D28).
