@@ -420,7 +420,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
 - An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
-- An item's id is never given again once the item is gone, and neither is a library's. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back, and a client that missed the removal, or work queued for the old row, would take the new one for it. `meta.last_item_id` and `meta.last_library_id` hold the highest ids given.
+- An item's id is never given again once the item is gone, and neither is a library's or a library folder's. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `meta.last_library_id` and `meta.last_root_id` hold the highest ids given.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Collections**

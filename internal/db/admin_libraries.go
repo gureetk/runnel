@@ -192,7 +192,11 @@ func (d *DB) ChangeLibrary(ctx context.Context, id int64, c LibraryChange, now i
 			}
 		}
 		for _, p := range added {
-			if _, err := tx.tx.ExecContext(ctx, `INSERT INTO roots (library_id, path) VALUES (?, ?)`, id, p); err != nil {
+			rid, err := tx.newID(ctx, "last_root_id", "roots")
+			if err != nil {
+				return err
+			}
+			if _, err := tx.tx.ExecContext(ctx, `INSERT INTO roots (id, library_id, path) VALUES (?, ?, ?)`, rid, id, p); err != nil {
 				return err
 			}
 		}

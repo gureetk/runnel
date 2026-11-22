@@ -59,12 +59,11 @@ func (d *DB) CreateLibrary(ctx context.Context, name, kind, profile string, root
 		}
 		lib.UpdatedSeq = seq
 		for _, p := range clean {
-			res, err := tx.tx.ExecContext(ctx, `INSERT INTO roots (library_id, path) VALUES (?, ?)`, lib.ID, p)
+			id, err := tx.newID(ctx, "last_root_id", "roots")
 			if err != nil {
 				return err
 			}
-			id, err := res.LastInsertId()
-			if err != nil {
+			if _, err := tx.tx.ExecContext(ctx, `INSERT INTO roots (id, library_id, path) VALUES (?, ?, ?)`, id, lib.ID, p); err != nil {
 				return err
 			}
 			lib.Roots = append(lib.Roots, model.Root{ID: id, LibraryID: lib.ID, Path: p, Available: true})

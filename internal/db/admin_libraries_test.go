@@ -130,6 +130,9 @@ func TestIDsAreNeverGivenAgain(t *testing.T) {
 	if lib.ID <= showsID {
 		t.Fatalf("a new library took id %d; the removed one had %d", lib.ID, showsID)
 	}
+	if lib.Roots[0].ID <= 3 {
+		t.Fatalf("a new folder took id %d; the removed one had 3", lib.Roots[0].ID)
+	}
 	addSeries(t, d, lib.ID, lib.Roots[0].ID, "Harbor Lantern", 1)
 	if got := slices.Min(itemIDs(t, d, lib.ID)); got <= highest {
 		t.Fatalf("a new item took id %d; the removed ones went up to %d", got, highest)

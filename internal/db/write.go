@@ -72,11 +72,12 @@ func (d *DB) Write(ctx context.Context, fn func(ctx context.Context, tx *Tx) err
 	return nil
 }
 
-// newID returns the id for a new row of an item or a library: one above
-// any id such a row has had, so that a removed row's id is never given to
-// another. A client that missed the removal would take the new row for the
-// old one, and so would work queued for it (docs/03-data-model.md, section
-// 4). key names the highest id given in meta, which is written when the
+// newID returns the id for a new row of an item, a library or a library's
+// folder: one above any id such a row has had, so that a removed row's id
+// is never given to another. A client that missed the removal would take
+// the new row for the old one, and so would work queued for it, or a call
+// made from a page loaded before (docs/03-data-model.md, section 4). key
+// names the highest id given in meta, which is written when the
 // transaction commits. table is an internal name, never input.
 func (t *Tx) newID(ctx context.Context, key, table string) (int64, error) {
 	next, ok := t.ids[key]
