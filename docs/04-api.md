@@ -957,7 +957,7 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 | `GET /admin/encoders` | What the server found it can encode, and when it checked. |
 | `POST /admin/encoders/check` | Runs the check again (`05-playback.md`, section 8) and returns the result. It takes a few seconds. `503` with code `busy` while a transcode is running. |
 | `GET /admin/stats` | Memory, the database, counts and limits. |
-| `GET /admin/playlog` | The start-time log, newest first. Parameters: `limit`, `cursor`. The server keeps its last 1,000 rows (P7). |
+| `GET /admin/playlog` | The start-time log, newest first. Parameters: `limit` (1 to 1000, default 100), `cursor`. The server keeps its last 1,000 rows (P7). |
 
 `GET /admin/encoders`:
 
@@ -986,7 +986,7 @@ A target that has no row, such as AV1, is one this version of the server does no
 }
 ```
 
-`limits` are set when the server starts (P2) and can only be read here.
+`limits` are set when the server starts (P2) and can only be read here. `memory.rss` is the server's resident memory, read from `/proc` (0 where there is none). `database.size` is the database file without its write-ahead log.
 
 A row of `GET /admin/playlog`:
 
@@ -999,7 +999,7 @@ A row of `GET /admin/playlog`:
 ], "next": null}
 ```
 
-A row is a snapshot: it keeps the device's name and the title as they were, also after the device signs out or the item goes. Medians are the page's own arithmetic over the rows it has.
+A row is a snapshot: it keeps the person's and the device's names and the title as they were, also after the device signs out or the item goes. A field the report did not carry is null, and `server_first_byte_ms` and `encoder` are null for a direct playback. Medians are the page's own arithmetic over the rows it has.
 
 `GET /healthz`, outside `/api/v1`, answers `200` with no authentication.
 

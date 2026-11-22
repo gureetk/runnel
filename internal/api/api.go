@@ -48,6 +48,8 @@ type Config struct {
 	Gate Gate
 	// Images is where images' files are kept. Nil serves none.
 	Images Images
+	// StartedAt is when the server started; the API's own start when zero.
+	StartedAt time.Time
 }
 
 // Server is the API. Build one with New and serve its Handler.
@@ -60,6 +62,7 @@ type Server struct {
 	scans     Scans
 	gate      Gate
 	images    Images
+	startedAt time.Time
 	mux       *http.ServeMux
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
 
@@ -99,6 +102,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		scans:         c.Scans,
 		gate:          gate,
 		images:        c.Images,
+		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
 		warm:          warmups{by: map[int64]*warmup{}},
@@ -110,6 +114,9 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		pairLookups:   auth.NewLimiter(pairLookupMinute, time.Minute, now),
 		setupCodes:    auth.NewLimiter(setupTries, time.Minute, now),
 		touched:       map[int64]int64{},
+	}
+	if s.startedAt.IsZero() {
+		s.startedAt = now()
 	}
 	s.routes()
 	return s
@@ -164,6 +171,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
+	s.mux.Handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))
+	s.mux.Handle("GET "+Prefix+"/admin/stats", s.json(s.admin(s.handleStats)))
 }
 
 // Handler is the whole server: every route inside the middleware that every
