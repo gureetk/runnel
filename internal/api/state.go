@@ -39,17 +39,18 @@ func stateJSON(s db.State) *stateBody {
 }
 
 // personal is what belongs to the signed-in user on a set of cards: the
-// state of films and episodes, and the unplayed count of series and
-// seasons.
+// state of films and episodes, the unplayed count of series and seasons,
+// and when films and series went on My list.
 type personal struct {
 	states   map[int64]db.State
 	unplayed map[int64]int
+	listed   map[int64]int64
 }
 
 // personalOf reads the signed-in user's parts of some cards.
 func (s *Server) personalOf(ctx context.Context, cards []db.Card) (personal, error) {
 	user := callerOf(ctx).user.ID
-	var items, series, seasons []int64
+	var items, series, seasons, listable []int64
 	for _, c := range cards {
 		switch c.Type {
 		case "movie", "episode":
@@ -59,6 +60,9 @@ func (s *Server) personalOf(ctx context.Context, cards []db.Card) (personal, err
 		case "season":
 			seasons = append(seasons, c.ID)
 		}
+		if c.Type == "movie" || c.Type == "series" {
+			listable = append(listable, c.ID)
+		}
 	}
 	var p personal
 	var err error
@@ -66,6 +70,9 @@ func (s *Server) personalOf(ctx context.Context, cards []db.Card) (personal, err
 		return personal{}, err
 	}
 	if p.unplayed, err = s.db.Unplayed(ctx, user, series, seasons); err != nil {
+		return personal{}, err
+	}
+	if p.listed, err = s.db.ListedOf(ctx, user, listable); err != nil {
 		return personal{}, err
 	}
 	return p, nil

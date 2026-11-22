@@ -120,6 +120,8 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT "+Prefix+"/items/played", s.json(s.signedIn(s.handlePlayedMany(true))))
 	s.mux.Handle("DELETE "+Prefix+"/items/played", s.json(s.signedIn(s.handlePlayedMany(false))))
 	s.mux.Handle("PUT "+Prefix+"/items/state", s.json(s.signedIn(s.handleRestore)))
+	s.mux.Handle("PUT "+Prefix+"/items/{id}/list", s.json(s.signedIn(s.handleListed(true))))
+	s.mux.Handle("DELETE "+Prefix+"/items/{id}/list", s.json(s.signedIn(s.handleListed(false))))
 	s.mux.Handle("PUT "+Prefix+"/series/{id}/prefs", s.json(s.signedIn(s.handleSeriesPrefs(false))))
 	s.mux.Handle("DELETE "+Prefix+"/series/{id}/prefs", s.json(s.signedIn(s.handleSeriesPrefs(true))))
 	s.mux.Handle("GET "+Prefix+"/auth/me/prefs", s.json(s.signedIn(s.handleMyPrefs)))

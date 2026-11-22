@@ -76,15 +76,24 @@ const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_titl
      FROM images im WHERE im.item_id = i.id AND im.rank = 0),
   i.added_at, i.updated_seq`
 
-func scanCards(rows *sql.Rows) ([]Card, error) {
+func scanCards(rows *sql.Rows) ([]Card, error) { return scanCardsWith(rows, nil) }
+
+// scanCardsWith reads cards from a query of cardColumns followed by one
+// more column, which it scans into what extra returns for each row. A nil
+// extra reads cardColumns alone.
+func scanCardsWith(rows *sql.Rows, extra func() any) ([]Card, error) {
 	defer rows.Close()
 	var out []Card
 	for rows.Next() {
 		var c Card
 		var root, year, parent, series, season, episode, end, absolute sql.NullInt64
 		var seriesTitle, images sql.NullString
-		if err := rows.Scan(&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
-			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq); err != nil {
+		dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
+			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
+		if extra != nil {
+			dest = append(dest, extra())
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		if images.String != "" && images.String != "{}" {
