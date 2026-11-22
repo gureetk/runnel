@@ -2,8 +2,8 @@
 
 // Command runnel is the Runnel media server, and the tool that manages it.
 //
-// What it does so far is the work of stage 1 in docs/01-roadmap.md, as far
-// as it has been built.
+// What it does so far is the work of the stages of docs/01-roadmap.md, as
+// far as they have been built.
 package main
 
 import (
@@ -20,6 +20,8 @@ const usage = `Usage: runnel <command>
 Commands:
   serve                        Run the server.
   user add <name> [--admin]    Add a user to the running server.
+  pair approve <code> --user <name>
+                               Sign in the device that shows the code.
   library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
                                Add a library to the running server.
   scan [--library <id>]        Ask the running server to scan.
@@ -48,6 +50,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return userCmd(args[1:], stdin, stdout, stderr)
 	case "library":
 		return libraryCmd(args[1:], stdout, stderr)
+	case "pair":
+		return pairCmd(args[1:], stdout, stderr)
 	case "scan":
 		return scanCmd(args[1:], stdout, stderr)
 	case "report":
