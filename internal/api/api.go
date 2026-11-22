@@ -61,6 +61,7 @@ type Server struct {
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
 
 	warm          warmups
+	sessions      sessions      // playbacks that report progress
 	firstByteHold time.Duration // firstByteHold, shorter in tests
 	prepareHold   time.Duration // prepareHold, shorter in tests
 
@@ -92,6 +93,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
 		warm:          warmups{by: map[int64]*warmup{}},
+		sessions:      sessions{by: map[sessionKey]*session{}},
 		firstByteHold: firstByteHold,
 		prepareHold:   prepareHold,
 		logins:        auth.NewLimiter(loginTries, time.Minute, now),
@@ -112,6 +114,16 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
 	s.mux.Handle("GET "+Prefix+"/files/{id}/external/{external_id}", s.media(s.handleExternal))
 	s.mux.Handle("POST "+Prefix+"/files/{id}/prepare", s.json(s.signedIn(s.handlePrepare)))
+	s.mux.Handle("POST "+Prefix+"/progress", s.json(s.signedIn(s.handleProgress)))
+	s.mux.Handle("PUT "+Prefix+"/items/{id}/played", s.json(s.signedIn(s.handlePlayed(true))))
+	s.mux.Handle("DELETE "+Prefix+"/items/{id}/played", s.json(s.signedIn(s.handlePlayed(false))))
+	s.mux.Handle("PUT "+Prefix+"/items/played", s.json(s.signedIn(s.handlePlayedMany(true))))
+	s.mux.Handle("DELETE "+Prefix+"/items/played", s.json(s.signedIn(s.handlePlayedMany(false))))
+	s.mux.Handle("PUT "+Prefix+"/items/state", s.json(s.signedIn(s.handleRestore)))
+	s.mux.Handle("PUT "+Prefix+"/series/{id}/prefs", s.json(s.signedIn(s.handleSeriesPrefs(false))))
+	s.mux.Handle("DELETE "+Prefix+"/series/{id}/prefs", s.json(s.signedIn(s.handleSeriesPrefs(true))))
+	s.mux.Handle("GET "+Prefix+"/auth/me/prefs", s.json(s.signedIn(s.handleMyPrefs)))
+	s.mux.Handle("PUT "+Prefix+"/auth/me/prefs", s.json(s.signedIn(s.handleSetMyPrefs)))
 	s.mux.Handle("GET "+Prefix+"/img/{key}/{w}", http.HandlerFunc(s.handleImage))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))

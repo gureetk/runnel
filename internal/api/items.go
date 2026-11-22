@@ -19,16 +19,16 @@ type rootStateBody struct {
 }
 
 type libraryBody struct {
-	ID    int64           `json:"id"`
-	Name  string          `json:"name"`
-	Kind  string          `json:"kind"`
-	Items int             `json:"items"`
-	Roots []rootStateBody `json:"roots"`
-	Seq   int64           `json:"seq"`
+	ID       int64           `json:"id"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind"`
+	Items    int             `json:"items"`
+	Unplayed int             `json:"unplayed"`
+	Roots    []rootStateBody `json:"roots"`
+	Seq      int64           `json:"seq"`
 }
 
 // handleLibraries is GET /libraries (docs/04-api.md, section 4.1).
-// unplayed arrives with watch state.
 func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	libs, err := s.db.Libraries(r.Context())
 	if err != nil {
@@ -40,9 +40,15 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	unplayed, err := s.db.UnplayedByLibrary(r.Context(), callerOf(r.Context()).user.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	out := []libraryBody{}
 	for _, l := range libs {
-		b := libraryBody{ID: l.ID, Name: l.Name, Kind: l.Kind, Items: counts[l.ID], Roots: []rootStateBody{}, Seq: l.UpdatedSeq}
+		b := libraryBody{ID: l.ID, Name: l.Name, Kind: l.Kind, Items: counts[l.ID], Unplayed: unplayed[l.ID],
+			Roots: []rootStateBody{}, Seq: l.UpdatedSeq}
 		for _, root := range l.Roots {
 			b.Roots = append(b.Roots, rootStateBody{ID: root.ID, Available: root.Available})
 		}
@@ -52,7 +58,7 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 }
 
 // cardBody is a card (docs/04-api.md, section 2.1) as far as stage 2 has
-// its data. What needs metadata, artwork or a user's state is absent.
+// its data. What needs metadata is absent.
 type cardBody struct {
 	ID          int64                   `json:"id"`
 	Type        string                  `json:"type"`
@@ -68,19 +74,35 @@ type cardBody struct {
 	Absolute    *int                    `json:"absolute,omitempty"`
 	Available   bool                    `json:"available"`
 	Images      map[string]db.CardImage `json:"images,omitempty"`
+	State       *stateBody              `json:"state,omitempty"`
 	Counts      *countsBody             `json:"counts,omitempty"`
 	AddedAt     int64                   `json:"added_at"`
 	Seq         int64                   `json:"seq"`
 }
 
 // countsBody is a series' or a season's counts. A series counts its
-// episodes and seasons outside the specials.
+// episodes and seasons outside the specials. unplayed is the signed-in
+// user's.
 type countsBody struct {
 	Episodes int  `json:"episodes"`
+	Unplayed *int `json:"unplayed,omitempty"`
 	Seasons  *int `json:"seasons,omitempty"`
 }
 
-func cardJSON(c db.Card) cardBody {
+// unplayedOf is a series' or a season's unplayed count, or nil where no
+// user's parts were read.
+func (p personal) unplayedOf(id int64) *int {
+	if p.unplayed == nil {
+		return nil
+	}
+	n := p.unplayed[id]
+	return &n
+}
+
+// cardJSON is a card, with the parts of p that belong to the signed-in
+// user: a film's or an episode's state, a series' or a season's unplayed
+// count. A zero p leaves them out.
+func cardJSON(c db.Card, p personal) cardBody {
 	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, Available: c.Available, Images: c.Images,
 		AddedAt: c.AddedAt, Seq: c.Seq}
 	if c.RootID != 0 {
@@ -88,6 +110,9 @@ func cardJSON(c db.Card) cardBody {
 	}
 	if c.Year != 0 {
 		b.Year = &c.Year
+	}
+	if p.states != nil && (c.Type == "movie" || c.Type == "episode") {
+		b.State = p.state(c.ID)
 	}
 	switch c.Type {
 	case "episode":
@@ -101,9 +126,9 @@ func cardJSON(c db.Card) cardBody {
 		}
 	case "season":
 		b.SeriesID, b.SeriesTitle, b.Season = &c.SeriesID, c.SeriesTitle, &c.Season
-		b.Counts = &countsBody{Episodes: c.Episodes}
+		b.Counts = &countsBody{Episodes: c.Episodes, Unplayed: p.unplayedOf(c.ID)}
 	case "series":
-		b.Counts = &countsBody{Episodes: c.Episodes, Seasons: &c.Seasons}
+		b.Counts = &countsBody{Episodes: c.Episodes, Unplayed: p.unplayedOf(c.ID), Seasons: &c.Seasons}
 	}
 	return b
 }
@@ -305,8 +330,13 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		body.Next = &n
 		cards = cards[:limit]
 	}
+	mine, err := s.personalOf(r.Context(), cards)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	for _, c := range cards {
-		body.Items = append(body.Items, cardJSON(c))
+		body.Items = append(body.Items, cardJSON(c, mine))
 	}
 	if first {
 		body.Total = &total
@@ -458,10 +488,36 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	body := detailBody{cardBody: cardJSON(c), OriginalTitle: nil, ExternalIDs: m.ExternalIDs,
+	user := callerOf(r.Context()).user.ID
+	var seasons []db.Card
+	if c.Type == "series" {
+		if seasons, err = s.db.SeasonsOf(r.Context(), id, db.SeasonKey{Season: math.MinInt32}, 1000); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	mine, err := s.personalOf(r.Context(), append([]db.Card{c}, seasons...))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	body := detailBody{cardBody: cardJSON(c, mine), OriginalTitle: nil, ExternalIDs: m.ExternalIDs,
 		Match: matchBody{State: m.State}}
 	if m.Confidence != 0 {
 		body.Match.Confidence = &m.Confidence
+	}
+	if c.Type == "movie" || c.Type == "episode" || c.Type == "series" {
+		series := c.SeriesID
+		if c.Type == "series" {
+			series = c.ID
+		}
+		p, err := s.db.PrefsFor(r.Context(), user, series)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		pb := prefsJSON(p)
+		body.Prefs = &pb
 	}
 	switch c.Type {
 	case "movie", "episode":
@@ -490,30 +546,38 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		}
 	case "series":
 		body.Numbering = m.Numbering
-		seasons, err := s.db.SeasonsOf(r.Context(), id, db.SeasonKey{Season: math.MinInt32}, 1000)
+		list := []seasonBody{}
+		for _, se := range seasons {
+			list = append(list, seasonBody{ID: se.ID, Season: se.Season, Title: se.Title,
+				Counts: countsBody{Episodes: se.Episodes, Unplayed: mine.unplayedOf(se.ID)}})
+		}
+		body.Seasons = &list
+		at, ok, err := s.db.ResumeOf(r.Context(), user, id)
 		if err != nil {
 			s.internal(w, r, err)
 			return
 		}
-		list := []seasonBody{}
-		for _, se := range seasons {
-			list = append(list, seasonBody{ID: se.ID, Season: se.Season, Title: se.Title, Counts: countsBody{Episodes: se.Episodes}})
+		if ok {
+			body.Resume = &resumeBody{ID: at.ID, Season: at.Season, Episode: at.Episode, PositionMS: at.PositionMS}
 		}
-		body.Seasons = &list
 	}
 	writeJSON(w, http.StatusOK, body)
 }
 
 // detailBody is an item's detail (docs/04-api.md, section 2.2), as far as
-// stage 2 has its data: the card, and for a film or an episode its files,
-// for an episode its neighbours, for a series its numbering and seasons.
+// stage 2 has its data: the card; for a film, an episode or a series the
+// track choice to start with; for a film or an episode its files; for an
+// episode its neighbours; for a series its numbering, its seasons and
+// where its Play button starts.
 type detailBody struct {
 	cardBody
 	OriginalTitle *string           `json:"original_title"`
 	ExternalIDs   map[string]string `json:"external_ids"`
 	Match         matchBody         `json:"match"`
+	Prefs         *prefsBody        `json:"prefs,omitempty"`
 	Numbering     string            `json:"numbering,omitempty"`
 	Seasons       *[]seasonBody     `json:"seasons,omitempty"`
+	Resume        *resumeBody       `json:"resume,omitempty"`
 	Files         *[]fileBody       `json:"files,omitempty"`
 	Prev          *neighbourBody    `json:"prev,omitempty"`
 	Next          *neighbourBody    `json:"next,omitempty"`
@@ -529,6 +593,13 @@ type seasonBody struct {
 	Season int        `json:"season"`
 	Title  string     `json:"title"`
 	Counts countsBody `json:"counts"`
+}
+
+type resumeBody struct {
+	ID         int64 `json:"id"`
+	Season     int   `json:"season"`
+	Episode    int   `json:"episode"`
+	PositionMS int64 `json:"position_ms"`
 }
 
 type neighbourBody struct {

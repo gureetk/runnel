@@ -175,9 +175,16 @@ func remoteIP(r *http.Request) net.IP {
 	return net.ParseIP(host)
 }
 
-// decode reads a JSON body into v, or answers 400 and reports false.
+// decode reads a JSON body of at most 64 KiB into v, or answers 400 and
+// reports false.
 func (s *Server) decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	return s.decodeUpTo(w, r, v, 64<<10)
+}
+
+// decodeUpTo reads a JSON body of at most limit bytes into v, or answers
+// 400 and reports false.
+func (s *Server) decodeUpTo(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		s.fail(w, r, http.StatusBadRequest, "bad_request", "the body is not the JSON this call takes")
 		return false
