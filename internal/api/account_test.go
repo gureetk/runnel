@@ -105,3 +105,130 @@ func TestOwnAccount(t *testing.T) {
 		t.Fatalf("after logout: %d", rec.Code)
 	}
 }
+
+func TestPeopleAndDevices(t *testing.T) {
+	ts := newTestServer(t)
+	ada := ts.signIn(t, "ada", true, "phone")
+	noor := ts.signIn(t, "noor", false, "tv")
+	var me loginAnswer
+	ts.call(t, "POST", "/api/v1/auth/login", "", "", login("noor", "correct horse", "laptop"), &me)
+	users := map[string]adminUserBody{}
+	list := func() {
+		t.Helper()
+		var body struct {
+			Users []adminUserBody `json:"users"`
+		}
+		ts.call(t, "GET", "/api/v1/admin/users", ada, "", nil, &body)
+		users = map[string]adminUserBody{}
+		for _, u := range body.Users {
+			users[u.Name] = u
+		}
+	}
+	list()
+	adaID, noorID := idStr(users["ada"].ID), idStr(users["noor"].ID)
+
+	var e apiError
+	for _, c := range []struct {
+		id     string
+		body   any
+		status int
+		code   string
+	}{
+		{noorID, map[string]any{"name": "ADA"}, 409, "conflict"},
+		{noorID, map[string]any{"name": ""}, 400, "bad_request"},
+		{noorID, map[string]any{"name": nil}, 400, "bad_request"},
+		{noorID, map[string]any{"password": "short"}, 400, "weak_password"},
+		{noorID, map[string]any{"password": 7}, 400, "bad_request"},
+		{noorID, map[string]any{"is_admin": "yes"}, 400, "bad_request"},
+		{noorID, map[string]any{"devices": 0}, 400, "bad_request"},
+		{adaID, map[string]any{"is_admin": false}, 409, "last_admin"},
+		{"99", map[string]any{"name": "x"}, 404, "not_found"},
+	} {
+		e = apiError{}
+		if rec := ts.call(t, "PATCH", "/api/v1/admin/users/"+c.id, ada, "", c.body, &e); rec.Code != c.status || e.Error.Code != c.code {
+			t.Errorf("%s %v: %d %+v, want %d %s", c.id, c.body, rec.Code, e, c.status, c.code)
+		}
+	}
+	var changed adminUserBody
+	if rec := ts.call(t, "PATCH", "/api/v1/admin/users/"+noorID, ada, "",
+		map[string]any{"name": "Noor", "password": nil, "is_admin": true}, &changed); rec.Code != 200 ||
+		changed.Name != "Noor" || !changed.IsAdmin || changed.HasPassword || changed.Devices != 2 || changed.LastActiveAt == nil {
+		t.Fatalf("%d %+v", rec.Code, changed)
+	}
+	if rec := ts.call(t, "POST", "/api/v1/auth/login", "", "", login("noor", "correct horse", "tablet"), nil); rec.Code != 401 {
+		t.Fatalf("a password taken away still signs in: %d", rec.Code)
+	}
+	if rec := ts.call(t, "PATCH", "/api/v1/admin/users/"+noorID, ada, "", map[string]any{"password": "a new long password"}, &changed); rec.Code != 200 || !changed.HasPassword {
+		t.Fatalf("a new password: %d %+v", rec.Code, changed)
+	}
+	if rec := ts.call(t, "POST", "/api/v1/auth/login", "", "", login("noor", "a new long password", "tablet"), nil); rec.Code != 200 {
+		t.Fatalf("sign in with the new password: %d", rec.Code)
+	}
+	// Noor's devices stayed signed in, and noor is an admin now.
+	if rec := ts.call(t, "GET", "/api/v1/admin/users", noor, "", nil, nil); rec.Code != 200 {
+		t.Fatalf("noor's tv after the changes: %d", rec.Code)
+	}
+
+	var devices struct {
+		Devices []struct {
+			myDeviceBody
+			User struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			} `json:"user"`
+		} `json:"devices"`
+	}
+	ts.call(t, "GET", "/api/v1/admin/tokens", ada, "", nil, &devices)
+	if len(devices.Devices) != 4 {
+		t.Fatalf("%+v", devices)
+	}
+	var tv struct {
+		Device myDeviceBody `json:"device"`
+	}
+	ts.call(t, "GET", "/api/v1/auth/me", noor, "", nil, &tv)
+	var laptop int64
+	current := 0
+	for _, d := range devices.Devices {
+		if d.Current {
+			current++
+			if d.User.Name != "ada" {
+				t.Fatalf("the current device is %+v", d)
+			}
+		}
+		if d.User.Name == "Noor" && d.ID != tv.Device.ID {
+			laptop = d.ID
+		}
+	}
+	if current != 1 || laptop == 0 || tv.Device.ID == 0 {
+		t.Fatalf("%d current, another device %d, the tv %d: %+v", current, laptop, tv.Device.ID, devices)
+	}
+	if rec := ts.call(t, "DELETE", "/api/v1/admin/tokens/"+idStr(laptop), ada, "", nil, nil); rec.Code != 204 {
+		t.Fatalf("sign a device out: %d", rec.Code)
+	}
+	if rec := ts.call(t, "DELETE", "/api/v1/admin/tokens/"+idStr(laptop), ada, "", nil, &e); rec.Code != 404 || e.Error.Code != "not_found" {
+		t.Fatalf("again: %d %+v", rec.Code, e)
+	}
+
+	// Noor removes ada, who is no longer the last admin. Ada's phone is
+	// signed out with her.
+	if rec := ts.call(t, "DELETE", "/api/v1/admin/users/"+adaID, noor, "", nil, nil); rec.Code != 204 {
+		t.Fatalf("remove ada: %d", rec.Code)
+	}
+	if rec := ts.call(t, "GET", "/api/v1/auth/me", ada, "", nil, nil); rec.Code != 401 {
+		t.Fatalf("ada's phone: %d", rec.Code)
+	}
+	if rec := ts.call(t, "DELETE", "/api/v1/admin/users/"+noorID, noor, "", nil, &e); rec.Code != 409 || e.Error.Code != "last_admin" {
+		t.Fatalf("the last admin: %d %+v", rec.Code, e)
+	}
+	if rec := ts.call(t, "DELETE", "/api/v1/admin/users/"+adaID, noor, "", nil, &e); rec.Code != 404 {
+		t.Fatalf("a user who went: %d", rec.Code)
+	}
+	// Someone who is no admin is refused all of it.
+	bo := ts.signIn(t, "bo", false, "watch")
+	for _, c := range [][2]string{{"PATCH", "/api/v1/admin/users/" + noorID}, {"DELETE", "/api/v1/admin/users/" + noorID},
+		{"GET", "/api/v1/admin/tokens"}, {"DELETE", "/api/v1/admin/tokens/1"}} {
+		if rec := ts.call(t, c[0], c[1], bo, "", map[string]any{}, nil); rec.Code != 403 {
+			t.Errorf("%s %s by bo: %d", c[0], c[1], rec.Code)
+		}
+	}
+}

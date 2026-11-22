@@ -420,7 +420,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
 - An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
-- An item's id is never given again once the item is gone, and neither is a library's or a library folder's. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `meta.last_library_id` and `meta.last_root_id` hold the highest ids given.
+- An item's id is never given again once the item is gone, and neither is the id of a library, a library folder, a user or a token. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `last_library_id`, `last_root_id`, `last_user_id` and `last_token_id` hold the highest ids given.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Collections**
@@ -476,7 +476,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A row left `running` by a server that stopped is queued again at the next start, and that run does not count in `attempts`.
 - A probe queued again while it runs, for a file that changed meanwhile, stays queued when the run ends, and runs again.
 - `play_log` keeps its newest 1,000 rows (P7). Inserting a row deletes what is older.
-- A `play_log` row comes from the first progress report of a playback that carries timings or stats (`04-api.md`, section 7.6). Its `mode` is the report's, so it can also be `remux` (section 7.9 there), which the comment in migration 0001 leaves out. `detail` keeps the user's name, the device's name and client, the item's title and the client's stats as they were, so that the row still reads the same after the device signs out or the item goes.
+- A `play_log` row comes from the first progress report of a playback that carries timings or stats (`04-api.md`, section 7.6). Its `mode` is the report's, so it can also be `remux` (section 7.9 there), which the comment in migration 0001 leaves out. `detail` keeps the user's name, the device's name and client, the item's title and the client's stats as they were, so that the row still reads the same after the device signs out or the item goes. Removing a user sets `user_id` to NULL in their rows.
 
 **Search index**
 

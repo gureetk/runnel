@@ -944,12 +944,14 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 |---|---|
 | `GET /admin/users` | `{"users": [{"id": 1, "name": "ada", "is_admin": true, "has_password": true, "devices": 3, "last_active_at": 1795203000000}]}`. |
 | `POST /admin/users` | `{"name": "noor", "password": "…", "is_admin": false}`. Without a password the person signs in by pairing only. Returns `201` with `{"id": 2, "name": "noor", "is_admin": false}`. |
-| `PATCH /admin/users/{id}` | Rename, set a new password, make admin or not. |
-| `DELETE /admin/users/{id}` | Removes the person, with their progress, their list and their sign-ins. |
-| `GET /admin/tokens`, `DELETE /admin/tokens/{id}` | Signed-in devices, one entry for each person on a device, shaped as in 3.5 with the `user` added. Deleting one signs it out. |
+| `PATCH /admin/users/{id}` | Rename, set a new password, make admin or not: `{"name": "Noor", "password": "…", "is_admin": true}`, any of them. Returns the person as `GET /admin/users` lists them. |
+| `DELETE /admin/users/{id}` | Removes the person, with their progress, their list and their sign-ins. Returns `204`. |
+| `GET /admin/tokens`, `DELETE /admin/tokens/{id}` | Signed-in devices, one entry for each person on a device, shaped as in 3.5 with the `user` added: `{"devices": [{"id": 12, "name": "Living room TV", …, "current": false, "user": {"id": 1, "name": "ada"}}]}`, the one used last first. Deleting one signs it out, and returns `204`. |
 | `GET /admin/pairings` | Devices waiting with a pairing code: `{"pairings": [{"code": "K7Q2M9", "device": {"name": "Bedroom TV", "client": "runnel-androidtv/1.0.0"}, "created_at": 1795203000000, "expires_in": 412}]}`. |
 
 - The last admin cannot be removed or made a non-admin: `409` with code `last_admin`.
+- `PATCH` changes everything it is given or nothing, and any other field is `400`. A new password leaves the person's devices signed in. `"password": null` takes the password away: the person signs in by pairing only.
+- A removed person's rows of the start-time log keep their name, and their `user.id` is null (8.7). Their id is never given to another (`03-data-model.md`, section 4).
 - A name has 1 to 40 characters, no control characters and no space at either end. Names are compared without case. A name that is taken is `409` with code `conflict`.
 - The first person is always an admin, whatever `is_admin` says, so that a server always has one.
 - The pairings list says that something is waiting. Approving is still done against the code on the device's own screen (3.3).
@@ -1004,7 +1006,7 @@ A row of `GET /admin/playlog`:
 ], "next": null}
 ```
 
-A row is a snapshot: it keeps the person's and the device's names and the title as they were, also after the device signs out or the item goes. A field the report did not carry is null, and `server_first_byte_ms` and `encoder` are null for a direct playback. Medians are the page's own arithmetic over the rows it has.
+A row is a snapshot: it keeps the person's and the device's names and the title as they were, also after the device signs out or the item goes. Once the person is removed, `user.id` is null. A field the report did not carry is null, and `server_first_byte_ms` and `encoder` are null for a direct playback. Medians are the page's own arithmetic over the rows it has.
 
 `GET /healthz`, outside `/api/v1`, answers `200` with no authentication.
 

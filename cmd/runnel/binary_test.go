@@ -130,6 +130,15 @@ func TestTheBuiltBinary(t *testing.T) {
 	if _, errOut, status := run("", "user", "add"); status != 2 || !strings.Contains(errOut, "Usage: runnel user add") {
 		t.Fatalf("user add without a name: %d %q", status, errOut)
 	}
+	if out, errOut, status := run("a new long horse\n", "user", "passwd", "ada"); status != 0 || !strings.HasPrefix(out, "Set a new password for ada.") {
+		t.Fatalf("user passwd: %d %q %q", status, out, errOut)
+	}
+	if _, errOut, status := run("a new long horse\n", "user", "passwd", "kim"); status != 1 || !strings.Contains(errOut, "no user named kim") {
+		t.Fatalf("user passwd for nobody: %d %q", status, errOut)
+	}
+	if out, errOut, status := run("", "user", "list"); status != 0 || out != "1  ada: admin, signs in with a password; no device signed in\n" {
+		t.Fatalf("user list: %d %q %q", status, out, errOut)
+	}
 
 	films := filepath.Join(t.TempDir(), "films")
 	shows := filepath.Join(t.TempDir(), "shows")

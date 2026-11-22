@@ -38,8 +38,11 @@ func TestCommands(t *testing.T) {
 	if code := run([]string{"frobnicate"}, os.Stdin, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "unknown command") {
 		t.Errorf("unknown command: %d %q", code, errOut.String())
 	}
-	if code := run([]string{"user", "remove", "ada"}, os.Stdin, &out, &errOut); code != 2 {
-		t.Errorf("user remove: %d", code)
+	for _, args := range [][]string{{"user", "remove", "ada"}, {"user"}, {"user", "list", "ada"}, {"user", "passwd"},
+		{"user", "passwd", "ada", "--admin"}} {
+		if code := run(args, os.Stdin, &out, &errOut); code != 2 {
+			t.Errorf("%v: %d", args, code)
+		}
 	}
 	for _, args := range [][]string{{"library"}, {"library", "list", "extra"}, {"library", "remove"}, {"library", "remove", "x"},
 		{"library", "remove", "0"}, {"library", "rename", "1"}} {
@@ -185,14 +188,43 @@ func TestUserAdd(t *testing.T) {
 	}
 
 	// The user can now sign in.
-	resp, err := http.Post("http://"+srv.addr+"/api/v1/auth/login", "application/json", strings.NewReader(
-		`{"name":"ada","password":"correct horse","device":{"id":"test-device"}}`))
-	if err != nil {
+	signIn := func(name, password string) int {
+		t.Helper()
+		resp, err := http.Post("http://"+srv.addr+"/api/v1/auth/login", "application/json", strings.NewReader(
+			`{"name":"`+name+`","password":"`+password+`","device":{"id":"test-device"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := signIn("ada", "correct horse"); code != 200 {
+		t.Fatalf("sign-in: %d", code)
+	}
+
+	// A new password, for a name in any case; the list.
+	out.Reset()
+	if err := userPasswd(ctx, client, "NOOR", "a third horse", &out); err != nil ||
+		out.String() != "Set a new password for noor. Their devices stay signed in.\n" {
+		t.Fatalf("passwd: %q %v", out.String(), err)
+	}
+	if signIn("noor", "another horse") != 401 || signIn("noor", "a third horse") != 200 {
+		t.Fatal("the new password is not the one that signs in")
+	}
+	if err := userPasswd(ctx, client, "kim", "a third horse", &out); err == nil || !strings.Contains(err.Error(), "no user named kim") {
+		t.Fatalf("passwd for nobody: %v", err)
+	}
+	if err := userPasswd(ctx, client, "noor", "short", &out); !errors.As(err, &e) || e.Code != "weak_password" {
+		t.Fatalf("passwd, a short password: %v", err)
+	}
+	out.Reset()
+	if err := userList(ctx, client, &out); err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("sign-in: %d", resp.StatusCode)
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "1  ada: admin, signs in with a password; 1 device, last active ") ||
+		!strings.HasPrefix(lines[1], "2  noor: signs in with a password; 1 device, last active ") {
+		t.Fatalf("list:\n%s", out.String())
 	}
 
 	// With the server stopped, the subcommand says so.

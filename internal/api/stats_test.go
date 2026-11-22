@@ -19,7 +19,7 @@ func TestPlaylogAndStats(t *testing.T) {
 	type row struct {
 		ID   int64 `json:"id"`
 		User *struct {
-			ID   int64  `json:"id"`
+			ID   *int64 `json:"id"`
 			Name string `json:"name"`
 		} `json:"user"`
 		Device          *string `json:"device"`
@@ -43,7 +43,7 @@ func TestPlaylogAndStats(t *testing.T) {
 		t.Fatalf("playlog %d %+v", rec.Code, page)
 	}
 	r := page.Rows[0]
-	if r.User == nil || r.User.Name != "ada" || *r.Device != "Test device" || *r.Client != "runnel-test/0" || *r.ItemID != film.ID ||
+	if r.User == nil || r.User.ID == nil || r.User.Name != "ada" || *r.Device != "Test device" || *r.Client != "runnel-test/0" || *r.ItemID != film.ID ||
 		*r.Title != "Paper Comets" || r.Mode != "direct" || !r.Warmed || *r.ClientLoadedMS != 101 || *r.ClientPlayingMS != 201 ||
 		r.ServerFirstByte != nil || *r.Decoder != "mediacodec" || !*r.Hardware || r.Encoder != nil {
 		t.Fatalf("the newest row %+v", r)
@@ -82,6 +82,27 @@ func TestPlaylogAndStats(t *testing.T) {
 		if rec := b.call(t, "GET", target, b.token, "", nil, nil); rec.Code != 400 {
 			t.Errorf("%s: %d", target, rec.Code)
 		}
+	}
+
+	// A row keeps the person's name once the person is removed, and loses
+	// their id, which is never given again.
+	idOf := func(token string) string {
+		var me struct {
+			User struct {
+				ID int64 `json:"id"`
+			} `json:"user"`
+		}
+		b.call(t, "GET", "/api/v1/auth/me", token, "", nil, &me)
+		return idStr(me.User.ID)
+	}
+	b.call(t, "PATCH", "/api/v1/admin/users/"+idOf(bo), b.token, "", map[string]any{"is_admin": true}, nil)
+	if rec := b.call(t, "DELETE", "/api/v1/admin/users/"+idOf(b.token), bo, "", nil, nil); rec.Code != 204 {
+		t.Fatalf("remove ada: %d", rec.Code)
+	}
+	page.Rows = nil
+	b.call(t, "GET", "/api/v1/admin/playlog", bo, "", nil, &page)
+	if len(page.Rows) != 2 || page.Rows[0].User == nil || page.Rows[0].User.ID != nil || page.Rows[0].User.Name != "ada" {
+		t.Fatalf("after ada went: %+v", page.Rows)
 	}
 }
 

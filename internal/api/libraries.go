@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/gureetk/runnel/internal/db"
@@ -229,21 +228,11 @@ func (s *Server) handleAdminLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// libraryID reads the {id} of a library's path, or answers 404.
-func (s *Server) libraryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
-		s.fail(w, r, http.StatusNotFound, "not_found", "no such library")
-		return 0, false
-	}
-	return id, true
-}
-
 // handleChangeLibrary is PATCH /admin/libraries/{id}: a new name or
 // profile, folders added and folders removed, all at once or none of it
 // (docs/04-api.md, section 8.2). A library added to is scanned at once.
 func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
-	id, ok := s.libraryID(w, r)
+	id, ok := s.pathID(w, r, "library")
 	if !ok {
 		return
 	}
@@ -326,7 +315,7 @@ func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
 // handleDeleteLibrary is DELETE /admin/libraries/{id}: the library goes,
 // with its items and everyone's watch state for them.
 func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
-	id, ok := s.libraryID(w, r)
+	id, ok := s.pathID(w, r, "library")
 	if !ok {
 		return
 	}
