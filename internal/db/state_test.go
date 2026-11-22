@@ -389,13 +389,19 @@ func TestPrefs(t *testing.T) {
 	if p := prefs(1, 10); p != (Prefs{SubMode: "auto"}) {
 		t.Fatalf("a new user's defaults: %+v", p)
 	}
+	// New defaults take a sequence value, on no row, so that ETags move.
+	// The same defaults again take none.
 	defaults := Prefs{AudioLang: "jpn", SubLang: "eng", SubMode: "on"}
 	before := seqNow(t, d)
 	if err := d.SetDefaultPrefs(ctx, 1, defaults); err != nil {
 		t.Fatal(err)
 	}
-	if prefs(1, 0) != defaults || prefs(1, 10) != defaults || seqNow(t, d) != before {
+	if prefs(1, 0) != defaults || prefs(1, 10) != defaults || seqNow(t, d) != before+1 {
 		t.Fatalf("defaults %+v %+v, seq %d after %d", prefs(1, 0), prefs(1, 10), seqNow(t, d), before)
+	}
+	before = seqNow(t, d)
+	if err := d.SetDefaultPrefs(ctx, 1, defaults); err != nil || seqNow(t, d) != before {
+		t.Fatalf("the same defaults: %v, seq %d after %d", err, seqNow(t, d), before)
 	}
 
 	own := Prefs{AudioLang: "eng", SubMode: "off"}

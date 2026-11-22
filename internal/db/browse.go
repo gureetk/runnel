@@ -85,27 +85,41 @@ func scanCardsWith(rows *sql.Rows, extra func() any) ([]Card, error) {
 	defer rows.Close()
 	var out []Card
 	for rows.Next() {
-		var c Card
-		var root, year, parent, series, season, episode, end, absolute sql.NullInt64
-		var seriesTitle, images sql.NullString
-		dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
-			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
+		var e any
 		if extra != nil {
-			dest = append(dest, extra())
+			e = extra()
 		}
-		if err := rows.Scan(dest...); err != nil {
+		c, err := scanCard(rows, e)
+		if err != nil {
 			return nil, err
 		}
-		if images.String != "" && images.String != "{}" {
-			if err := json.Unmarshal([]byte(images.String), &c.Images); err != nil {
-				return nil, fmt.Errorf("db: read a card's images: %w", err)
-			}
-		}
-		c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
-		c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// scanCard reads the row a query of cardColumns is on, and the column
+// after them into extra when extra is not nil.
+func scanCard(rows *sql.Rows, extra any) (Card, error) {
+	var c Card
+	var root, year, parent, series, season, episode, end, absolute sql.NullInt64
+	var seriesTitle, images sql.NullString
+	dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
+		&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
+	if extra != nil {
+		dest = append(dest, extra)
+	}
+	if err := rows.Scan(dest...); err != nil {
+		return Card{}, err
+	}
+	if images.String != "" && images.String != "{}" {
+		if err := json.Unmarshal([]byte(images.String), &c.Images); err != nil {
+			return Card{}, fmt.Errorf("db: read a card's images: %w", err)
+		}
+	}
+	c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
+	c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
+	return c, nil
 }
 
 // ItemCounts counts the films and series of each library.

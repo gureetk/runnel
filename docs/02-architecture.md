@@ -184,8 +184,10 @@ The server's instance id, its settings and the setup code are rows in the databa
 | A held warm-up | A transcode's memory, no CPU | Measured |
 | A browser playback with the video copied | Two ffmpeg children, 56 to 58 MB each at their peak | Measured in the sandbox, 20 November 2026 |
 | The web interface | Its files are part of the binary. To be measured at stage 5. | Not measured |
+| A first sync of 20,000 items from `/changes` | Inside "under API load" | Measured in the sandbox, 21 November 2026, on generated files: 28.6 to 31.8 MiB at its peak, sampled every 50 ms, with pages of 500 or 2,000 |
+| The first build of a library of 20,000 items | Above a scan's budget | Measured in the sandbox, 21 November 2026: 44 to 57 MiB at its peak, 21 to 24 MiB idle after it. Not looked into yet |
 
-After a batch of scans and after a probe pass, the server hands the memory it freed back to the system (`debug.FreeOSMemory`): in the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files.
+After a batch of scans, after a probe pass, and at the end of a `/changes` sync that wrote 5,000 rows or more, the server hands the memory it freed back to the system (`debug.FreeOSMemory`). In the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files, and from 28 to 31 MiB to 24 to 26 MiB after the first sync of 20,000 items.
 
 Set `GOMEMLIMIT=64MiB` in the service. In the prototype a 16 MiB limit with `GOGC=50` held the server at 21.8 MB after load.
 

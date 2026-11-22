@@ -55,6 +55,9 @@ type Scanner struct {
 	// before it walks it, with the root as the check found it: available,
 	// or away. The watcher watches it from then on.
 	Checked func(root model.Root)
+	// Nightly, when set, is called when Run starts and at nightlyAt each
+	// night, before the walk: the cleanup that runs with it.
+	Nightly func(ctx context.Context)
 
 	// found is, for each root scanned since its library's items were
 	// built, the images the scan found and what it looked at.
@@ -115,6 +118,9 @@ func (s *Scanner) poke() {
 // and walks every library. It walks them all again each night at
 // nightlyAt.
 func (s *Scanner) Run(ctx context.Context) {
+	if s.Nightly != nil {
+		s.Nightly(ctx)
+	}
 	s.queueProbes(ctx, 0)
 	s.Request(0)
 	nightly := time.NewTimer(untilNightly(s.now()))
@@ -133,6 +139,9 @@ func (s *Scanner) Run(ctx context.Context) {
 		case <-soon.C:
 		case <-nightly.C:
 			s.log.Info("scan: the nightly walk")
+			if s.Nightly != nil {
+				s.Nightly(ctx)
+			}
 			s.Request(0)
 			nightly.Reset(untilNightly(s.now()))
 		}

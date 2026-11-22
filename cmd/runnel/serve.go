@@ -127,6 +127,18 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			"added", res.Added, "changed", res.Changed, "removed", res.Removed)
 		return nil
 	}
+	// At start and each night: the delete markers older than 90 days go,
+	// with what only they could tell (docs/03-data-model.md, section 5).
+	scanner.Nightly = func(ctx context.Context) {
+		p, err := database.Prune(ctx, time.Now().UnixMilli())
+		if err != nil {
+			log.Error("pruning failed", "err", err)
+			return
+		}
+		if p.Tombstones+p.Listings+p.Prefs > 0 {
+			log.Info("pruned", "tombstones", p.Tombstones, "listings", p.Listings, "prefs", p.Prefs, "floor", p.Floor)
+		}
+	}
 	background, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
 	scanning := make(chan struct{})

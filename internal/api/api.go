@@ -69,6 +69,9 @@ type Server struct {
 
 	touchMu sync.Mutex
 	touched map[int64]int64 // token id -> when its use was last written
+
+	changesMu   sync.Mutex
+	changesRows int // rows /changes wrote since memory was last handed back
 }
 
 // New builds the API on an open database.
@@ -109,6 +112,7 @@ func (s *Server) routes() {
 
 	s.mux.Handle("GET "+Prefix+"/libraries", s.json(s.signedIn(s.handleLibraries)))
 	s.mux.Handle("GET "+Prefix+"/items", s.json(s.signedIn(s.handleItems)))
+	s.mux.Handle("GET "+Prefix+"/changes", s.json(s.signedIn(s.handleChanges)))
 	s.mux.Handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
@@ -148,10 +152,13 @@ func (s *Server) Handler() http.Handler {
 	}))
 }
 
-// writeJSON sends v with the given status.
+// writeJSON sends v with the given status. It is not to be stored by a
+// cache, unless the handler said otherwise.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
