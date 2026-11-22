@@ -54,22 +54,23 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 // cardBody is a card (docs/04-api.md, section 2.1) as far as stage 2 has
 // its data. What needs metadata, artwork or a user's state is absent.
 type cardBody struct {
-	ID          int64       `json:"id"`
-	Type        string      `json:"type"`
-	LibraryID   int64       `json:"library_id"`
-	RootID      *int64      `json:"root_id,omitempty"`
-	Title       string      `json:"title"`
-	Year        *int        `json:"year,omitempty"`
-	SeriesID    *int64      `json:"series_id,omitempty"`
-	SeriesTitle string      `json:"series_title,omitempty"`
-	Season      *int        `json:"season,omitempty"`
-	Episode     *int        `json:"episode,omitempty"`
-	EpisodeEnd  *int        `json:"episode_end,omitempty"`
-	Absolute    *int        `json:"absolute,omitempty"`
-	Available   bool        `json:"available"`
-	Counts      *countsBody `json:"counts,omitempty"`
-	AddedAt     int64       `json:"added_at"`
-	Seq         int64       `json:"seq"`
+	ID          int64                   `json:"id"`
+	Type        string                  `json:"type"`
+	LibraryID   int64                   `json:"library_id"`
+	RootID      *int64                  `json:"root_id,omitempty"`
+	Title       string                  `json:"title"`
+	Year        *int                    `json:"year,omitempty"`
+	SeriesID    *int64                  `json:"series_id,omitempty"`
+	SeriesTitle string                  `json:"series_title,omitempty"`
+	Season      *int                    `json:"season,omitempty"`
+	Episode     *int                    `json:"episode,omitempty"`
+	EpisodeEnd  *int                    `json:"episode_end,omitempty"`
+	Absolute    *int                    `json:"absolute,omitempty"`
+	Available   bool                    `json:"available"`
+	Images      map[string]db.CardImage `json:"images,omitempty"`
+	Counts      *countsBody             `json:"counts,omitempty"`
+	AddedAt     int64                   `json:"added_at"`
+	Seq         int64                   `json:"seq"`
 }
 
 // countsBody is a series' or a season's counts. A series counts its
@@ -80,7 +81,8 @@ type countsBody struct {
 }
 
 func cardJSON(c db.Card) cardBody {
-	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, Available: c.Available, AddedAt: c.AddedAt, Seq: c.Seq}
+	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, Available: c.Available, Images: c.Images,
+		AddedAt: c.AddedAt, Seq: c.Seq}
 	if c.RootID != 0 {
 		b.RootID = &c.RootID
 	}

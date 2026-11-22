@@ -22,6 +22,7 @@ import (
 	"github.com/gureetk/runnel/internal/config"
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
+	"github.com/gureetk/runnel/internal/meta"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
 	"github.com/gureetk/runnel/internal/tasks"
@@ -96,8 +97,22 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	} else {
 		queue.Register(scan.NewProbes(database, probe.New(ffprobe, scan.ProbeWorkers), log).Kind())
 	}
+	// Images are scaled by an ffmpeg child, and need ffprobe for their
+	// size.
+	ffmpeg := cfg.FFmpeg
+	if ffmpeg == "" {
+		ffmpeg, _ = exec.LookPath("ffmpeg")
+	}
+	if ffmpeg == "" {
+		log.Warn("ffmpeg is not on PATH: images in library folders are not shown; set RUNNEL_FFMPEG to its path")
+	}
+	artwork := meta.NewArtwork(database, cfg.DataDir, ffmpeg, ffprobe, log)
+	artwork.Queued = queue.Wake
+	queue.Register(artwork.Kind())
+
 	scanner := scan.New(database, log)
 	scanner.Queued = queue.Wake
+	scanner.Images = artwork.Sync
 	// The watcher follows each root the scanner has checked, and asks it
 	// to scan what changed.
 	watcher := scan.NewWatcher(scanner, log)
@@ -137,6 +152,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		AdminTokenHash: adminHash,
 		Scans:          scanner,
 		Gate:           gate,
+		Images:         artwork,
 	}).Handler()
 	srv := &http.Server{
 		Handler:           handler,

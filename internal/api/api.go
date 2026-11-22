@@ -43,6 +43,8 @@ type Config struct {
 	// Gate is the playback gate, which a starting playback holds. Nil
 	// holds nothing.
 	Gate Gate
+	// Images is where images' files are kept. Nil serves none.
+	Images Images
 }
 
 // Server is the API. Build one with New and serve its Handler.
@@ -54,6 +56,7 @@ type Server struct {
 	now       func() time.Time
 	scans     Scans
 	gate      Gate
+	images    Images
 	mux       *http.ServeMux
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
 
@@ -85,6 +88,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		now:           now,
 		scans:         c.Scans,
 		gate:          gate,
+		images:        c.Images,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
 		warm:          warmups{by: map[int64]*warmup{}},
@@ -108,6 +112,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
 	s.mux.Handle("GET "+Prefix+"/files/{id}/external/{external_id}", s.media(s.handleExternal))
 	s.mux.Handle("POST "+Prefix+"/files/{id}/prepare", s.json(s.signedIn(s.handlePrepare)))
+	s.mux.Handle("GET "+Prefix+"/img/{key}/{w}", http.HandlerFunc(s.handleImage))
 
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))

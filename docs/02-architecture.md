@@ -160,7 +160,7 @@ Subcommands that change data talk to the running server over its API on localhos
 ```
 runnel.db, runnel.db-wal, runnel.db-shm   the database
 admin.token                               for the subcommands, readable by the service user only; new at every start (section 6)
-images/ab/<key>_<width>.jpg               artwork
+images/ab/<key>_<width>.jpg               artwork; a logo is .png
 sidecar/<file id>-<fingerprint>.mkv       audio-and-subtitle files, a capped cache
 subs/<file id>-<fingerprint>/             text subtitle tracks and attached fonts, extracted for browsers; in the same cap
 import/jellyfin-report.json               the report of the last import or dry run

@@ -557,7 +557,8 @@ What the copy does not hold: files with their streams and chapters, credits, and
 
 ## 6. Images: `GET /img/{key}/{w}`
 
-- `key` comes from an `images` entry, or from a person's `image`. `w` is one of its listed widths. Another width gets the nearest stored one at or above it.
+- `key` comes from an `images` entry, or from a person's `image`. `w` is one of its listed widths. Another width gets the nearest stored one at or above it, or the widest when none is.
+- A logo is `image/png`, every other image `image/jpeg`. `404` for a key that is not an image's, and for an image whose files were deleted from the data directory, until the next scan makes them again.
 - No authentication: keys are 128 random-looking bits and the content is artwork.
 - `Cache-Control: public, max-age=31536000, immutable`. A changed image has a new key.
 - The server never resizes an image in its own process. Provider images are fetched at the widths the provider offers. Local images are scaled once by an ffmpeg child.

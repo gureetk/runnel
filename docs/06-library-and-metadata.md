@@ -202,7 +202,19 @@ Both lists are Jellyfin's, as its documentation for films gives them (checked on
 
 ### 4.8 Local images
 
-`poster`, `folder`, `backdrop`, `fanart`, `logo`, `banner` in an item's folder, and `<episode file name>-thumb` next to an episode. Used before anything is fetched.
+Image files in an item's folder, as Jellyfin's documentation names them [checked: its page on metadata images, 21 November 2026]. Used before anything is fetched.
+
+| Kind | Names, in the order preferred | Taken by |
+|---|---|---|
+| `poster` | `poster`, `cover`, `folder`, `default`, `movie`, `show` | films, series, seasons |
+| `backdrop` | `backdrop`, `fanart`, `background`, `art` | films, series |
+| `logo` | `logo`, `clearlogo` | films, series |
+| `thumb` | `<episode file's base name>-thumb` | episodes |
+
+- The formats are `.jpg`, `.jpeg`, `.png` and `.webp`.
+- A film's images are in its folder: a name alone, `poster.jpg`, or after the base name of one of its files and a dash, `Paper Comets (2019)-poster.jpg`. A lone file at the top of a films library has only the second kind, beside it.
+- A series' images are in its folder, a season's poster in its season folder, by a name alone. An episode's thumb is beside its file.
+- Not kept: images in an extras folder; `banner`, and the landscape `thumb` and `landscape` of films and series, for which no screen has a place; backdrops numbered for cycling, `backdrop-1.jpg`, and the `extrafanart` folder; a season's backdrop and logo.
 
 ## 5. Building items
 
@@ -336,11 +348,11 @@ A library that Jellyfin has already matched can be imported. That is quicker and
 | `logo` | films, series | 500 |
 | a person's photo | cast and crew | One width for cards and one for the person page, chosen from the provider's sizes when stage 4 is specified |
 
-- **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once.
+- **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once, none wider than the file itself: a file narrower than a width is kept at its own, and that is the width listed. A scan finds them after it has built the items, and queues an `image` task for each one that is new or changed (section 9). An image whose file went is removed, with its files. A scan also makes again an image whose files were deleted from the data directory.
 - **Provider images** are downloaded at the provider's own sizes nearest to those widths. The server never decodes a large image in its own process.
-- **Key.** 32 hex characters derived from the image's source: the provider and its image path, or a local file's fingerprint. A changed image has a new key, so responses can be cached forever.
-- **On disk**: `images/<first two characters>/<key>_<width>.jpg` under the data directory.
-- **Placeholder colour**: the average colour of the smallest stored width, computed once.
+- **Key.** 32 hex characters derived from the image's source: the provider and its image path, or a local file's fingerprint (2.1). For a local file it is the first 128 bits of the SHA-256 of `local:` and the fingerprint. A changed image has a new key, so responses can be cached forever.
+- **On disk**: `images/<first two characters>/<key>_<width>.jpg` under the data directory, and `.png` for a logo, which keeps its transparency.
+- **Placeholder colour**: the average colour of the smallest stored width, computed once, by an ffmpeg child that scales it to one pixel.
 - **Order of work**: posters and backdrops for films and series first. Episode thumbs are fetched when their season is first opened, and in the background at the lowest priority.
 - A library of 3,000 films and 240 series comes to roughly 3,500 posters and backdrops, a few hundred megabytes at most.
 - **People's photos arrive on first request** (D33). A film can credit dozens of people, so matching a library downloads none of them. The key is derived from the photo's path when the credits are stored, so the address exists at once. `GET /img/{key}/{w}` for a key with no file on disk finds the person, downloads the provider's nearest size, stores it, works out the colour and answers. A photo the provider cannot give is `404`, and is not tried again for a day.
@@ -355,7 +367,7 @@ One queue in the `tasks` table, so work survives a restart.
 | `probe` | after a scan, per new or changed file, and at start for any file still to probe | 2 |
 | `match` | after items are built, per unmatched film or series | 2, sharing the provider limit |
 | `fetch` | after a match, and on refresh | 2, sharing the provider limit |
-| `image` | after a fetch | 2 |
+| `image` | after a scan, per local image that is new or changed; from stage 4 after a fetch | 2 |
 | `sidecar` | when a transcode starts | 1 |
 | `import` | on request | 1 |
 | `extract` | when a browser first asks for a file's subtitles or fonts, or a `prepare` says so | 1 |

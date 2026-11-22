@@ -47,10 +47,18 @@ type Scanner struct {
 	Built func(ctx context.Context, libraryID int64) error
 	// Queued, when set, is called after probes were queued.
 	Queued func()
+	// Images, when set, is called after a library's items are built, for
+	// each root scanned, with the images the scan found in it and which of
+	// the root's paths it looked at.
+	Images func(ctx context.Context, libraryID int64, rootID int64, inScope func(rel string) bool, found []db.LocalSource) error
 	// Checked, when set, is called each time a scan has checked a root,
 	// before it walks it, with the root as the check found it: available,
 	// or away. The watcher watches it from then on.
 	Checked func(root model.Root)
+
+	// found is, for each root scanned since its library's items were
+	// built, the images the scan found and what it looked at.
+	found map[int64]foundImages
 
 	mu      sync.Mutex
 	pending map[int64]bool             // library ids to scan; 0 means all
@@ -66,6 +74,7 @@ func New(d *db.DB, log *slog.Logger) *Scanner {
 		pending: map[int64]bool{},
 		folders: map[int64]map[string]bool{},
 		later:   map[int64]map[string]int64{},
+		found:   map[int64]foundImages{},
 		wake:    make(chan struct{}, 1),
 	}
 }
@@ -218,8 +227,8 @@ func (s *Scanner) runAsked(ctx context.Context) bool {
 			}
 			scanned = true
 		}
-		if scanned && s.Built != nil {
-			if err := s.Built(ctx, lib.ID); err != nil && ctx.Err() == nil {
+		if scanned {
+			if err := s.built(ctx, lib); err != nil && ctx.Err() == nil {
 				s.log.Error("scan: cannot build items", "library", lib.ID, "err", err)
 			}
 		}
@@ -262,6 +271,11 @@ func (s *Scanner) queueProbes(ctx context.Context, rootID int64) {
 	}
 }
 
+type foundImages struct {
+	inScope func(rel string) bool
+	images  []db.LocalSource
+}
+
 // ScanLibrary scans every root of a library, one after another, and then
 // builds its items. It returns what each root's scan found.
 func (s *Scanner) ScanLibrary(ctx context.Context, lib model.Library) ([]model.ScanResult, error) {
@@ -273,10 +287,30 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib model.Library) ([]model.S
 		}
 		results = append(results, r)
 	}
+	return results, s.built(ctx, lib)
+}
+
+// built builds a library's items, and then hands on the images its roots'
+// scans found.
+func (s *Scanner) built(ctx context.Context, lib model.Library) error {
 	if s.Built != nil {
-		return results, s.Built(ctx, lib.ID)
+		if err := s.Built(ctx, lib.ID); err != nil {
+			return err
+		}
 	}
-	return results, nil
+	for _, root := range lib.Roots {
+		f, ok := s.found[root.ID]
+		if !ok {
+			continue
+		}
+		delete(s.found, root.ID)
+		if s.Images != nil {
+			if err := s.Images(ctx, lib.ID, root.ID, f.inScope, f.images); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // scanRoot is one scan of one root (docs/06-library-and-metadata.md,
@@ -355,6 +389,10 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root, folders []strin
 	if err := s.db.SyncTracks(ctx, root.ID, inScope, w.byVideo()); err != nil {
 		return model.ScanResult{}, err
 	}
+	for i := range w.images {
+		w.images[i].Root = root.ID
+	}
+	s.found[root.ID] = foundImages{inScope: inScope, images: w.images}
 	s.queueProbes(ctx, root.ID)
 	attrs := []any{"root", root.Path, "ms", changes.Result.MS,
 		"files", len(w.seen) + len(w.new), "added", len(changes.New), "back", len(changes.Back),
@@ -408,6 +446,7 @@ type walkResult struct {
 	// section 4.7).
 	videos map[string][]string // folder -> paths of its videos
 	tracks map[string][]db.ExternalTrack
+	images []db.LocalSource // image files, outside extras folders
 	err    error
 }
 
@@ -519,10 +558,18 @@ func (s *Scanner) walk(ctx context.Context, w *walkResult, rootPath, from string
 			dir = ""
 		}
 		if !isVideo(d.Name()) {
-			if parse.TrackKind(d.Name()) != "" {
-				if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() {
-					w.tracks[dir] = append(w.tracks[dir], db.ExternalTrack{RelPath: rel, Size: info.Size(), MtimeNS: info.ModTime().UnixNano()})
-				}
+			track, image := parse.TrackKind(d.Name()) != "", parse.IsImage(d.Name()) && !isExtra(rel)
+			if !track && !image {
+				return nil
+			}
+			info, err := os.Stat(p)
+			if err != nil || !info.Mode().IsRegular() {
+				return nil
+			}
+			if track {
+				w.tracks[dir] = append(w.tracks[dir], db.ExternalTrack{RelPath: rel, Size: info.Size(), MtimeNS: info.ModTime().UnixNano()})
+			} else {
+				w.images = append(w.images, db.LocalSource{Path: rel, Size: info.Size(), MtimeNS: info.ModTime().UnixNano()})
 			}
 			return nil
 		}
