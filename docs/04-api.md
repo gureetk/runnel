@@ -376,7 +376,7 @@ Codes are six characters from an alphabet without look-alikes (no 0, O, 1, I, L)
 
 A new server has no person, so nobody can sign in. While that is so, `GET /server` says `"setup_done": false`, and this one call makes the first person, who is an admin. It needs the setup code (D35).
 
-The server makes the code when it starts without people and prints it in its log. `runnel setup-code` prints it again. It is eight characters from the pairing alphabet, shown in two groups of four: `K7Q2-M9XD`.
+The server makes the code when it starts without people and prints it in its log. A later start without people keeps the same code. `runnel setup-code` prints it again, from `GET /admin/setup-code`, which takes the local admin token only: an admin's token is `403`, and once a person exists it is `409` with code `setup_done`. The code is eight characters from the pairing alphabet, shown in two groups of four: `K7Q2-M9XD`.
 
 ```json
 {"code": "K7Q2M9XD", "name": "ada", "password": "correct horse", "device": {"id": "5e1c9a70-3b2d-4f6a-8c11-9d0e7f2a4b63", "name": "Firefox on Linux", "client": "runnel-web/0.1.0"}}
@@ -386,8 +386,8 @@ Returns `200` with the same body as a password sign-in. The rest of the first ru
 
 - The code is accepted in either case, with or without the hyphen.
 - A wrong code is `403` with code `wrong_code`. Five wrong codes a minute from one address is `429` (P7).
-- `400` with code `weak_password` for a password under ten characters.
-- `409` with code `setup_done` once a person exists. The code is deleted when the first person is made.
+- `400` with code `weak_password` for a password under ten characters, and `400` for a name or a device as `POST /admin/users` (8.6) and sign-in (3.2) refuse them.
+- `409` with code `setup_done` once a person exists. The code is deleted when the first person is made, here or by `runnel user add`.
 
 ### 3.5 A person's own account
 
@@ -803,7 +803,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 - The key is never sent back. `hint` is its last four characters.
 - A new key is checked against TMDB before it is stored. `400` with code `bad_key` when TMDB refuses it. `502` with code `upstream` when TMDB cannot be reached. Neither stores it. `"tmdb_key": null` removes the key.
 - `ok` and `checked_at` come from the last request the server made with the key.
-- A server name has 1 to 40 characters.
+- A server name has 1 to 40 characters, no control characters and no space at either end. `"server_name": null` removes it, and the host name is shown again. Any other field is `400`.
 
 ### 8.2 Libraries, folders and scans
 

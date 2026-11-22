@@ -25,9 +25,12 @@ const jsonDeadline = 15 * time.Second
 
 // Info holds the facts about this server that do not change while it runs.
 type Info struct {
-	Name       string // shown by clients; the host name when none is set
-	Version    string
-	InstanceID string
+	// Name is shown by clients: the environment's, or the host name, which
+	// an admin's setting replaces unless NameFromEnv is set.
+	Name        string
+	NameFromEnv bool
+	Version     string
+	InstanceID  string
 }
 
 // Config is what the API is built from.
@@ -68,6 +71,7 @@ type Server struct {
 	logins      *auth.Limiter // wrong sign-ins by address
 	pairStarts  *auth.Limiter // pairings started, by address
 	pairLookups *auth.Limiter // pairing codes looked up or approved, by token
+	setupCodes  *auth.Limiter // wrong setup codes, by address
 
 	touchMu sync.Mutex
 	touched map[int64]int64 // token id -> when its use was last written
@@ -104,6 +108,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		logins:        auth.NewLimiter(loginTries, time.Minute, now),
 		pairStarts:    auth.NewLimiter(pairStartsMinute, time.Minute, now),
 		pairLookups:   auth.NewLimiter(pairLookupMinute, time.Minute, now),
+		setupCodes:    auth.NewLimiter(setupTries, time.Minute, now),
 		touched:       map[int64]int64{},
 	}
 	s.routes()
@@ -113,6 +118,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/server", s.json(s.handleServer))
 	s.mux.Handle("POST "+Prefix+"/auth/login", s.json(s.handleLogin))
+	s.mux.Handle("POST "+Prefix+"/setup", s.json(s.handleSetup))
 	s.mux.Handle("POST "+Prefix+"/auth/pair/start", s.json(s.handlePairStart))
 	s.mux.Handle("GET "+Prefix+"/auth/pair/{code}", s.json(s.signedInOrLocal(s.handlePairLookup)))
 	s.mux.Handle("POST "+Prefix+"/auth/pair/approve", s.json(s.signedInOrLocal(s.handlePairApprove)))
@@ -152,6 +158,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/admin/users", s.json(s.admin(s.handleAdminUsers)))
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
 	s.mux.Handle("GET "+Prefix+"/admin/pairings", s.json(s.admin(s.handleAdminPairings)))
+	s.mux.Handle("GET "+Prefix+"/admin/setup-code", s.json(s.admin(s.handleSetupCode)))
+	s.mux.Handle("GET "+Prefix+"/admin/settings", s.json(s.admin(s.handleSettings)))
+	s.mux.Handle("PATCH "+Prefix+"/admin/settings", s.json(s.admin(s.handlePatchSettings)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))

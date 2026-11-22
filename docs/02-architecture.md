@@ -139,7 +139,7 @@ Subcommands of the one binary:
 |---|---|
 | `runnel serve` | Runs the server. |
 | `runnel user add <name> [--admin]`, `user passwd <name>`, `user list` | Users. The first user is made here, or in the web interface's first run with the setup code. |
-| `runnel setup-code` | Prints the setup code, while no user exists (D35). The server also prints it in its log when it starts without users. |
+| `runnel setup-code` | Prints the setup code, while no user exists (D35), from `GET /admin/setup-code` (`04-api.md`, section 3.4). The server also prints it in its log when it starts without users. |
 | `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id>` | Libraries. |
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
 | `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |

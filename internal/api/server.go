@@ -35,16 +35,21 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	name, err := s.serverName(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, serverBody{
 		Product:    "runnel",
-		Name:       s.info.Name,
+		Name:       name,
 		Version:    s.info.Version,
 		InstanceID: s.info.InstanceID,
 		SetupDone:  done,
 		API: apiBody{
 			Version: 1,
 			// A feature is listed once this server implements it.
-			Features: []string{"prepare"},
+			Features: []string{"changes", "list", "pairing", "prepare"},
 		},
 		// This server encodes nothing yet, so it lists nothing a client
 		// could ask for.

@@ -20,6 +20,7 @@ const usage = `Usage: runnel <command>
 Commands:
   serve                        Run the server.
   user add <name> [--admin]    Add a user to the running server.
+  setup-code                   Print the setup code the first run asks for.
   pair approve <code> --user <name>
                                Sign in the device that shows the code.
   library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
@@ -52,6 +53,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return libraryCmd(args[1:], stdout, stderr)
 	case "pair":
 		return pairCmd(args[1:], stdout, stderr)
+	case "setup-code":
+		return setupCodeCmd(args[1:], stdout, stderr)
 	case "scan":
 		return scanCmd(args[1:], stdout, stderr)
 	case "report":

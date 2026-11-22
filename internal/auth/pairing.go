@@ -17,12 +17,33 @@ const PairingAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 // PairingCodeLen is how long a pairing code is.
 const PairingCodeLen = 6
 
+// SetupCodeLen is how long the setup code of the first run is (D35).
+const SetupCodeLen = 8
+
 // NewPairingCode makes a random pairing code, each character drawn
 // evenly from PairingAlphabet.
-func NewPairingCode() string {
+func NewPairingCode() string { return newCode(PairingCodeLen) }
+
+// NewSetupCode makes the setup code of the first run: eight characters
+// of PairingAlphabet (docs/04-api.md, section 3.4).
+func NewSetupCode() string { return newCode(SetupCodeLen) }
+
+// ShowSetupCode is a setup code as it is shown: in two groups of four,
+// "K7Q2-M9XD".
+func ShowSetupCode(code string) string {
+	if len(code) != SetupCodeLen {
+		return code
+	}
+	return code[:4] + "-" + code[4:]
+}
+
+// CleanSetupCode is a setup code as a person typed it, or false.
+func CleanSetupCode(s string) (string, bool) { return cleanCode(s, SetupCodeLen) }
+
+func newCode(n int) string {
 	var b strings.Builder
 	buf := make([]byte, 1)
-	for b.Len() < PairingCodeLen {
+	for b.Len() < n {
 		if _, err := rand.Read(buf); err != nil {
 			panic("auth: no randomness: " + err.Error())
 		}
@@ -37,9 +58,11 @@ func NewPairingCode() string {
 
 // CleanPairingCode is a code as a person typed it, in capitals and
 // without spaces or dashes, or false when it cannot be one.
-func CleanPairingCode(s string) (string, bool) {
+func CleanPairingCode(s string) (string, bool) { return cleanCode(s, PairingCodeLen) }
+
+func cleanCode(s string, n int) (string, bool) {
 	s = strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(s))
-	if len(s) != PairingCodeLen {
+	if len(s) != n {
 		return "", false
 	}
 	for i := 0; i < len(s); i++ {
