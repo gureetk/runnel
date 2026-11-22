@@ -77,6 +77,7 @@ type cardBody struct {
 	State       *stateBody              `json:"state,omitempty"`
 	Counts      *countsBody             `json:"counts,omitempty"`
 	ListedAt    *int64                  `json:"listed_at,omitempty"`
+	NewEpisodes *int                    `json:"new_episodes,omitempty"`
 	AddedAt     int64                   `json:"added_at"`
 	Seq         int64                   `json:"seq"`
 }
@@ -172,27 +173,30 @@ type numberCursor struct {
 	I int64 `json:"i"`
 }
 
-// itemsParams are the parameters of GET /items that this server takes.
-// The others of docs/04-api.md, section 4.3, arrive with the parts of
-// stage 2 that hold their data.
-var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "parent": true, "list": true, "sort": true,
-	"limit": true, "cursor": true}
+// itemsParams are the parameters of GET /items (docs/04-api.md,
+// section 4.3).
+var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "parent": true, "ids": true, "genre": true,
+	"list": true, "collection": true, "person": true, "played": true, "sort": true, "order": true, "limit": true,
+	"cursor": true, "offset": true}
 
-// handleItems is GET /items: the films or series of a library by title;
-// the episodes of a series in season and episode order, specials last; the
-// children of an item, the seasons of a series or the episodes of a
-// season, in their order; or the signed-in user's list.
+// handleItems is GET /items: the episodes of a series in season and
+// episode order, specials last; the children of an item, the seasons of a
+// series or the episodes of a season, in their order; some items by id;
+// or a list of films and series, a library's, a genre's or the signed-in
+// user's, in one of its sorts.
 func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	for k := range q {
 		if !itemsParams[k] {
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "this server does not take the parameter "+strconv.Quote(k)+" yet")
+			s.fail(w, r, http.StatusBadRequest, "bad_request", "GET /items does not take the parameter "+strconv.Quote(k))
 			return
 		}
 	}
-	if v := q.Get("sort"); v != "" && v != "title" && !q.Has("list") {
-		s.fail(w, r, http.StatusBadRequest, "bad_request", `this server sorts by "title" only, so far`)
-		return
+	for _, k := range []string{"collection", "person"} {
+		if q.Has(k) {
+			s.fail(w, r, http.StatusBadRequest, "bad_request", k+" arrives with metadata, in a later version of the server")
+			return
+		}
 	}
 	limit := 100
 	if v := q.Get("limit"); v != "" {
@@ -203,7 +207,23 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	if !s.etag(w, r) {
+	if q.Has("parent") || q.Has("series") {
+		for _, k := range []string{"library", "ids", "genre", "list", "played", "sort", "order", "offset"} {
+			if q.Has(k) {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", k+" does not go with parent or series")
+				return
+			}
+		}
+	}
+	if !s.etag(w, r, "") {
+		return
+	}
+	switch {
+	case q.Has("ids"):
+		s.itemsByID(w, r)
+		return
+	case !q.Has("parent") && !q.Has("series"):
+		s.list(w, r, limit)
 		return
 	}
 	first := q.Get("cursor") == ""
@@ -212,12 +232,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var next func(db.Card) string
 	var err error
-	if q.Has("list") {
-		var ok bool
-		if cards, total, next, ok = s.listPage(w, r, limit, first); !ok {
-			return
-		}
-	} else if v := q.Get("parent"); v != "" {
+	if v := q.Get("parent"); v != "" {
 		id, perr := strconv.ParseInt(v, 10, 64)
 		parent, gerr := s.db.Item(r.Context(), id)
 		switch {
@@ -293,47 +308,17 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		next = func(c db.Card) string {
 			return encodeCursor(episodeCursor{Z: c.Season == 0, S: c.Season, E: c.Episode, I: c.ID})
 		}
-	} else {
-		v := q.Get("library")
-		id, perr := strconv.ParseInt(v, 10, 64)
-		lib, gerr := s.db.Library(r.Context(), id)
-		switch {
-		case v == "":
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "library, series or parent is needed")
-			return
-		case perr != nil || errors.Is(gerr, db.ErrNotFound):
-			s.fail(w, r, http.StatusNotFound, "not_found", "no such library")
-			return
-		case gerr != nil:
-			s.internal(w, r, gerr)
-			return
-		}
-		typ := q.Get("type")
-		if typ == "" {
-			typ = map[string]string{"movies": "movie", "shows": "series"}[lib.Kind]
-		}
-		if typ != "movie" && typ != "series" {
-			s.fail(w, r, http.StatusBadRequest, "bad_request", `at the top of a library, type is "movie" or "series"`)
-			return
-		}
-		var c titleCursor
-		if !first && !decodeCursor(q.Get("cursor"), &c) {
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "the cursor is not one this server gave")
-			return
-		}
-		if first {
-			total, err = s.db.CountByType(r.Context(), id, typ)
-		}
-		if err == nil {
-			cards, err = s.db.ItemsByTitle(r.Context(), id, typ, c.T, c.I, limit+1)
-		}
-		next = func(c db.Card) string { return encodeCursor(titleCursor{T: c.SortTitle, I: c.ID}) }
 	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	s.page(w, r, cards, limit, next, first, total)
+}
 
+// page answers a page of cards: at most limit of them, the next cursor
+// when there are more, and the total on a first page.
+func (s *Server) page(w http.ResponseWriter, r *http.Request, cards []db.Card, limit int, next func(db.Card) string, withTotal bool, total int) {
 	body := struct {
 		Items []cardBody `json:"items"`
 		Next  *string    `json:"next"`
@@ -352,7 +337,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	for _, c := range cards {
 		body.Items = append(body.Items, cardJSON(c, mine))
 	}
-	if first {
+	if withTotal {
 		body.Total = &total
 	}
 	writeJSON(w, http.StatusOK, body)
@@ -487,7 +472,7 @@ func fileJSON(f db.FileDetail) fileBody {
 // their streams and chapters, which is what a player needs; an episode its
 // neighbours; a series its numbering and its seasons.
 func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
-	if !s.etag(w, r) {
+	if !s.etag(w, r, "") {
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

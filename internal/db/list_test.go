@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"math"
 	"testing"
 )
 
@@ -41,10 +40,14 @@ func TestMyList(t *testing.T) {
 	}
 
 	// Pages, newest first and by title, of both types or one.
-	page := func(typ string, byTitle bool, after ListKey, limit int) []int64 {
+	page := func(typ string, sort string, desc bool, after *ListKey, limit int) []int64 {
 		t.Helper()
-		cards, at, err := d.Listed(ctx, 1, typ, byTitle, after, limit)
-		if err != nil || len(at) != len(cards) {
+		q := ListQuery{UserID: 1, Listed: true, Played: -1, Sort: sort, Desc: desc}
+		if typ != "" {
+			q.Types = []string{typ}
+		}
+		cards, keys, err := d.ListItems(ctx, q, after, 0, limit)
+		if err != nil || len(keys) != len(cards) {
 			t.Fatal(err)
 		}
 		var ids []int64
@@ -53,20 +56,19 @@ func TestMyList(t *testing.T) {
 		}
 		return ids
 	}
-	newest := ListKey{ListedAt: math.MaxInt64, ID: math.MaxInt64}
-	if ids := page("", false, newest, 2); len(ids) != 2 || ids[0] != 60 || ids[1] != 10 {
+	if ids := page("", "listed", true, nil, 2); len(ids) != 2 || ids[0] != 60 || ids[1] != 10 {
 		t.Fatalf("newest first: %v", ids)
 	}
-	if ids := page("", false, ListKey{ListedAt: 20, ID: 10}, 10); len(ids) != 1 || ids[0] != 50 {
+	if ids := page("", "listed", true, &ListKey{Value: int64(20), Title: "harbor lantern", ID: 10}, 10); len(ids) != 1 || ids[0] != 50 {
 		t.Fatalf("after the second: %v", ids)
 	}
-	if ids := page("", true, ListKey{}, 10); len(ids) != 3 || ids[0] != 10 || ids[1] != 50 || ids[2] != 60 {
+	if ids := page("", "title", false, nil, 10); len(ids) != 3 || ids[0] != 10 || ids[1] != 50 || ids[2] != 60 {
 		t.Fatalf("by title: %v", ids)
 	}
-	if ids := page("movie", false, newest, 10); len(ids) != 2 || ids[0] != 60 || ids[1] != 50 {
+	if ids := page("movie", "listed", true, nil, 10); len(ids) != 2 || ids[0] != 60 || ids[1] != 50 {
 		t.Fatalf("films: %v", ids)
 	}
-	if n, err := d.CountListed(ctx, 1, "series"); err != nil || n != 1 {
+	if n, err := d.CountItems(ctx, ListQuery{UserID: 1, Listed: true, Played: -1, Types: []string{"series"}}); err != nil || n != 1 {
 		t.Fatalf("count %d %v", n, err)
 	}
 
@@ -89,7 +91,7 @@ func TestMyList(t *testing.T) {
 	if err := d.SetListed(ctx, 2, 50, false, 50); err != nil || seqNow(t, d) != seq {
 		t.Fatalf("taking off what was never on: %v", err)
 	}
-	if n, _ := d.CountListed(ctx, 1, ""); n != 2 {
+	if n, _ := d.CountItems(ctx, ListQuery{UserID: 1, Listed: true, Played: -1}); n != 2 {
 		t.Fatalf("count after taking off: %d", n)
 	}
 	// Put back, it is listed anew.

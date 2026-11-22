@@ -134,8 +134,8 @@ func TestLibrariesAndItems(t *testing.T) {
 
 	var e apiError
 	for target, want := range map[string]int{
-		"/api/v1/items?library=1&played=0":    400,
-		"/api/v1/items?library=1&sort=added":  400,
+		"/api/v1/items?library=1&played=2":    400,
+		"/api/v1/items?library=1&sort=views":  400,
 		"/api/v1/items?library=9":             404,
 		"/api/v1/items":                       400,
 		"/api/v1/items?library=1&type=season": 400,

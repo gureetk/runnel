@@ -448,9 +448,11 @@ The first screen in one response. Parameters: `limit` (each row, default 20, at 
 ```
 
 - `continue`: started and not finished, most recent first.
-- `next_up`: for each series, the first unplayed and unstarted episode after the one played most recently.
-- `recent`: films as they are, new episodes folded into their series with `new_episodes`.
+- `next_up`: for each series, the first unplayed and unstarted episode after the one played most recently, as `03-data-model.md`, section 6, finds it. The series played most recently comes first.
+- `recent`: what was added in the 30 days before the start of today (P7), newest first. Films are as they are. Episodes are folded into their series, which is placed at the time of its newest episode, and `new_episodes` counts the episodes added in those days. Nothing in that time leaves the row empty.
 - `list`: My list, newest first (4.7).
+- `library` keeps every row to one library. `404` for a library that does not exist.
+- Home's `ETag` also carries the day, so that it moves when Recently added does.
 
 The cards are shortened here. They are whole cards, so `recent` carries the `overview` and `genres` that Home's large cards draw.
 
@@ -459,26 +461,28 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | Parameter | Meaning |
 |---|---|
 | `library` | Library id. Required unless `parent`, `series`, `ids`, `genre`, `list`, `collection` or `person` is given. |
-| `type` | `movie` or `series` at the top of a library; left out, the library's own kind. `season` or `episode` below a parent. With `genre`, `list` or `person`: `movie` or `series` to narrow it, both when left out. |
+| `type` | `movie` or `series` at the top of a library; left out, the library's own kind. `season` or `episode` below a parent. With `genre`, `list` or `person` and no `library`: `movie` or `series` to narrow it, both when left out. |
 | `parent` | Children of an item: the seasons of a series, the specials last, or the episodes of a season, in order. |
 | `series` | With `type=episode`: every episode of a series in one list. |
-| `ids` | Comma-separated ids, at most 200. For refreshing a few cards. |
+| `ids` | Comma-separated ids, at most 200. For refreshing a few cards. It goes alone. The cards come in the order asked for, once each, and an id that no item has is left out. |
 | `genre` | One genre name. Without `library`: the films and series of every library. |
 | `list` | `1`: what the signed-in user has on My list (4.7). Unavailable items are included. It does not go with `library`, `parent` or `series`. |
 | `collection` | A collection's id: its films. |
 | `person` | A person's id: the films and series that credit them. Each card gains `credit`, such as `{"kind": "cast", "role": "Edda", "episodes": 12}`. |
-| `played` | `0` or `1`. For series, `0` means some episode is unplayed. |
-| `sort` | `title` (default), `added`, `date`, `rating`. Episodes default to season and episode order. With `list` there is also `listed`, its default. With `collection` and `person` the default is `date`. |
+| `played` | `0` or `1`. For series, `0` means some episode outside the specials is unplayed. |
+| `sort` | `title` (default), `added`, `date`, `rating`. Episodes default to season and episode order. With `list` there is also `listed`, its default. With `collection` and `person` the default is `date`. A series was `added` when its newest episode was. `date` is the release date, or the year where that is not known. Items without a date or a rating come last, in either order. Items that sort the same go by title. |
 | `order` | `asc` or `desc`. Defaults to `asc` for `title` and `desc` for the others, except with `collection`, where `date` runs `asc`. |
 | `limit` | 1 to 1000, default 100. |
-| `cursor` | From `next` of the page before. |
-| `offset` | In place of `cursor`: leave out this many rows. For a grid that jumps to a letter (below). |
+| `cursor` | From `next` of the page before. A cursor goes with the sort and order it came from. |
+| `offset` | In place of `cursor`, not with it: leave out this many rows. For a grid that jumps to a letter (below). |
 
 ```json
 {"items": [{"id": 377, "type": "series", "library_id": 2, "title": "Harbor Lantern", "year": 2021, "counts": {"episodes": 24, "unplayed": 20, "seasons": 2}, "seq": 1258}], "next": "eyJ0IjoiaGFyYm9yIGxhbnRlcm4iLCJpIjozNzd9", "total": 241}
 ```
 
 `total` is sent on the first page, and on every page asked for with `offset`.
+
+`parent` and `series` take `type`, `limit` and `cursor` only.
 
 **Letters.** A client with a local copy jumps to a letter by itself. One without, such as a browser, asks `GET /items/letters`, with the same `library`, `type`, `genre`, `played` and `list` as the list it shows. The answer is for that list sorted by title:
 
@@ -495,11 +499,11 @@ The detail object of section 2.2, or of 2.3 for a collection. `404` for an id th
 
 ### 4.5 `GET /search`
 
-Parameters: `q` (required), `types` (default `movie,series`), `limit` (default 30). Returns `{"items": [card, …]}` in relevance order. Matching is by substring, on titles, original titles and alternative titles. A query shorter than three characters matches the start of a title.
+Parameters: `q` (required), `types` (default `movie,series`; also `season`, `episode` and `collection`), `limit` (default 30, at most 100). Returns `{"items": [card, …]}` in relevance order, titles that rank the same by title. Matching is by substring, on titles, original titles and alternative titles, whatever the case. A query shorter than three characters matches the start of a title, or of its sort title, which leaves out a leading "The", "A" or "An".
 
 ### 4.6 `GET /genres`
 
-Parameter: `library`, optional. Returns `{"genres": [{"name": "Drama", "items": 412, "libraries": [1, 2]}]}`. Without `library` the count is across every library, and `libraries` says which of them hold the genre.
+Parameter: `library`, optional. Returns `{"genres": [{"name": "Drama", "items": 412, "libraries": [1, 2]}]}`, by name. Without `library` the count is across every library, and `libraries` says which of them hold the genre, in order. Genres come with metadata: until it has arrived, the list is empty.
 
 ### 4.7 My list
 
