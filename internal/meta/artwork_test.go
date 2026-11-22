@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
@@ -185,5 +187,63 @@ func TestSeriesImages(t *testing.T) {
 	if len(im) != 4 || im["Harbor Lantern/poster"].Key == "" || im["Harbor Lantern/backdrop"].Key == "" ||
 		im["Season 1/poster"].Key == "" || !slices.Equal(im["Episode 1/thumb"].W, []int{300}) {
 		t.Fatalf("images %v", im)
+	}
+}
+
+// TestSweep: the files of images whose items went are deleted, and those
+// of images that stay and of files written in the last hour are not.
+func TestSweep(t *testing.T) {
+	e := newEnv(t, "movies")
+	ctx := context.Background()
+	e.video("Paper Comets (2019)/Paper Comets (2019).mkv")
+	e.image("Paper Comets (2019)/poster.jpg", 600, 900)
+	e.scan()
+	other := filepath.Join(t.TempDir(), "other")
+	os.MkdirAll(filepath.Join(other, "Lone Lantern (1999)"), 0o755)
+	os.WriteFile(filepath.Join(other, "Lone Lantern (1999)", "Lone Lantern (1999).mkv"), []byte("x"), 0o644)
+	tm.Make(t, filepath.Join(other, "Lone Lantern (1999)", "poster.jpg"), "-f", "lavfi", "-i", "testsrc2=size=600x800:rate=1", "-frames:v", "1")
+	lib, err := e.db.CreateLibrary(ctx, "Other", "movies", "default", []string{other}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm.Settle(t, other)
+	if _, err := e.s.ScanLibrary(ctx, lib); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.q.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	kept := e.images()["Paper Comets/poster"]
+	items, _ := e.db.LibraryItems(ctx, lib.ID)
+	gone, err := e.db.Item(ctx, items[0].ID)
+	if err != nil || gone.Images["poster"].Key == "" {
+		t.Fatalf("%+v %v", gone, err)
+	}
+	// A file that is no image's, such as one left by a task that stopped.
+	stray := strings.Repeat("ab", 16)
+	os.MkdirAll(filepath.Dir(e.art.Path(stray, "poster", 342)), 0o755)
+	os.WriteFile(e.art.Path(stray, "poster", 342), []byte("x"), 0o644)
+	if _, err := e.db.DeleteLibrary(ctx, lib.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Within the hour nothing goes.
+	if n, err := e.art.Sweep(ctx); err != nil || n != 0 {
+		t.Fatalf("swept %d at once: %v", n, err)
+	}
+	e.art.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	if n, err := e.art.Sweep(ctx); err != nil || n != 3 {
+		t.Fatalf("swept %d: %v", n, err)
+	}
+	for _, w := range []int{342, 500} {
+		if _, err := os.Stat(e.art.Path(gone.Images["poster"].Key, "poster", w)); err == nil {
+			t.Errorf("the removed film's poster at %d stayed", w)
+		}
+		if _, err := os.Stat(e.art.Path(kept.Key, "poster", w)); err != nil {
+			t.Errorf("the poster that stays, at %d: %v", w, err)
+		}
+	}
+	if _, err := os.Stat(e.art.Path(stray, "poster", 342)); err == nil {
+		t.Error("a file that is no image's stayed")
 	}
 }

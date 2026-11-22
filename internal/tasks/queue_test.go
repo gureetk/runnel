@@ -277,10 +277,16 @@ func TestPauseHoldsTheKind(t *testing.T) {
 	}})
 	e.add("probe", "file:1", e.libs[0])
 	e.add("probe", "file:2", e.libs[0])
+	if e.q.Paused("probe") {
+		t.Fatal("paused before any run")
+	}
 	e.drain()
 	// One run, then the kind waits: the other task is not taken either.
 	if r := e.rows(); runs != 1 || r["file:1"].Attempts != 0 || r["file:1"].Error != "ffprobe cannot be run" || r["file:2"].Attempts != 0 {
 		t.Fatalf("%d runs, %+v", runs, r)
+	}
+	if !e.q.Paused("probe") || e.q.Paused("image") {
+		t.Fatal("GET /admin/tasks would not say which kind waits")
 	}
 	e.advance(30 * time.Second)
 	e.drain()
@@ -289,6 +295,9 @@ func TestPauseHoldsTheKind(t *testing.T) {
 	}
 	broken = false
 	e.advance(30 * time.Second)
+	if e.q.Paused("probe") {
+		t.Fatal("still paused after the wait")
+	}
 	e.drain()
 	if runs != 3 || len(e.rows()) != 0 {
 		t.Fatalf("%d runs, rows %+v", runs, e.rows())

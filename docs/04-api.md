@@ -811,7 +811,8 @@ Two settings can be changed while the server runs, and are kept in the database.
 |---|---|
 | `GET /admin/libraries` | Libraries with their folders, what a scan is doing now, and each folder's last scan. |
 | `POST /admin/libraries` | Create: `{"name": "Anime", "kind": "shows", "profile": "anime", "roots": ["/media/anime"]}`. Returns `201` with `{"id": 2, "name": "Anime", "kind": "shows", "profile": "anime", "roots": [{"id": 2, "path": "/media/anime", "available": true}]}`, and the library's first scan starts. |
-| `PATCH /admin/libraries/{id}`, `DELETE /admin/libraries/{id}` | Change or remove. Removing a library removes its items and watch state. |
+| `PATCH /admin/libraries/{id}` | Change: `{"name": "Anime", "profile": "anime", "add_roots": ["/media/anime-3"], "remove_roots": [3]}`, any of them. Returns the library as `POST` does. |
+| `DELETE /admin/libraries/{id}` | Remove the library, with its items and everyone's watch state for them. Returns `204`. |
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
@@ -832,7 +833,10 @@ Two settings can be changed while the server runs, and are kept in the database.
 ```
 
 - Creating a library: `kind` is `movies` or `shows`, `profile` is `default` (when left out) or `anime`. A library has 1 to 32 folders, each an absolute path to a folder the server can open, stored without a trailing slash. A folder that is, contains or lies inside one that a library already scans is `409` with code `conflict`, and so is a name that is taken. Library names are compared with their case.
-- `scan.state` is `idle`, `walking` (going through the folders, with no numbers yet), `probing` (reading what was found: `done` of `total` files) or `failed`.
+- Changing a library: `PATCH` changes everything it is given or nothing. `add_roots` are folders as when creating, and `remove_roots` the ids of the library's own folders. The library keeps 1 to 32 folders. `kind` cannot change, and any other field is `400`. Folders added are scanned at once. A folder removed takes what was built from it: its items go, with everyone's watch state for them, and reach clients in `deleted` (section 5).
+- Removing a library: clients learn of it from `library_ids` (section 5). A removed library's id is never given to another, nor a removed item's (`03-data-model.md`, section 4).
+- `items` counts the library's films and series.
+- `scan.state` is `idle`, `walking` (going through the folders and building items from them, with no numbers yet), `probing` (reading what was found: `done` of `total` files) or `failed`: nothing is running, and the last scan of one of the folders ended with an error, which that folder's `last_scan.error` holds. A folder that is away is such an error. `done` and `total` are there while probing only.
 - `last_scan` is the folder's last scan of any kind: asked for, nightly, or set off by a change on disk. `added`, `changed` and `removed` count files.
 
 `GET /admin/parse-report`:
@@ -858,9 +862,9 @@ Two settings can be changed while the server runs, and are kept in the database.
 ]}
 ```
 
-- Folders only, by name, at most 500. `truncated` says when there were more. Names that begin with a dot are left out.
-- `entries` counts what is directly inside a folder. Nothing deeper is counted: that would wake disks and could take long.
-- Without `path` it lists `/`. A path that is not a folder is `404`.
+- Folders only, by name, at most 500. `truncated` says when there were more. Names that begin with a dot are left out. A link to a folder is listed as a folder: it can be a library's folder, though a scan follows no link to a folder inside one (`06-library-and-metadata.md`, section 2.3).
+- `entries` counts what is directly inside a folder. Nothing deeper is counted: that would wake disks and could take long. A folder the server cannot read has `readable` false and `entries` null.
+- Without `path` it lists `/`, whose `parent` is null. A `path` must be absolute: `400` otherwise. A path that is not a folder, or a folder the server cannot read, is `404`.
 
 ### 8.3 Background work
 
@@ -877,9 +881,10 @@ Two settings can be changed while the server runs, and are kept in the database.
 - One entry for each kind of work in each library, not one for each file. The kinds are in `06-library-and-metadata.md`, section 9.
 - `state` is `running`, `queued`, `paused`, or `failed` when nothing is left to run and some of it failed after its retries.
 - `paused_by` is `playback` while something is starting to play, or `provider` while a provider has asked the server to wait.
-- `done` and `total` count the units since that entry's queue was last empty. `error` is the last failure's message.
-- `POST /admin/tasks/cancel` with `{"kind": "image", "library_id": 1}` drops what is queued. What is running finishes. The next scan or refresh finds cancelled work again.
+- `done` and `total` count the units since that entry's queue was last empty. `error` is the last failure's message: of a task that failed, or else of one that waits to be tried again.
+- `POST /admin/tasks/cancel` with `{"kind": "image", "library_id": 1}` drops what is queued and what failed. What is running finishes. The next scan or refresh finds cancelled work again.
 - `POST /admin/tasks/retry` with the same body queues what failed again.
+- Both answer `{"count": 12}`: how many tasks they dropped or queued. `library_id` is null, or left out, for work that is no library's, such as `import`. Any other `kind` than those is `400`.
 
 ### 8.4 Review and matching
 

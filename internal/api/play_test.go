@@ -22,6 +22,12 @@ type countGate struct {
 	n  int
 }
 
+func (g *countGate) Open() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.n == 0
+}
+
 func (g *countGate) Hold() func() {
 	g.mu.Lock()
 	g.n++

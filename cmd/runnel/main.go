@@ -25,6 +25,8 @@ Commands:
                                Sign in the device that shows the code.
   library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
                                Add a library to the running server.
+  library list                 Print the libraries and their folders' last scans.
+  library remove <id> [--yes]  Remove a library, with its items and watch state.
   scan [--library <id>]        Ask the running server to scan.
   report [--library <id>] [--class <class>|all]
                                Print how every file's name parsed.
@@ -50,7 +52,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	case "user":
 		return userCmd(args[1:], stdin, stdout, stderr)
 	case "library":
-		return libraryCmd(args[1:], stdout, stderr)
+		return libraryCmd(args[1:], stdin, stdout, stderr)
 	case "pair":
 		return pairCmd(args[1:], stdout, stderr)
 	case "setup-code":

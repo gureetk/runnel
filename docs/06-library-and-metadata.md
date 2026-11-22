@@ -348,7 +348,7 @@ A library that Jellyfin has already matched can be imported. That is quicker and
 | `logo` | films, series | 500 |
 | a person's photo | cast and crew | One width for cards and one for the person page, chosen from the provider's sizes when stage 4 is specified |
 
-- **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once, none wider than the file itself: a file narrower than a width is kept at its own, and that is the width listed. A scan finds them after it has built the items, and queues an `image` task for each one that is new or changed (section 9). An image whose file went is removed, with its files. A scan also makes again an image whose files were deleted from the data directory.
+- **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once, none wider than the file itself: a file narrower than a width is kept at its own, and that is the width listed. A scan finds them after it has built the items, and queues an `image` task for each one that is new or changed (section 9). An image whose file went is removed, with its files. The files of an item's images go with the item, at the next start or by night (`03-data-model.md`, section 4). A scan also makes again an image whose files were deleted from the data directory.
 - **Provider images** are downloaded at the provider's own sizes nearest to those widths. The server never decodes a large image in its own process.
 - **Key.** 32 hex characters derived from the image's source: the provider and its image path, or a local file's fingerprint (2.1). For a local file it is the first 128 bits of the SHA-256 of `local:` and the fingerprint. A changed image has a new key, so responses can be cached forever.
 - **On disk**: `images/<first two characters>/<key>_<width>.jpg` under the data directory, and `.png` for a logo, which keeps its transparency.
@@ -377,5 +377,5 @@ One queue in the `tasks` table, so work survives a restart.
 - Everything here pauses while a playback session is starting (the playback gate, `02-architecture.md`, section 5).
 - A provider that answers 429 pauses its queue for the time it asks.
 - A task carries the library it works for. Finished tasks stay until their kind and library have nothing queued or running, and are then deleted together. `GET /admin/tasks` counts progress from that: done out of all (`03-data-model.md`, section 4).
-- An admin can cancel what is queued and retry what failed. Cancelled work is found again by the next scan or refresh.
+- An admin can cancel what is queued or failed, and retry what failed. Cancelled work is found again by the next scan or refresh.
 - A scan is not a task. The scanner reports its own state: walking, then probing with done out of total, which are its library's `probe` tasks.

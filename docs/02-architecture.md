@@ -140,7 +140,7 @@ Subcommands of the one binary:
 | `runnel serve` | Runs the server. |
 | `runnel user add <name> [--admin]`, `user passwd <name>`, `user list` | Users. The first user is made here, or in the web interface's first run with the setup code. |
 | `runnel setup-code` | Prints the setup code, while no user exists (D35), from `GET /admin/setup-code` (`04-api.md`, section 3.4). The server also prints it in its log when it starts without users. |
-| `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id>` | Libraries. |
+| `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id> [--yes]` | Libraries. `list` prints each library with its folders and their last scans, from `GET /admin/libraries`. |
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
 | `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |
 | `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code, and prints the device's name and client. It finds the user with `GET /admin/users`, the device with `GET /auth/pair/{code}`, and approves with `POST /auth/pair/approve` (`04-api.md`, section 3.3). |
@@ -153,7 +153,7 @@ Subcommands that change data talk to the running server over its API on localhos
 - **The local admin token.** At every start the server makes a new random token, writes it to `admin.token` in the data directory, readable by its own user only, and keeps only its hash, in memory. The token is not a row in `tokens`: it belongs to no user, so it also works before the first user exists. The server takes it for the calls of `04-api.md`, section 8, and only from its own host: a loopback address, or the address the request arrived at.
 - **Finding the server.** A subcommand reads the same `RUNNEL_LISTEN` and `RUNNEL_DATA` as the server. It connects to `127.0.0.1` when the server listens on every address. It has to run as the server's user, or as root, to read the token: `sudo -u runnel runnel user add ada`.
 - **`runnel user add`** asks for the password twice, without echo, on a terminal. Otherwise it reads the first line of standard input.
-- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`. A scan of some folders also gives `folders`, and one that left files alone as still being written gives `being_written`.
+- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel library remove`** asks on a terminal before it removes anything, and needs `--yes` elsewhere. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`. A scan of some folders also gives `folders`, and one that left files alone as still being written gives `being_written`.
 
 ## 7. The data directory
 

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -450,5 +451,44 @@ func TestRunScansWhenAsked(t *testing.T) {
 	}
 	if len(e.known()) != 1 {
 		t.Fatal("the scan asked for did not run")
+	}
+}
+
+// TestWalkingAndForget: a scan says which library it goes through while it
+// walks and builds, and a root that Forget is told of loses the scans
+// asked for it.
+func TestWalkingAndForget(t *testing.T) {
+	e := newEnv(t, "movies")
+	e.put("A Film (2001)/A Film (2001).mkv", 4000)
+	var mu sync.Mutex
+	var during, other []bool
+	e.s.Built = func(ctx context.Context, id int64) error {
+		mu.Lock()
+		during, other = append(during, e.s.Walking(id)), append(other, e.s.Walking(id+1))
+		mu.Unlock()
+		return nil
+	}
+	var forgotten []int64
+	e.s.Forgotten = func(id int64) { forgotten = append(forgotten, id) }
+	e.s.RequestFolders(e.lib.Roots[0].ID, []string{"A Film (2001)"})
+	e.s.Forget([]int64{e.lib.Roots[0].ID})
+	if len(forgotten) != 1 || forgotten[0] != e.lib.Roots[0].ID {
+		t.Fatalf("forgotten: %v", forgotten)
+	}
+	if e.s.runAsked(context.Background()) {
+		t.Fatal("a forgotten root's folders were scanned")
+	}
+
+	e.s.Request(e.lib.ID)
+	if !e.s.runAsked(context.Background()) {
+		t.Fatal("the scan asked for did not run")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(during) != 1 || !during[0] || other[0] {
+		t.Fatalf("walking while built: %v, another library: %v", during, other)
+	}
+	if e.s.Walking(e.lib.ID) {
+		t.Fatal("still walking after the scan")
 	}
 }

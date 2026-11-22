@@ -529,18 +529,17 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		r, err := b.tx.tx.ExecContext(b.ctx,
-			`INSERT INTO items (library_id, type, root_id, path_key, parent_id, series_id, season_number, episode_number,
-			   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, updated_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			b.lib, f.typ, nullInt(f.rootID), nullString(f.key), nullInt(f.parentID), nullInt(f.seriesID),
-			seasonOf(f), episodeOf(f), nullInt(int64(f.end)), nullInt(int64(f.absolute)), nullString(f.numbering),
-			f.title, f.sort, nullInt(int64(f.year)), f.addedAt, seq)
+		id, err := b.tx.newID(b.ctx, "last_item_id", "items")
 		if err != nil {
 			return 0, err
 		}
-		id, err := r.LastInsertId()
-		if err != nil {
+		if _, err := b.tx.tx.ExecContext(b.ctx,
+			`INSERT INTO items (id, library_id, type, root_id, path_key, parent_id, series_id, season_number, episode_number,
+			   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, updated_seq)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, b.lib, f.typ, nullInt(f.rootID), nullString(f.key), nullInt(f.parentID), nullInt(f.seriesID),
+			seasonOf(f), episodeOf(f), nullInt(int64(f.end)), nullInt(int64(f.absolute)), nullString(f.numbering),
+			f.title, f.sort, nullInt(int64(f.year)), f.addedAt, seq); err != nil {
 			return 0, err
 		}
 		if err := b.index(f.typ, id, f.title, false); err != nil {

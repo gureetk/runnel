@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -413,6 +414,69 @@ func (a *Artwork) ffrun(ctx context.Context, bin string, args ...string) ([]byte
 	default:
 		return nil, &tasks.Pause{Err: fmt.Errorf("%s cannot be run: %w", bin, err), For: noToolWait}
 	}
+}
+
+// sweepAge is how old an image's file must be before Sweep may delete it:
+// an image task writes its files before the row that names them.
+const sweepAge = time.Hour
+
+// Sweep deletes the files of keys that no image and no person's photo has
+// any more: those of items that went with a build, a removed folder or a
+// removed library (docs/03-data-model.md, section 4). It reads one of
+// the 256 folders of images/ at a time, and returns how many files it
+// deleted.
+func (a *Artwork) Sweep(ctx context.Context) (int, error) {
+	dirs, err := os.ReadDir(a.dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	old := a.now().Add(-sweepAge)
+	deleted := 0
+	for _, d := range dirs {
+		if !d.IsDir() || len(d.Name()) != 2 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
+		dir := filepath.Join(a.dir, d.Name())
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return deleted, err
+		}
+		files := map[string][]string{}
+		for _, e := range entries {
+			name := e.Name()
+			if len(name) < 34 || name[32] != '_' || !strings.HasPrefix(name, d.Name()) {
+				continue
+			}
+			if fi, err := e.Info(); err != nil || fi.ModTime().After(old) {
+				continue
+			}
+			files[name[:32]] = append(files[name[:32]], name)
+		}
+		if len(files) == 0 {
+			continue
+		}
+		used, err := a.db.KeysInUse(ctx, slices.Collect(maps.Keys(files)))
+		if err != nil {
+			return deleted, err
+		}
+		for key, names := range files {
+			if used[key] {
+				continue
+			}
+			for _, name := range names {
+				if os.Remove(filepath.Join(dir, name)) == nil {
+					deleted++
+				}
+			}
+		}
+	}
+	return deleted, nil
 }
 
 // removeFiles deletes the files of images that no item has any more.

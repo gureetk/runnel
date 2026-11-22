@@ -20,11 +20,14 @@ import (
 // (docs/02-architecture.md, section 5).
 type Gate interface {
 	Hold() (release func())
+	// Open reports whether no playback is starting.
+	Open() bool
 }
 
 type noGate struct{}
 
 func (noGate) Hold() func() { return func() {} }
+func (noGate) Open() bool   { return true }
 
 const (
 	// firstByteHold is how long after a response's first byte its

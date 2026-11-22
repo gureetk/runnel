@@ -9,10 +9,25 @@ import (
 	"testing"
 )
 
-// scansAsked records the scans the API asks for.
+// scansAsked records the scans the API asks for, and says that a scan
+// walks the library walking names.
 type scansAsked struct {
-	mu  sync.Mutex
-	ids []int64
+	mu      sync.Mutex
+	ids     []int64
+	walking int64
+	forgot  []int64 // roots
+}
+
+func (s *scansAsked) Forget(ids []int64) {
+	s.mu.Lock()
+	s.forgot = append(s.forgot, ids...)
+	s.mu.Unlock()
+}
+
+func (s *scansAsked) Walking(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.walking != 0 && s.walking == id
 }
 
 func (s *scansAsked) Request(id int64) {

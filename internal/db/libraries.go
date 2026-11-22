@@ -47,13 +47,14 @@ func (d *DB) CreateLibrary(ctx context.Context, name, kind, profile string, root
 		if err != nil {
 			return err
 		}
-		res, err := tx.tx.ExecContext(ctx,
-			`INSERT INTO libraries (name, kind, profile, created_at, updated_seq) VALUES (?, ?, ?, ?, ?)`,
-			name, kind, profile, now, seq)
-		if err != nil {
+		// A client that missed a removed library would keep its items
+		// under a new library given the same id.
+		if lib.ID, err = tx.newID(ctx, "last_library_id", "libraries"); err != nil {
 			return err
 		}
-		if lib.ID, err = res.LastInsertId(); err != nil {
+		if _, err := tx.tx.ExecContext(ctx,
+			`INSERT INTO libraries (id, name, kind, profile, created_at, updated_seq) VALUES (?, ?, ?, ?, ?, ?)`,
+			lib.ID, name, kind, profile, now, seq); err != nil {
 			return err
 		}
 		lib.UpdatedSeq = seq

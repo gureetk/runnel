@@ -128,6 +128,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	// to scan what changed.
 	watcher := scan.NewWatcher(scanner, log)
 	scanner.Checked = watcher.Watch
+	scanner.Forgotten = watcher.Forget
 	scanner.Built = func(ctx context.Context, libraryID int64) error {
 		start := time.Now()
 		res, err := library.Build(ctx, database, libraryID, time.Now().UnixMilli())
@@ -139,15 +140,18 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return nil
 	}
 	// At start and each night: the delete markers older than 90 days go,
-	// with what only they could tell (docs/03-data-model.md, section 5).
+	// with what only they could tell (docs/03-data-model.md, section 5),
+	// and so do the files of images whose items went (section 4 there).
 	scanner.Nightly = func(ctx context.Context) {
-		p, err := database.Prune(ctx, time.Now().UnixMilli())
-		if err != nil {
+		if p, err := database.Prune(ctx, time.Now().UnixMilli()); err != nil {
 			log.Error("pruning failed", "err", err)
-			return
-		}
-		if p.Tombstones+p.Listings+p.Prefs > 0 {
+		} else if p.Tombstones+p.Listings+p.Prefs > 0 {
 			log.Info("pruned", "tombstones", p.Tombstones, "listings", p.Listings, "prefs", p.Prefs, "floor", p.Floor)
+		}
+		if n, err := artwork.Sweep(ctx); err != nil && ctx.Err() == nil {
+			log.Error("cannot delete unused image files", "err", err)
+		} else if n > 0 {
+			log.Info("deleted unused image files", "files", n)
 		}
 	}
 	background, stopBackground := context.WithCancel(context.Background())
@@ -176,6 +180,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Scans:          scanner,
 		Gate:           gate,
 		Images:         artwork,
+		Work:           queue,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{
