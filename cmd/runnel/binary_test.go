@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -117,6 +118,18 @@ func TestTheBuiltBinary(t *testing.T) {
 	resp.Body.Close()
 	if server.Version != "v0.0.0-test" || server.Name != "Built" {
 		t.Fatalf("GET /server: %+v", server)
+	}
+	for _, method := range []string{"GET", "HEAD"} {
+		req, _ := http.NewRequest(method, "http://"+addr+"/healthz", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if want := map[string]string{"GET": "ok\n", "HEAD": ""}[method]; resp.StatusCode != 200 || string(body) != want {
+			t.Fatalf("%s /healthz: %d %q", method, resp.StatusCode, body)
+		}
 	}
 
 	// user add reads the password from standard input when it is not a

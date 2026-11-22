@@ -1019,7 +1019,7 @@ A row of `GET /admin/playlog`:
 
 A row is a snapshot: it keeps the person's and the device's names and the title as they were, also after the device signs out or the item goes. Once the person is removed, `user.id` is null. A field the report did not carry is null, and `server_first_byte_ms` and `encoder` are null for a direct playback. Medians are the page's own arithmetic over the rows it has.
 
-`GET /healthz`, outside `/api/v1`, answers `200` with no authentication.
+`GET /healthz`, outside `/api/v1`, answers `200` with no authentication, with `ok` as plain text. It reads nothing: it says that the server is up and answering, for a supervisor or a container's health check. A check that passes is logged at debug level only (`02-architecture.md`, section 9).
 
 ### 8.8 A newer release
 

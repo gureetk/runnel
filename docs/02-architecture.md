@@ -203,7 +203,7 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 - JSON routes: 15 s to respond.
 - `/files/…/raw`, `/files/…/sidecar.mkv`, `/files/…/transcode.mkv`, `/files/…/video.mp4`, `/files/…/audio.mp4`: no write deadline. They last as long as the player keeps them.
 - The API is under `/api/v1`. The web interface is served from `/`, as files compressed at build time, with names that change when their content does.
-- Middleware, in order: recover, request id, log (method, path, status, time; never the query string), authenticate, gzip for JSON. Gzip runs at its fastest level, with writers kept between requests: a writer at the default level holds much more memory.
+- Middleware, in order: recover, request id, log (method, path, status, time; never the query string), authenticate, gzip for JSON. A `GET /healthz` that answers `200` is logged at debug level, so that a health check every few seconds does not fill the log. Gzip runs at its fastest level, with writers kept between requests: a writer at the default level holds much more memory.
 - No CORS headers unless an origin is configured.
 
 ## 10. Security
@@ -272,7 +272,7 @@ WantedBy=multi-user.target
 | Unit | ffmpeg arguments | Golden tests: a request in, an argument array out. |
 | Unit | Progress rules, match scoring, cursors | Table tests. |
 | Database | Migrations and every query | Against a temporary database with sample rows. The queries in `03-data-model.md` are the starting set. |
-| API | Every endpoint | `net/http/httptest` against a temporary database and a temporary library. |
+| API | Every endpoint | `net/http/httptest` against a temporary database and a temporary library. A test holds the routes to the endpoints that `04-api.md` names, with those of later stages listed by stage. |
 | Integration | Scan, probe, range requests, a piped transcode's first packet | Tiny media files generated with ffmpeg's test sources in CI. Software codecs only. |
 | The binary | `serve` and the subcommands, as they ship | A test builds `runnel` and runs `serve`, `user add`, `library add`, `scan` and `report` as processes of their own, on a library made with ffmpeg, checking their output and exit statuses and that SIGTERM stops the server. |
 | Hardware | Encoders, timings, memory | By hand on real hardware, with the checklist in `05-playback.md`, section 12. CI has no GPU. |
