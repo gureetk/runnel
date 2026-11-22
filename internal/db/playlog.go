@@ -159,3 +159,29 @@ func loggedEpisode(series string, season, episode, end int64) string {
 	}
 	return t
 }
+
+// Stats is what GET /admin/stats tells about the database
+// (docs/04-api.md, section 8.7).
+type Stats struct {
+	Size                                              int64 // bytes in the database file, without its write-ahead log
+	Seq                                               int64
+	Libraries, Movies, Series, Episodes, Files, Users int
+}
+
+// StatsOf counts what the database holds.
+func (d *DB) StatsOf(ctx context.Context) (Stats, error) {
+	var s Stats
+	err := d.r.QueryRowContext(ctx, `SELECT
+		  (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()),
+		  (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'seq'),
+		  (SELECT count(*) FROM libraries),
+		  (SELECT count(*) FROM items WHERE type = 'movie'),
+		  (SELECT count(*) FROM items WHERE type = 'series'),
+		  (SELECT count(*) FROM items WHERE type = 'episode'),
+		  (SELECT count(*) FROM files),
+		  (SELECT count(*) FROM users)`).Scan(&s.Size, &s.Seq, &s.Libraries, &s.Movies, &s.Series, &s.Episodes, &s.Files, &s.Users)
+	if err != nil {
+		return Stats{}, fmt.Errorf("db: count for stats: %w", err)
+	}
+	return s, nil
+}

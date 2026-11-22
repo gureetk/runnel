@@ -67,6 +67,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 	defer database.Close()
 
+	started := time.Now()
 	instanceID, err := database.InstanceID(ctx)
 	if err != nil {
 		return err
@@ -175,6 +176,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Scans:          scanner,
 		Gate:           gate,
 		Images:         artwork,
+		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{
 		Handler:           handler,
