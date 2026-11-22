@@ -88,27 +88,29 @@ func TestReadersCannotWrite(t *testing.T) {
 	}
 }
 
-func TestMigrationMatchesTheDocument(t *testing.T) {
+func TestMigrationsMatchTheDocument(t *testing.T) {
 	doc, err := os.ReadFile("../../docs/03-data-model.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile("(?s)Migration `0001_init.sql`:\n\n```sql\n(.*?)```").FindSubmatch(doc)
-	if m == nil {
-		t.Fatal("no migration 0001 block in docs/03-data-model.md")
-	}
-	file, err := migrationFS.ReadFile("migrations/0001_init.sql")
+	ms, err := migrations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The file starts with a comment header and a blank line; the rest is
-	// the document's block.
-	_, body, ok := strings.Cut(string(file), "\n\n")
-	if !ok {
-		t.Fatal("0001_init.sql has no header")
-	}
-	if body != string(m[1]) {
-		t.Fatal("migrations/0001_init.sql and docs/03-data-model.md, section 3, differ: change both together")
+	for _, mig := range ms {
+		m := regexp.MustCompile("(?s)Migration `" + regexp.QuoteMeta(mig.name) + "`[^\n]*\n\n```sql\n(.*?)```").FindSubmatch(doc)
+		if m == nil {
+			t.Fatalf("no block for migration %s in docs/03-data-model.md", mig.name)
+		}
+		// The file starts with a comment header and a blank line; the
+		// rest is the document's block.
+		_, body, ok := strings.Cut(mig.sql, "\n\n")
+		if !ok {
+			t.Fatalf("%s has no header", mig.name)
+		}
+		if body != string(m[1]) {
+			t.Fatalf("migrations/%s and docs/03-data-model.md, section 3, differ: change both together", mig.name)
+		}
 	}
 }
 
@@ -119,7 +121,8 @@ func TestMigrationMatchesTheDocument(t *testing.T) {
 // to the schema is a new migration, whose hash is added here in the pull
 // request that adds it (docs/03-data-model.md, section 7).
 var frozen = map[string]string{
-	"0001_init.sql": "5010988cbfe70f4bc90dfdb9a0ad6fb61a804a1be5112e2f815251fa62211399",
+	"0001_init.sql":       "5010988cbfe70f4bc90dfdb9a0ad6fb61a804a1be5112e2f815251fa62211399",
+	"0002_images_key.sql": "30619ab3332855b014e2b53a973894525eb1067db27df05c71dab7b137ac545b",
 }
 
 func TestMigrationsAreFrozen(t *testing.T) {
@@ -146,7 +149,7 @@ func TestSchema(t *testing.T) {
 	ctx := context.Background()
 
 	v, err := d.schemaVersion(ctx)
-	if err != nil || v != 1 || SchemaVersion() != 1 {
+	if err != nil || v != 2 || SchemaVersion() != 2 {
 		t.Fatalf("schema version %d (%v), embedded %d", v, err, SchemaVersion())
 	}
 
@@ -166,7 +169,7 @@ func TestSchema(t *testing.T) {
 		t.Fatalf("tables:\n got %s\nwant %s", got, want)
 	}
 
-	for key, want := range map[string]string{"schema_version": "1", "seq": "0", "tombstone_floor": "0"} {
+	for key, want := range map[string]string{"schema_version": "2", "seq": "0", "tombstone_floor": "0"} {
 		var got string
 		if err := d.r.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&got); err != nil || got != want {
 			t.Errorf("meta %s = %q (%v), want %q", key, got, err, want)
@@ -518,5 +521,46 @@ func TestLibraries(t *testing.T) {
 	}
 	if _, err := d.Library(ctx, 99); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an unknown library: %v", err)
+	}
+}
+
+// TestAnOlderDatabaseIsMigrated: a database that migration 0001 made, as
+// the servers before 0002 left it, gains the index at its next start.
+func TestAnOlderDatabaseIsMigrated(t *testing.T) {
+	d, path := openTemp(t)
+	ctx := context.Background()
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := tx.tx.ExecContext(ctx, `DROP INDEX images_key`); err != nil {
+			return err
+		}
+		_, err := tx.tx.ExecContext(ctx, `UPDATE meta SET value = '1' WHERE key = 'schema_version'`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+	if v, err := d2.schemaVersion(ctx); err != nil || v != 2 {
+		t.Fatalf("schema version %d (%v)", v, err)
+	}
+	var plan string
+	rows, err := d2.r.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT kind FROM images WHERE key = ?`, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		rows.Scan(&id, &parent, &unused, &detail)
+		plan += detail
+	}
+	rows.Close()
+	if !strings.Contains(plan, "images_key") {
+		t.Fatalf("a lookup by key does not use the index: %s", plan)
 	}
 }
