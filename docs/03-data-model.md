@@ -445,8 +445,10 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 **Watch state**
 
-- State hangs on items, never on files, so replacing a file with a better copy keeps the position.
-- `played = 1` sets `position_ms = 0`. The thresholds that turn progress into `played` are in `04-api.md`, section 7.
+- State hangs on items, never on files, so replacing a file with a better copy keeps the position. `file_id` is the file the position was saved from: its version, and for an item in parts the part that was playing.
+- `played = 1` sets `position_ms = 0`, and a position that is kept sets `played = 0`. The play count stays either way. The thresholds that turn progress into `played` are in `04-api.md`, section 7.6.
+- Only films and episodes have rows. A series' and a season's `unplayed` counts are the user's and are counted when asked for, so a row changes nothing on any item, and no item's `updated_seq` moves for it.
+- Every row written is stamped like any other (section 5). Marking a series played writes a row for each of its episodes, so it can take several sequence values.
 
 **My list**
 
@@ -473,6 +475,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A row left `running` by a server that stopped is queued again at the next start, and that run does not count in `attempts`.
 - A probe queued again while it runs, for a file that changed meanwhile, stays queued when the run ends, and runs again.
 - `play_log` keeps its newest 1,000 rows (P7). Inserting a row deletes what is older.
+- A `play_log` row comes from the first progress report of a playback that carries timings or stats (`04-api.md`, section 7.6). Its `mode` is the report's, so it can also be `remux` (section 7.9 there), which the comment in migration 0001 leaves out. `detail` keeps the user's name, the device's name and client, the item's title and the client's stats as they were, so that the row still reads the same after the device signs out or the item goes.
 
 **Search index**
 
@@ -562,7 +565,8 @@ LIMIT :limit;
 ```sql
 WITH last_played AS (
   SELECT e.series_id, e.season_number AS s, e.episode_number AS n, us.last_played_at AS t,
-         ROW_NUMBER() OVER (PARTITION BY e.series_id ORDER BY us.last_played_at DESC) AS r
+         ROW_NUMBER() OVER (PARTITION BY e.series_id
+                            ORDER BY us.last_played_at DESC, e.season_number DESC, e.episode_number DESC) AS r
   FROM user_state us JOIN items e ON e.id = us.item_id
   WHERE us.user_id = :user AND us.played = 1 AND e.type = 'episode'
 )
@@ -581,7 +585,7 @@ ORDER BY lp.t DESC
 LIMIT :limit;
 ```
 
-An episode that is already started is left out here because Continue watching shows it.
+An episode that is already started is left out here because Continue watching shows it. Episodes marked played together share one `last_played_at`, so the latest of them in order counts as the one played most recently. A series' `resume` (`04-api.md`, section 2.2) asks the same question for one series.
 
 **Recently added**: films as they are, episodes folded into their series.
 

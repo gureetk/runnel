@@ -1,6 +1,6 @@
 # API, version 1
 
-The contract between the server and its clients. The clients are Runnel's own: the web interface, the Android TV app, the phone and tablet apps and the desktop apps (`10-clients.md`). Nothing here is private to them, so any other client can use the same calls. This is a design, not yet an implementation: no endpoint here exists in code.
+The contract between the server and its clients. The clients are Runnel's own: the web interface, the Android TV app, the phone and tablet apps and the desktop apps (`10-clients.md`). Nothing here is private to them, so any other client can use the same calls. The server implements it stage by stage, as `01-roadmap.md` lists, and answers `404` for a call that its stage has not brought yet.
 
 Table and column names refer to `03-data-model.md`. This document and the database say `user` where the interfaces say person.
 
@@ -106,8 +106,8 @@ A film's card, to show the fields an episode does not have:
 | `available` | False when none of the item's own files is there. For a series or a season: none of its episodes' files. A folder that is away does not change it: that is said once, for the folder, in `GET /libraries` and `/changes`. A client shows an item as unavailable when either says so. |
 | `collection_id` | Films only: the collection the film belongs to, when the library shows one (2.3). |
 | `images` | By kind: `poster`, `backdrop`, `thumb`, `logo`. Each has a `key`, the widths stored, the aspect ratio and a placeholder colour. The URL is `/img/{key}/{w}`. A kind that is missing is absent. |
-| `state` | The signed-in user's. Absent on seasons and collections. On a series it is replaced by `counts`. |
-| `counts` | Series and seasons: `{"episodes": 24, "unplayed": 20, "seasons": 2}`. Collections: `{"films": 2}`. A series counts its episodes and seasons without the specials. The specials' season counts its own episodes. |
+| `state` | The signed-in user's, on films and episodes, also before they are played: `position_ms` 0, `played` false, `play_count` 0, `last_played_at` null. `position_ms` is from the start of the item, across its parts (7.6). Absent on seasons and collections. On a series it is replaced by `counts`. |
+| `counts` | Series and seasons: `{"episodes": 24, "unplayed": 20, "seasons": 2}`. Collections: `{"films": 2}`. A series counts its episodes and seasons without the specials. The specials' season counts its own episodes. `unplayed` is the signed-in user's: the episodes counted that are not played. |
 | `listed_at` | Films and series only: when the signed-in user put the item on My list (4.7). Absent when it is not on it. |
 | `seq` | The change sequence at which this card last changed. |
 
@@ -183,7 +183,7 @@ Everything on the card, and what a detail screen and the player need besides: th
 
 | Field | Notes |
 |---|---|
-| `prefs` | The track choice to start with: the user's choice for this series if there is one, otherwise the user's defaults. `sub_mode` is `off`, `forced`, `auto` or `on`. `auto` means subtitles are shown when the audio is not in `audio_lang`. |
+| `prefs` | Films, episodes and series: the track choice to start with. For an episode or a series, the user's choice for the series if there is one, otherwise the user's defaults; for a film, the defaults. `sub_mode` is `off`, `forced`, `auto` or `on`. `auto` means subtitles are shown when the audio is not in `audio_lang`. |
 | `files` | Versions and parts. `part` 0 is a whole item. Parts 1..n play in order. The main version, whose `label` is null, comes first, then versions whose label is a number and a `p` or an `i`, such as `1080p`, the highest first, then the others by label. A version's parts follow each other. |
 | `numbering` | Series only: `seasons`, or `absolute` when its files carry one running count (`06-library-and-metadata.md`, section 5). |
 | `seasons` | Series only: its seasons in order, the specials last, each with its id, number, title and counts. |
@@ -225,7 +225,7 @@ A series detail has `counts`, `seasons` and `credits` in place of `files`, `prev
 }
 ```
 
-`resume` is what a Play button on the series should start: the episode in progress, else the next unplayed one, else the first.
+`resume` is what a Play button on the series should start: the episode in progress, the one played last if several are; else the next unplayed one, as Next up finds it (`03-data-model.md`, section 6): the first episode after the one played most recently that is neither played nor started, specials skipped; else the first episode. Its `position_ms` is 0 unless it is in progress. The counts of the series and of each season carry the user's `unplayed`.
 
 A series is one page in every client (D30). Its seasons are in this response, and the episodes of a season are `GET /items?parent={season id}`.
 
@@ -431,7 +431,7 @@ Proposed (P6). Not researched yet, and not final.
 ```
 
 - `items` counts movies or series, not episodes.
-- `unplayed` is the signed-in user's: films not played, or series with an episode not played.
+- `unplayed` is the signed-in user's: films not played, or series with an episode not played outside the specials.
 - `roots` are the library's folders. `available` is false while a folder is away, for example a disk that is not mounted. Every item built from that folder (`root_id` on its card) is then unavailable, whatever its own `available` says. Paths are not shown here: they are for admins (8.2).
 
 ### 4.2 `GET /home`
@@ -673,25 +673,31 @@ Sent every 10 seconds while playing, and at once on pause, resume, seek and stop
 
 | Field | Notes |
 |---|---|
-| `session` | Made by the client for each playback. |
+| `session` | Made by the client for each playback. At most 64 characters. |
+| `item_id`, `file_id` | The film or the episode, and the file playing: one of the item's `files`. |
+| `position_ms` | From the start of the item. For an item in parts, that is the durations of the parts before the one playing, plus the position in it. |
 | `state` | `playing`, `paused` or `stopped`. |
 | `mode` | `direct`, `transcode`, `sidecar` (a transcode with audio from the sidecar) or `remux` (a browser playing copied video, 7.9). |
-| `timings`, `stats` | Optional. Sent once, with the first report after playback starts. The server keeps them in `play_log`. |
+| `audio_idx`, `sub_idx` | Optional. The tracks playing. Not stored. |
+| `timings`, `stats` | Optional. Sent once, with the first report after playback starts. The server keeps them in `play_log`: the first report of a session that carries them makes the row. |
 
-Returns `204`. What the server does with it:
+Returns `204`. `400` when a field is missing or malformed, the item is not a film or an episode, or the file is not one of its files. `404` when there is no such item. What the server does with it:
 
 - Saves the position. While `playing` it writes at most once every 10 seconds per session. `paused` and `stopped` always write.
+- A position below 30 seconds is not kept, whatever the state: the item counts as not started. A report there clears a position kept before, and changes nothing else.
+- A position from 30 seconds on is kept, with the file and the report's time as `last_played_at`. On a played item that makes it unplayed again, so that a second viewing in progress shows under Continue watching. Its play count stays.
 - On `stopped`:
   - below 30 seconds: the position is cleared, as if the item was never started.
-  - at or beyond 90% of the runtime: the item is marked played, its position is cleared and its play count goes up.
+  - at or beyond 90% of the runtime: the item is marked played, its position is cleared, its play count goes up and `last_played_at` is the report's time.
   - otherwise the position is kept, and the item shows under Continue watching.
+- The runtime is the played version's: its file's duration, or the sum of its parts' (`files[].duration_ms`). It is not the provider's `runtime_ms`, since a version can be longer or shorter than that. Where a duration is not known, a stop keeps the position.
 - It does not learn track preferences from this. Those are set on purpose (7.8).
 
 ### 7.7 Played and unplayed
 
-- `PUT /items/{id}/played` marks an item played. On a season, a series or a collection it marks every episode or film in it.
-- `DELETE /items/{id}/played` clears played and the position, with the same reach.
-- `PUT /items/played` and `DELETE /items/played` take `{"ids": [4801, 4802, 4803]}`, at most 1000 ids, and do the same for each of them. That is one request for "Mark earlier episodes as played".
+- `PUT /items/{id}/played` marks an item played: `played` true, the position cleared, `last_played_at` the time of the request, and a play count of at least 1. On a season it marks every episode in it, on a series every episode, the specials too, and on a collection every film. An item already played is left as it is.
+- `DELETE /items/{id}/played` clears played and the position, with the same reach. The play count and `last_played_at` stay. An item that is neither played nor started is left as it is.
+- `PUT /items/played` and `DELETE /items/played` take `{"ids": [4801, 4802, 4803]}`, at most 1000 ids, and do the same for each of them. That is one request for "Mark earlier episodes as played". An id that no item has, such as one a scan has just removed, is skipped. The forms with one id answer `404` for it.
 
 All four return `204`. With `?return=previous` they return `200` and what they replaced, one entry for each item whose state changed:
 
@@ -702,20 +708,23 @@ All four return `204`. With `?return=previous` they return `200` and what they r
 ]}
 ```
 
-**Undo.** `PUT /items/state` with `{"states": [ … ]}` writes each entry as given, for the signed-in user. Entries have the shape above, at most 2000 of them. A client asks for `previous`, keeps it while its Undo is on screen, and sends it back if Undo is pressed. Nothing else sets a position or a play count directly: playback uses `POST /progress`.
+**Undo.** `PUT /items/state` with `{"states": [ … ]}` writes each entry as given, for the signed-in user, and returns `204`. Entries have the shape above, at most 2000 of them, so a longer `previous` goes back in several requests. An entry is for a film or an episode, and one with `played` true has `position_ms` 0: anything else is `400`. An entry for an item that no longer exists is skipped. A client asks for `previous`, keeps it while its Undo is on screen, and sends it back if Undo is pressed. Nothing else sets a position or a play count directly: playback uses `POST /progress`.
 
 ### 7.8 Track preferences
 
-`PUT /series/{id}/prefs`, sent when the user picks an audio or subtitle track during an episode:
+`PUT /series/{id}/prefs`, sent when the user picks an audio or subtitle track during an episode. `204`, and `404` for an id that is not a series:
 
 ```json
 {"audio_lang": "eng", "sub_lang": null, "sub_mode": "off"}
 ```
 
-The next episode of that series then arrives with these in `prefs`, so it starts on the right tracks and no switch is needed. `PUT /auth/me/prefs` with the same body sets the user's defaults, which also apply to films.
+`sub_mode` is required. A language is the `lang` of a track as the detail gives it, or null: at most 16 letters, digits and hyphens.
+
+The next episode of that series then arrives with these in `prefs`, so it starts on the right tracks and no switch is needed. `PUT /auth/me/prefs` with the same body sets the user's defaults, which also apply to films. `204`.
 
 - `DELETE /series/{id}/prefs` forgets a series' choice, so the series follows the user's defaults again. `204`. In `/changes` it is a `prefs` row with `sub_mode` null.
-- `GET /auth/me/prefs` returns the defaults and every series with a choice of its own, for a settings page:
+- The defaults are not in `/changes`. A client reads them with `GET /auth/me/prefs` when it starts, and a detail's `prefs` already applies them.
+- `GET /auth/me/prefs` returns the defaults and every series with a choice of its own, by title, for a settings page:
 
 ```json
 {"defaults": {"audio_lang": "eng", "sub_lang": "eng", "sub_mode": "auto"}, "series": [{"series_id": 377, "title": "Harbor Lantern", "audio_lang": "jpn", "sub_lang": "eng", "sub_mode": "on"}]}
