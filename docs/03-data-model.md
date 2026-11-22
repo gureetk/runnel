@@ -387,6 +387,12 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 );
 ```
 
+Migration `0002_images_key.sql`, because `GET /img` finds an image by its key, and without an index that read every row of `images`. With 40,000 rows, a request for the key in the last row took a median of 5.5 ms, against 0.5 ms for the first; with the index, 0.5 ms for either (measured in a development sandbox, 22 November 2026). The migration rebuilds no table:
+
+```sql
+CREATE INDEX images_key ON images(key);
+```
+
 ## 4. Rules that keep it consistent
 
 **Files**
