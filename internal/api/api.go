@@ -112,6 +112,10 @@ func (s *Server) routes() {
 
 	s.mux.Handle("GET "+Prefix+"/libraries", s.json(s.signedIn(s.handleLibraries)))
 	s.mux.Handle("GET "+Prefix+"/items", s.json(s.signedIn(s.handleItems)))
+	s.mux.Handle("GET "+Prefix+"/items/letters", s.json(s.signedIn(s.handleLetters)))
+	s.mux.Handle("GET "+Prefix+"/home", s.json(s.signedIn(s.handleHome)))
+	s.mux.Handle("GET "+Prefix+"/search", s.json(s.signedIn(s.handleSearch)))
+	s.mux.Handle("GET "+Prefix+"/genres", s.json(s.signedIn(s.handleGenres)))
 	s.mux.Handle("GET "+Prefix+"/changes", s.json(s.signedIn(s.handleChanges)))
 	s.mux.Handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
 	s.mux.Handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))

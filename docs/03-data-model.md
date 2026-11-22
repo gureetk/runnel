@@ -588,7 +588,7 @@ LIMIT :limit;
 
 An episode that is already started is left out here because Continue watching shows it. Episodes marked played together share one `last_played_at`, so the latest of them in order counts as the one played most recently. A series' `resume` (`04-api.md`, section 2.2) asks the same question for one series.
 
-**Recently added**: films as they are, episodes folded into their series.
+**Recently added**: films as they are, episodes folded into their series. `:since` is the start of the day 30 days back (P7), so that Home's `ETag` can carry it.
 
 ```sql
 SELECT id, type, title, added_at, 1 AS new_count

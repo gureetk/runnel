@@ -15,11 +15,12 @@ import (
 
 // etag sets the ETag of what a request reads now, built from the server's
 // instance, the change sequence and the user (docs/04-api.md, section 1),
-// and answers 304 when the request's If-None-Match holds it. It reads the
-// sequence before the response's data, so that a change made while the
-// response is built moves the tag of the next request. It reports whether
-// the handler is to go on.
-func (s *Server) etag(w http.ResponseWriter, r *http.Request) bool {
+// and extra, for what else the response depends on, and answers 304 when
+// the request's If-None-Match holds it. It reads the sequence before the
+// response's data, so that a change made while the response is built
+// moves the tag of the next request. It reports whether the handler is to
+// go on.
+func (s *Server) etag(w http.ResponseWriter, r *http.Request, extra string) bool {
 	seq, err := s.db.Seq(r.Context())
 	if err != nil {
 		s.internal(w, r, err)
@@ -29,7 +30,7 @@ func (s *Server) etag(w http.ResponseWriter, r *http.Request) bool {
 	if len(instance) > 8 {
 		instance = instance[:8]
 	}
-	tag := `W/"` + instance + "-" + strconv.FormatInt(seq, 10) + "-" + strconv.FormatInt(callerOf(r.Context()).user.ID, 10) + `"`
+	tag := `W/"` + instance + "-" + strconv.FormatInt(seq, 10) + "-" + strconv.FormatInt(callerOf(r.Context()).user.ID, 10) + extra + `"`
 	h := w.Header()
 	h.Set("ETag", tag)
 	h.Set("Cache-Control", "private, no-cache")

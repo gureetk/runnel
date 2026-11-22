@@ -101,7 +101,7 @@ func TestMyList(t *testing.T) {
 		{"GET", "/api/v1/items?list=2", 400},
 		{"GET", "/api/v1/items?list=1&library=1", 400},
 		{"GET", "/api/v1/items?list=1&type=episode", 400},
-		{"GET", "/api/v1/items?list=1&sort=added", 400},
+		{"GET", "/api/v1/items?list=1&sort=views", 400},
 		{"GET", "/api/v1/items?list=1&cursor=junk", 400},
 		{"GET", "/api/v1/items?library=1&sort=listed", 400},
 	} {
