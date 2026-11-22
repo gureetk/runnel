@@ -334,8 +334,17 @@ A library that Jellyfin has already matched can be imported. That is quicker and
 
 - `dry_run` does everything except the writes. Run that first.
 - The import is safe to repeat. It never overwrites a manual match, and it never lowers a play state that is newer locally.
-- Jellyfin's item listing with paths and user data is known from versions before 12. Check it against 12 before relying on it.
 - Before the dry run, `POST /admin/import/jellyfin/users` lists Jellyfin's users, for the form that maps them to people here.
+
+**The calls**, checked against Jellyfin 12.4's published API description (the `openapi.json` of version 12.4.0 that its SDKs carry) and its source at `v12.4` [checked 22 November 2026]:
+
+- **The key** goes in `Authorization: MediaBrowser Token="<key>"`. That is the header the description names. Jellyfin 12 turns the older ways off by default: `X-Emby-Token`, `X-MediaBrowser-Token`, `X-Emby-Authorization` and `api_key` are read only with its `EnableLegacyAuthorization` setting (`Jellyfin.Server.Implementations/Security/AuthorizationContext.cs`). An API key needs none of the header's device fields.
+- **`GET /System/Info/Public`**, without the key, gives `Version` and `ServerName`.
+- **`GET /Users`** gives the users, each with `Name` and `Id`. A key Jellyfin refuses is `401`.
+- **`GET /Items`** with `userId`, `recursive=true`, `includeItemTypes=Movie,Series,Episode`, `excludeLocationTypes=Virtual`, `fields=Path,ProviderIds`, `enableUserData=true`, `enableImages=false`, `sortBy=SortName`, `startIndex` and `limit=500` pages every film, series and episode that has a file. Each comes with its `Id`, `Name`, `Type`, `Path` and `ProviderIds`, and with that user's `UserData`: `Played`, `PlayCount`, `LastPlayedDate` and `PlaybackPositionTicks`, in units of 100 ns. A page answers `Items`, `TotalRecordCount` and `StartIndex`. Lists are comma-delimited, as the description says. With an API key `userId` may be left out, and the items then come without user data.
+- **Provider ids** are the keys of `ProviderIds`. Jellyfin itself writes `Tmdb`, `Imdb`, `Tvdb` and `TmdbCollection` (`MediaBrowser.Model/Entities/MetadataProvider.cs`). Its anime plugins write `AniDB` and `AniList` (their `ProviderNames.cs` at the default branches of `jellyfin-plugin-anidb` and `jellyfin-plugin-anilist`). They become `tmdb`, `imdb`, `tvdb`, `tmdb_collection`, `anidb` and `anilist`. Keys are compared without case, and other keys are left.
+- **Answers** are JSON with PascalCase names, Jellyfin's default.
+- The tests run against a stand-in that answers as the description says, and that refuses the older ways to send the key.
 - One import runs at a time. Its report is kept in the data directory, replaced by the next run. `GET /admin/import/jellyfin` returns the summary and the first 100 rows that did not join, and every row with `full=1` (`04-api.md`, section 8.5).
 
 ## 8. Artwork
