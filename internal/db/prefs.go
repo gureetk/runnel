@@ -76,12 +76,21 @@ func (d *DB) SetSeriesPrefs(ctx context.Context, userID, seriesID int64, p Prefs
 	return nil
 }
 
-// SetDefaultPrefs stores a user's track defaults. They are not stamped:
-// /changes does not carry them (docs/04-api.md, section 7.8).
+// SetDefaultPrefs stores a user's track defaults. /changes does not carry
+// them (docs/04-api.md, section 7.8), but a detail's prefs show them, so a
+// change takes a sequence value, on no row, and the ETags of details move.
 func (d *DB) SetDefaultPrefs(ctx context.Context, userID int64, p Prefs) error {
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
-		_, err := tx.tx.ExecContext(ctx, `UPDATE users SET audio_lang = ?, sub_lang = ?, sub_mode = ? WHERE id = ?`,
-			nullString(p.AudioLang), nullString(p.SubLang), p.SubMode, userID)
+		res, err := tx.tx.ExecContext(ctx, `UPDATE users SET audio_lang = ?, sub_lang = ?, sub_mode = ?
+			WHERE id = ? AND (audio_lang IS NOT ? OR sub_lang IS NOT ? OR sub_mode IS NOT ?)`,
+			nullString(p.AudioLang), nullString(p.SubLang), p.SubMode, userID,
+			nullString(p.AudioLang), nullString(p.SubLang), p.SubMode)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			_, err = tx.Seq(ctx)
+		}
 		return err
 	})
 	if err != nil {

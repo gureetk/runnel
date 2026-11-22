@@ -27,7 +27,7 @@ Added the same day, after the research on browsers (D39, D40): playing in a brow
 | Errors | An HTTP status and a body `{"error":{"code":"…","message":"…"}}`. Codes are in section 9. |
 | Wrong tries | A call that takes a secret (a password, a setup code, a pairing code) answers `429` with code `too_many` and a `Retry-After` header after too many wrong tries. The limit is given with each call. |
 | Paging | `limit` and `cursor`. A response carries `next`, a cursor for the following page, or `null`. Cursors are opaque. |
-| Caching | `GET /home`, `GET /items` and `GET /items/{id}` send an `ETag` built from the change sequence and the user. `If-None-Match` gets `304` when nothing changed. Images are immutable and cache forever. |
+| Caching | `GET /home`, `GET /items` and `GET /items/{id}` send a weak `ETag` built from the server's instance, the change sequence and the user, with `Cache-Control: private, no-cache`. `If-None-Match` gets `304` when nothing changed. Other JSON is sent with `Cache-Control: no-store`. Images are immutable and cache forever. |
 | Compression | JSON is gzip-compressed when the request allows it. Media is never compressed. |
 | Versioning | `/api/v1` only grows: new endpoints, new optional parameters, new response fields. Anything else is `/api/v2`. `GET /server` lists `features` so a client can ask before it uses something newer. |
 
@@ -518,7 +518,7 @@ The person object of section 2.4. `404` for an id that does not exist.
 
 A client keeps the library in its own database, draws its screens from that, and asks the server what changed.
 
-Parameters: `since` (a sequence number, 0 for everything), `limit` (default 500, at most 2000).
+Parameters: `since` (a sequence number, 0 for everything), `limit` (default 500, 1 to 2000). Anything else is `400`.
 
 ```json
 {
@@ -541,11 +541,13 @@ How a client uses it:
 1. Start with `since=0`. Apply what comes back: upsert `items`, `state`, `prefs`, `list` and `libraries`, remove `deleted`, and drop any library that is not in `library_ids`, with its items.
 2. Call again with `since` set to the `upto` it was given, until `upto` equals `latest`.
 3. Keep `latest`. Later, ask again from there: when the app opens, when a screen that shows the library opens, and after its own playback.
-4. If `reset` is true, the server no longer has the delete markers that far back. Drop the local copy and start from 0.
+4. If `reset` is true, the server no longer has the delete markers that far back, or `since` is ahead of its sequence, which means the copy came from another database. Drop the local copy and start from 0. A `reset` page holds nothing else but `latest` and `library_ids`. `since=0` is never reset.
 
 Rules on the server side:
 
-- Everything returned has a `seq` above `since` and at or below `upto`. A page ends at a sequence boundary, so the rows of one sequence value are never split across two pages. One value is on at most 500 rows (`03-data-model.md`, section 5), so a page holds at most `limit` rows, or 500 when `limit` is lower. A transaction that changes more than 500 rows, such as the first build of a large library, takes several values, and its changes can arrive over several pages. A parent comes before its children, so a page applied on its own never leaves an episode without its season.
+- Everything returned has a `seq` above `since` and at or below `upto`, but for the parents below. A page ends at a sequence boundary, so the rows of one sequence value are never split across two pages. One value is on at most 500 rows (`03-data-model.md`, section 5), so a page holds at most `limit` rows, or 500 when `limit` is lower, besides those parents. Rows that only another user sees do not count. A transaction that changes more than 500 rows, such as the first build of a large library, takes several values, and its changes can arrive over several pages.
+- A parent comes before its children, so a page applied on its own never leaves an episode without its season. In `items`, films, series and collections come first, then seasons, then episodes. A season or a series whose own `seq` is above `upto`, because a later change counted a new episode, comes with its episodes and seasons on the page, and again at its own value.
+- The page is read in one read transaction and written as it is read.
 - `items` are cards without the parts that belong to a user: no `state`, no `listed_at`, and `counts` without `unplayed`. Those arrive in `state` and `list`, for the signed-in user only. A client counts unplayed episodes from its own copy.
 - A new episode also returns its season and series, because their counts changed.
 - A `list` row with `listed_at` null was taken off the list. A `prefs` row with `sub_mode` null was reset (7.8).
@@ -723,7 +725,7 @@ All four return `204`. With `?return=previous` they return `200` and what they r
 The next episode of that series then arrives with these in `prefs`, so it starts on the right tracks and no switch is needed. `PUT /auth/me/prefs` with the same body sets the user's defaults, which also apply to films. `204`.
 
 - `DELETE /series/{id}/prefs` forgets a series' choice, so the series follows the user's defaults again. `204`. In `/changes` it is a `prefs` row with `sub_mode` null.
-- The defaults are not in `/changes`. A client reads them with `GET /auth/me/prefs` when it starts, and a detail's `prefs` already applies them.
+- The defaults are not in `/changes`. A client reads them with `GET /auth/me/prefs` when it starts, and a detail's `prefs` already applies them. Changing them takes a sequence value, so the `ETag`s of details move (section 1).
 - `GET /auth/me/prefs` returns the defaults and every series with a choice of its own, by title, for a settings page:
 
 ```json

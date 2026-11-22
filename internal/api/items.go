@@ -203,6 +203,9 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	if !s.etag(w, r) {
+		return
+	}
 	first := q.Get("cursor") == ""
 
 	var cards []db.Card
@@ -484,6 +487,9 @@ func fileJSON(f db.FileDetail) fileBody {
 // their streams and chapters, which is what a player needs; an episode its
 // neighbours; a series its numbering and its seasons.
 func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
+	if !s.etag(w, r) {
+		return
+	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	c, gerr := s.db.Item(r.Context(), id)
 	switch {
