@@ -51,6 +51,8 @@ type Config struct {
 	// Work is the background queue, which admin calls look at and wake.
 	// Nil has nothing paused by a provider.
 	Work Work
+	// Imports runs the Jellyfin import. Nil runs none.
+	Imports Imports
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -66,6 +68,7 @@ type Server struct {
 	gate      Gate
 	images    Images
 	work      Work
+	imports   Imports
 	startedAt time.Time
 	mux       *http.ServeMux
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
@@ -109,6 +112,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		gate:          gate,
 		images:        c.Images,
 		work:          c.Work,
+		imports:       c.Imports,
 		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
@@ -190,6 +194,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
 	s.mux.Handle("POST "+Prefix+"/admin/import/jellyfin/users", s.json(s.admin(s.handleJellyfinUsers)))
+	s.mux.Handle("POST "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleStartImport)))
+	s.mux.Handle("GET "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleImportReport)))
 	s.mux.Handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))
 	s.mux.Handle("GET "+Prefix+"/admin/stats", s.json(s.admin(s.handleStats)))
 }

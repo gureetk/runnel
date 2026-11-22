@@ -23,6 +23,7 @@ import (
 	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/meta"
+	"github.com/gureetk/runnel/internal/meta/jellyfin"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
 	"github.com/gureetk/runnel/internal/tasks"
@@ -120,6 +121,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	artwork := meta.NewArtwork(database, cfg.DataDir, ffmpeg, ffprobe, log)
 	artwork.Queued = queue.Wake
 	queue.Register(artwork.Kind())
+	// The Jellyfin import is a task of its own, which waits at the gate
+	// between pages too.
+	importer := jellyfin.NewImporter(database, cfg.DataDir, gate, log)
+	importer.Queued = queue.Wake
+	queue.Register(importer.Kind())
 
 	scanner := scan.New(database, log)
 	scanner.Queued = queue.Wake
@@ -181,6 +187,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Gate:           gate,
 		Images:         artwork,
 		Work:           queue,
+		Imports:        importer,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{

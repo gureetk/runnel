@@ -121,7 +121,7 @@ Where one call carries data that a later stage brings, stage 2 builds the part i
 - `GET /admin/stats` leaves out `limits` and `in_use`, which are transcoding's, until stage 3.
 - `GET /admin/settings` has the server's name only until stage 4, which brings the metadata key, and `PATCH /admin/settings` refuses `tmdb_key` with `400` until then.
 - `GET /items` refuses `collection` and `person` with `400` until stage 4, which brings collections and credits. Genres and ratings also come with metadata, so until then `GET /genres` and a genre's list are empty, and a sort by rating goes by title.
-- An item's detail (`GET /items/{id}`) has no metadata, `credits` or `collection` until stage 4. Its `match.state` is `unmatched` and its `external_ids` are empty. A series' `numbering` comes from its files: setting it by hand is in stage 4's match dialog, and so is mapping a running count to the provider's seasons, so until then a running count's episodes carry provisional season and episode numbers (`06-library-and-metadata.md`, section 5).
+- An item's detail (`GET /items/{id}`) has no metadata, `credits` or `collection` until stage 4. Its `match.state` is `unmatched` and its `external_ids` are empty, unless the Jellyfin import gave it Jellyfin's provider ids: it is `matched` then, still without metadata (`06-library-and-metadata.md`, section 7). A series' `numbering` comes from its files: setting it by hand is in stage 4's match dialog, and so is mapping a running count to the provider's seasons, so until then a running count's episodes carry provisional season and episode numbers (`06-library-and-metadata.md`, section 5).
 
 **Exit:**
 

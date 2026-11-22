@@ -345,6 +345,15 @@ A library that Jellyfin has already matched can be imported. That is quicker and
 - **Provider ids** are the keys of `ProviderIds`. Jellyfin itself writes `Tmdb`, `Imdb`, `Tvdb` and `TmdbCollection` (`MediaBrowser.Model/Entities/MetadataProvider.cs`). Its anime plugins write `AniDB` and `AniList` (their `ProviderNames.cs` at the default branches of `jellyfin-plugin-anidb` and `jellyfin-plugin-anilist`). They become `tmdb`, `imdb`, `tvdb`, `tmdb_collection`, `anidb` and `anilist`. Keys are compared without case, and other keys are left.
 - **Answers** are JSON with PascalCase names, Jellyfin's default.
 - The tests run against a stand-in that answers as the description says, and that refuses the older ways to send the key.
+
+**How it joins and writes:**
+
+- A path from Jellyfin is first rewritten by the `paths` entry whose `from` is the longest that holds it, matching whole folders. It then belongs to the deepest library folder here that holds it.
+- A film or an episode joins the item that the file at that path plays. A series joins the series built from that folder. A row that does not join is listed with why: no file at that path, a file that is no film's or episode's (an extra), no series built from that folder, a path outside every library folder, or a different kind of item here.
+- Films and series get the provider ids Jellyfin gives, and become `matched`. Ids that Jellyfin does not give stay. An item matched by hand, or left unmatched on purpose, is left as it is. An item whose ids change is stamped, since its detail changed.
+- Films and episodes get a play state for each person mapped: Jellyfin's played flag, play count, last played time and position. A state here whose `last_played_at` is later than Jellyfin's is kept as it is. A played item has no position, and the play count is the greater of the two. A Jellyfin item that says nothing (unplayed, no plays, never played, no position) writes nothing, and so does one that would change nothing.
+- With nobody mapped, the import still joins and writes the provider ids.
+- The import is the queue's one task of kind `import` (section 9). The task keeps the request, with the key, until the run ends. The run waits at the playback gate before each page. A failure ends the run as failed, its report says why, and it is not tried again by itself. A run that the server's stop cuts short is queued again at the next start.
 - One import runs at a time. Its report is kept in the data directory, replaced by the next run. `GET /admin/import/jellyfin` returns the summary and the first 100 rows that did not join, and every row with `full=1` (`04-api.md`, section 8.5).
 
 ## 8. Artwork
@@ -387,4 +396,5 @@ One queue in the `tasks` table, so work survives a restart.
 - A provider that answers 429 pauses its queue for the time it asks.
 - A task carries the library it works for. Finished tasks stay until their kind and library have nothing queued or running, and are then deleted together. `GET /admin/tasks` counts progress from that: done out of all (`03-data-model.md`, section 4).
 - An admin can cancel what is queued or failed, and retry what failed. Cancelled work is found again by the next scan or refresh.
+- The import is the exception to the retries: a run that fails ends there, and its report says why (section 7).
 - A scan is not a task. The scanner reports its own state: walking, then probing with done out of total, which are its library's `probe` tasks.

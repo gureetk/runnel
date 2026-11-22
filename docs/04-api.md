@@ -918,24 +918,33 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 | Endpoint | Purpose |
 |---|---|
 | `POST /admin/import/jellyfin/users` | `{"url": "…", "api_key": "…"}`. Returns Jellyfin's users, `{"version": "12.0", "users": [{"id": "…", "name": "ada"}]}`, for the form that maps them to people here. |
-| `POST /admin/import/jellyfin` | Starts the import, or its dry run. Returns `202`. `409` with code `conflict` while one is running. |
-| `GET /admin/import/jellyfin` | The state and the report of the last import or dry run. With `full=1`, every row that did not join, for download. |
+| `POST /admin/import/jellyfin` | Starts the import, or its dry run, with the body of `06-library-and-metadata.md`, section 7. Returns `202` with `{}` once Jellyfin and the people named are checked. `409` with code `conflict` while one is queued or running. |
+| `GET /admin/import/jellyfin` | The state and the report of the running or the last import or dry run. With `full=1`, every row that did not join, for download. `404` before any has run. |
 
 ```json
 {
   "state": "done",
   "dry_run": true,
   "at": 1795200000000,
+  "finished_at": 1795200041000,
+  "version": "12.4.0",
   "joined": 10480,
   "not_joined": 11,
+  "series_joined": 241,
+  "series_not_joined": 1,
   "matches": 3361,
   "states": {"ada": 5120, "noor": 2210},
-  "missing": [{"path": "/media/films/Old Film (1999)/Old Film (1999).mkv", "reason": "no file at that path"}],
-  "missing_more": 0
+  "missing": [{"type": "movie", "path": "/media/films/Old Film (1999)/Old Film (1999).mkv", "reason": "no file at that path here"}],
+  "missing_more": 0,
+  "error": null
 }
 ```
 
-- `state` is `running`, `done` or `failed`. `missing` holds the first 100 rows that did not join.
+- `state` is `running`, `done` or `failed`, and `error` says why a run failed. `missing` holds the first 100 rows that did not join, each with its `type` here (`movie`, `series` or `episode`), Jellyfin's path and the reason.
+- Without `dry_run` the import is a dry run: it writes only with `"dry_run": false`.
+- `joined` and `not_joined` count Jellyfin's films and episodes, which exit criterion 2 of stage 2 is about. `series_joined` and `series_not_joined` count its series. `matches` counts the films and series whose provider ids are written. `states` counts, for each person here, the films and episodes whose play state is written. A dry run counts what the import would write.
+- Jellyfin's user names and the names of people here are compared without case. A user Jellyfin does not have, a person who is not here, or a path to rewrite that is not absolute is `400` with code `bad_request`.
+- `full` is `1` or `0`.
 - `400` with code `bad_key` when Jellyfin refuses the key. `502` with code `upstream` when it cannot be reached, or answers with something the server does not read.
 - `url` is Jellyfin's address, `http` or `https`, with its base path if it has one. `api_key` is a key made in Jellyfin's dashboard: 1 to 200 printable characters, without `"` or `,`. Either one missing or malformed is `400` with code `bad_request`.
 - `version` is the `Version` that Jellyfin's `GET /System/Info/Public` gives. The users are listed by name.
