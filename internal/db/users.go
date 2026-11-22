@@ -82,21 +82,24 @@ func (d *DB) UserForLogin(ctx context.Context, name string) (model.User, *model.
 // earlier token of the same user on the same device is deleted in the same
 // transaction (docs/04-api.md, section 3.2).
 func (d *DB) ReplaceToken(ctx context.Context, userID int64, dev model.Device, hash []byte, now int64) error {
-	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
-		if _, err := tx.tx.ExecContext(ctx,
-			`DELETE FROM tokens WHERE user_id = ? AND device_id = ?`, userID, dev.ID); err != nil {
-			return err
-		}
-		_, err := tx.tx.ExecContext(ctx,
-			`INSERT INTO tokens (hash, user_id, device_id, device_name, client, created_at, last_used_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			hash, userID, dev.ID, nullString(dev.Name), nullString(dev.Client), now, now)
-		return err
-	})
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error { return tx.putToken(ctx, userID, dev, hash, now) })
 	if err != nil {
 		return fmt.Errorf("db: store token: %w", err)
 	}
 	return nil
+}
+
+// putToken stores a token's hash for a user on a device, in place of an
+// earlier token of the same user on the same device.
+func (t *Tx) putToken(ctx context.Context, userID int64, dev model.Device, hash []byte, now int64) error {
+	if _, err := t.tx.ExecContext(ctx, `DELETE FROM tokens WHERE user_id = ? AND device_id = ?`, userID, dev.ID); err != nil {
+		return err
+	}
+	_, err := t.tx.ExecContext(ctx,
+		`INSERT INTO tokens (hash, user_id, device_id, device_name, client, created_at, last_used_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		hash, userID, dev.ID, nullString(dev.Name), nullString(dev.Client), now, now)
+	return err
 }
 
 // TokenUser is a token that is in use, with its user.

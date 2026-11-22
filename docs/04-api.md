@@ -344,10 +344,10 @@ Returns `200`:
 
 For a TV, where typing a password with a D-pad is slow.
 
-1. The TV calls `POST /auth/pair/start` with its `device` object. No authentication.
+1. The TV calls `POST /auth/pair/start` with its `device` object, as in 3.2. No authentication.
 
    ```json
-   {"code": "K7Q2M9", "secret": "s_4f8a1c2e9b7d6035", "expires_in": 600, "poll_every": 2}
+   {"code": "K7Q2M9", "secret": "s_4f8a1c2e9b7d60358c1e2a9f7b3d6e04", "expires_in": 600, "poll_every": 2}
    ```
 
 2. The TV shows the code, and a QR code for `http://<host>:8610/pair?code=K7Q2M9`, at the address the TV itself reached the server by.
@@ -358,17 +358,18 @@ For a TV, where typing a password with a D-pad is slow.
    ```
 
    Their screen shows the device's name and client, so they see what is being let in before they approve.
-4. They approve it: `POST /auth/pair/approve` with `{"code": "K7Q2M9"}`. That signs the TV in as the approving user. An admin may add `"user_id"` to sign it in as someone else. On the server's own shell, `runnel pair approve K7Q2M9 --user ada` does the same.
-5. The TV polls `POST /auth/pair/poll` with `{"code": "K7Q2M9", "secret": "s_4f8a1c2e9b7d6035"}`.
-   - `202` while it waits.
+4. They approve it: `POST /auth/pair/approve` with `{"code": "K7Q2M9"}`, which answers `204`. That signs the TV in as the approving user. An admin may add `"user_id"` to sign it in as someone else; anyone else doing so gets `403`, and an id that no user has `400`. A code approved already is `409` with code `conflict`. On the server's own shell, `runnel pair approve K7Q2M9 --user ada` does the same, with the local admin token, which takes the lookup and needs `user_id` on the approval.
+5. The TV polls `POST /auth/pair/poll` with `{"code": "K7Q2M9", "secret": "s_4f8a1c2e9b7d60358c1e2a9f7b3d6e04"}`.
+   - `202` with `{"waiting": true}` while it waits.
    - `200` with the same body as a password sign-in, once. The pairing is then spent.
    - `410` with code `expired` after ten minutes or once spent.
+   - `404` for a code that no device waits with, or a secret that is not the code's.
 
-Codes are six characters from an alphabet without look-alikes (no 0, O, 1, I, L). Only the device that holds the secret can collect the token.
+Codes are six characters from an alphabet without look-alikes (no 0, O, 1, I, L). A code is taken as typed in small or capital letters, with spaces or dashes. The secret is `s_` and 32 hexadecimal characters, and only its SHA-256 is stored. Only the device that holds the secret can collect the token.
 
 - The lookup answers `404` when no device waits with that code, and `410` with code `expired` for a code that ran out or was spent. An expired code is remembered for an hour, so the two can be told apart.
-- One token may look up ten codes a minute, then `429` (P7).
-- At most 20 pairings wait at once, and one address may start ten a minute (P7). Beyond that `pair/start` answers `429`.
+- One token may look up or approve ten codes a minute, then `429` (P7).
+- At most 20 pairings wait at once, and one address may start ten a minute (P7). Beyond that `pair/start` answers `429`, with `Retry-After`. Behind a reverse proxy the address is the proxy's (`02-architecture.md`, section 10).
 - Admins can list what is waiting (8.6). That says a device is waiting, not whose it is. A code is approved only by someone who sees it on the device's own screen.
 
 ### 3.4 The first run: `POST /setup`
@@ -392,11 +393,11 @@ Returns `200` with the same body as a password sign-in. The rest of the first ru
 
 | Call | What it does |
 |---|---|
-| `GET /auth/me` | The user and the device of the token. |
-| `POST /auth/logout` | Revokes the token it is called with. |
-| `PUT /auth/me/password` | `{"current": "…", "new": "…"}`. `204`. A wrong `current` is `401` with code `wrong_login`, counted with failed sign-ins. Tokens stay valid: a device is signed out from the list below. Someone who has no password yet, because they sign in by pairing only, asks an admin to set one. |
-| `GET /auth/me/devices` | The person's signed-in devices. |
-| `DELETE /auth/me/devices/{id}` | Signs one of them out. `204`. |
+| `GET /auth/me` | The user and the device of the token: `{"user": {"id": 1, "name": "ada", "is_admin": true, "has_password": true}, "device": {…}}`, the device shaped as in the list below. |
+| `POST /auth/logout` | Revokes the token it is called with. `204`. |
+| `PUT /auth/me/password` | `{"current": "…", "new": "…"}`. `204`. A wrong `current` is `401` with code `wrong_login`, counted with failed sign-ins, and limited with them. Tokens stay valid: a device is signed out from the list below. Someone who has no password yet, because they sign in by pairing only, gets `403` and asks an admin to set one. |
+| `GET /auth/me/devices` | The person's signed-in devices, the one used last first. |
+| `DELETE /auth/me/devices/{id}` | Signs one of them out. `204`, and `404` for a device that is not the person's. |
 | `GET /auth/me/prefs`, `PUT /auth/me/prefs` | Track defaults, and the series with a choice of their own (7.8). |
 
 ```json

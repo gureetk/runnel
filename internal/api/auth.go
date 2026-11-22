@@ -84,7 +84,7 @@ func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc {
 		token := bearer(r)
 		if s.adminHash != nil && auth.LooksLikeToken(token) &&
 			subtle.ConstantTimeCompare(auth.HashToken(token), s.adminHash) == 1 {
-			if !fromThisHost(r) {
+			if !fromThisHost(r) || proxied(r) {
 				s.fail(w, r, http.StatusUnauthorized, "unauthorized", "the local admin token is taken only from the server's own host")
 				return
 			}
@@ -165,6 +165,15 @@ func fromThisHost(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// proxied reports whether a reverse proxy passed the request on: it says
+// whom for in Forwarded or X-Forwarded-For. Such a request may come from
+// anywhere, whatever address it arrived from, so the local admin token is
+// not taken on it (docs/02-architecture.md, section 10). No limit is ever
+// keyed on these headers, which any client can write.
+func proxied(r *http.Request) bool {
+	return r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-For") != ""
 }
 
 func remoteIP(r *http.Request) net.IP {

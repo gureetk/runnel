@@ -143,7 +143,7 @@ Subcommands of the one binary:
 | `runnel library add --name <n> --kind movies\|shows [--profile anime] --root <path>…`, `library list`, `library remove <id>` | Libraries. |
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
 | `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |
-| `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code. |
+| `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code, and prints the device's name and client. It finds the user with `GET /admin/users`, the device with `GET /auth/pair/{code}`, and approves with `POST /auth/pair/approve` (`04-api.md`, section 3.3). |
 | `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it. |
 | `runnel import jellyfin …` | The one-time import. |
 | `runnel version` | |
@@ -208,6 +208,7 @@ Goal for stage 2: under 30 MB resident with a real library loaded and a client b
 - A new server has no user. Making the first one needs the setup code from the server's log (D35), so that whoever opens the address first does not become its admin.
 - Over plain HTTP a browser gives a page no secure context. The web interface is built to need none (D45).
 - Wrong tries are limited: sign-ins, setup codes, pairing codes (P7).
+- **Behind a reverse proxy on the same machine** every request arrives from the proxy, at a loopback address. Limits kept by address, on wrong tries and on pairings started, are then shared by everyone the proxy passes on: stricter, never looser. No limit is ever keyed on `Forwarded` or `X-Forwarded-For`, which any client can write. The local admin token is refused on a request that carries either header, since a proxy passed it on and it may come from anywhere. On a request without them, as from a proxy that adds neither, the token's secrecy alone protects it: it is readable by the server's own user only.
 - Tokens are 32 random bytes, sent as `rn_` and 43 base-62 characters. Only their SHA-256 is stored. They are per device and can be revoked.
 - Passwords: PBKDF2 with SHA-256, a 16-byte random salt and an iteration count stored with the hash. New hashes use 600,000 iterations: one took 117 ms in the development sandbox. A wrong name takes as long to refuse as a wrong password.
 - URLs carry ids, never paths. A path from the database is joined to its root and checked to be inside it before any open.

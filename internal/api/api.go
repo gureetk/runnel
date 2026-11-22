@@ -65,7 +65,9 @@ type Server struct {
 	firstByteHold time.Duration // firstByteHold, shorter in tests
 	prepareHold   time.Duration // prepareHold, shorter in tests
 
-	logins *auth.Limiter // wrong sign-ins by address
+	logins      *auth.Limiter // wrong sign-ins by address
+	pairStarts  *auth.Limiter // pairings started, by address
+	pairLookups *auth.Limiter // pairing codes looked up or approved, by token
 
 	touchMu sync.Mutex
 	touched map[int64]int64 // token id -> when its use was last written
@@ -100,6 +102,8 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		firstByteHold: firstByteHold,
 		prepareHold:   prepareHold,
 		logins:        auth.NewLimiter(loginTries, time.Minute, now),
+		pairStarts:    auth.NewLimiter(pairStartsMinute, time.Minute, now),
+		pairLookups:   auth.NewLimiter(pairLookupMinute, time.Minute, now),
 		touched:       map[int64]int64{},
 	}
 	s.routes()
@@ -109,6 +113,15 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/server", s.json(s.handleServer))
 	s.mux.Handle("POST "+Prefix+"/auth/login", s.json(s.handleLogin))
+	s.mux.Handle("POST "+Prefix+"/auth/pair/start", s.json(s.handlePairStart))
+	s.mux.Handle("GET "+Prefix+"/auth/pair/{code}", s.json(s.signedInOrLocal(s.handlePairLookup)))
+	s.mux.Handle("POST "+Prefix+"/auth/pair/approve", s.json(s.signedInOrLocal(s.handlePairApprove)))
+	s.mux.Handle("POST "+Prefix+"/auth/pair/poll", s.json(s.handlePairPoll))
+	s.mux.Handle("GET "+Prefix+"/auth/me", s.json(s.signedIn(s.handleMe)))
+	s.mux.Handle("POST "+Prefix+"/auth/logout", s.json(s.signedIn(s.handleLogout)))
+	s.mux.Handle("PUT "+Prefix+"/auth/me/password", s.json(s.signedIn(s.handleSetMyPassword)))
+	s.mux.Handle("GET "+Prefix+"/auth/me/devices", s.json(s.signedIn(s.handleMyDevices)))
+	s.mux.Handle("DELETE "+Prefix+"/auth/me/devices/{id}", s.json(s.signedIn(s.handleSignOutDevice)))
 
 	s.mux.Handle("GET "+Prefix+"/libraries", s.json(s.signedIn(s.handleLibraries)))
 	s.mux.Handle("GET "+Prefix+"/items", s.json(s.signedIn(s.handleItems)))
@@ -136,7 +149,9 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT "+Prefix+"/auth/me/prefs", s.json(s.signedIn(s.handleSetMyPrefs)))
 	s.mux.Handle("GET "+Prefix+"/img/{key}/{w}", http.HandlerFunc(s.handleImage))
 
+	s.mux.Handle("GET "+Prefix+"/admin/users", s.json(s.admin(s.handleAdminUsers)))
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
+	s.mux.Handle("GET "+Prefix+"/admin/pairings", s.json(s.admin(s.handleAdminPairings)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))

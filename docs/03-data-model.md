@@ -465,7 +465,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - `setup_code` is deleted in the transaction that makes the first user.
 - The local admin token of the subcommands is not in the database. The server keeps its hash in memory (`02-architecture.md`, section 6).
 - `tokens.last_used_at` is written at most once in ten minutes for a token (P7). Otherwise every request would be a write.
-- A pairing is deleted an hour after it expires or is claimed. Until then a lookup can say that the code has expired.
+- A pairing is deleted an hour after it expires or is claimed. Until then a lookup can say that the code has expired. The deleting is done when a pairing starts, and a row older than the hour answers as if it were gone already.
 
 **Background work and the start-time log**
 
