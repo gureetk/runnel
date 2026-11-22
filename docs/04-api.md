@@ -464,7 +464,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | `series` | With `type=episode`: every episode of a series in one list. |
 | `ids` | Comma-separated ids, at most 200. For refreshing a few cards. |
 | `genre` | One genre name. Without `library`: the films and series of every library. |
-| `list` | `1`: what the signed-in user has on My list (4.7). Unavailable items are included. |
+| `list` | `1`: what the signed-in user has on My list (4.7). Unavailable items are included. It does not go with `library`, `parent` or `series`. |
 | `collection` | A collection's id: its films. |
 | `person` | A person's id: the films and series that credit them. Each card gains `credit`, such as `{"kind": "cast", "role": "Edda", "episodes": 12}`. |
 | `played` | `0` or `1`. For series, `0` means some episode is unplayed. |
@@ -505,8 +505,8 @@ Parameter: `library`, optional. Returns `{"genres": [{"name": "Drama", "items": 
 
 A person's own list of films and series to watch.
 
-- `PUT /items/{id}/list` puts an item on the signed-in user's list. `DELETE /items/{id}/list` takes it off. Both return `204`, and repeating either changes nothing.
-- Only films and series can be listed. Anything else is `400`.
+- `PUT /items/{id}/list` puts an item on the signed-in user's list, with the time of the request as its `listed_at`. `DELETE /items/{id}/list` takes it off. Both return `204`, and repeating either changes nothing: an item already on the list keeps its `listed_at`. One taken off and put back is listed anew.
+- Only films and series can be listed. Anything else is `400`, and an id that no item has is `404`.
 - The list is read with `GET /items?list=1`. Its newest entries are the `list` row of `GET /home`. A listed item's card says `listed_at`.
 - The list travels in `/changes` as watch state does (section 5), so every device of a person shows the same list.
 

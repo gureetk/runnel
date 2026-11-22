@@ -76,6 +76,7 @@ type cardBody struct {
 	Images      map[string]db.CardImage `json:"images,omitempty"`
 	State       *stateBody              `json:"state,omitempty"`
 	Counts      *countsBody             `json:"counts,omitempty"`
+	ListedAt    *int64                  `json:"listed_at,omitempty"`
 	AddedAt     int64                   `json:"added_at"`
 	Seq         int64                   `json:"seq"`
 }
@@ -101,7 +102,8 @@ func (p personal) unplayedOf(id int64) *int {
 
 // cardJSON is a card, with the parts of p that belong to the signed-in
 // user: a film's or an episode's state, a series' or a season's unplayed
-// count. A zero p leaves them out.
+// count, when a film or a series went on My list. A zero p leaves them
+// out.
 func cardJSON(c db.Card, p personal) cardBody {
 	b := cardBody{ID: c.ID, Type: c.Type, LibraryID: c.LibraryID, Title: c.Title, Available: c.Available, Images: c.Images,
 		AddedAt: c.AddedAt, Seq: c.Seq}
@@ -113,6 +115,9 @@ func cardJSON(c db.Card, p personal) cardBody {
 	}
 	if p.states != nil && (c.Type == "movie" || c.Type == "episode") {
 		b.State = p.state(c.ID)
+	}
+	if at, ok := p.listed[c.ID]; ok && (c.Type == "movie" || c.Type == "series") {
+		b.ListedAt = &at
 	}
 	switch c.Type {
 	case "episode":
@@ -170,12 +175,13 @@ type numberCursor struct {
 // itemsParams are the parameters of GET /items that this server takes.
 // The others of docs/04-api.md, section 4.3, arrive with the parts of
 // stage 2 that hold their data.
-var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "parent": true, "sort": true, "limit": true, "cursor": true}
+var itemsParams = map[string]bool{"library": true, "type": true, "series": true, "parent": true, "list": true, "sort": true,
+	"limit": true, "cursor": true}
 
 // handleItems is GET /items: the films or series of a library by title;
-// the episodes of a series in season and episode order, specials last; or
-// the children of an item, the seasons of a series or the episodes of a
-// season, in their order.
+// the episodes of a series in season and episode order, specials last; the
+// children of an item, the seasons of a series or the episodes of a
+// season, in their order; or the signed-in user's list.
 func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	for k := range q {
@@ -184,7 +190,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if v := q.Get("sort"); v != "" && v != "title" {
+	if v := q.Get("sort"); v != "" && v != "title" && !q.Has("list") {
 		s.fail(w, r, http.StatusBadRequest, "bad_request", `this server sorts by "title" only, so far`)
 		return
 	}
@@ -203,7 +209,12 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	var total int
 	var next func(db.Card) string
 	var err error
-	if v := q.Get("parent"); v != "" {
+	if q.Has("list") {
+		var ok bool
+		if cards, total, next, ok = s.listPage(w, r, limit, first); !ok {
+			return
+		}
+	} else if v := q.Get("parent"); v != "" {
 		id, perr := strconv.ParseInt(v, 10, 64)
 		parent, gerr := s.db.Item(r.Context(), id)
 		switch {
