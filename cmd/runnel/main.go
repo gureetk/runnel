@@ -20,6 +20,8 @@ const usage = `Usage: runnel <command>
 Commands:
   serve                        Run the server.
   user add <name> [--admin]    Add a user to the running server.
+  user passwd <name>           Give a user a new password.
+  user list                    Print the users and their devices.
   setup-code                   Print the setup code the first run asks for.
   pair approve <code> --user <name>
                                Sign in the device that shows the code.

@@ -169,6 +169,10 @@ func (s *Server) routes() {
 
 	s.mux.Handle("GET "+Prefix+"/admin/users", s.json(s.admin(s.handleAdminUsers)))
 	s.mux.Handle("POST "+Prefix+"/admin/users", s.json(s.admin(s.handleCreateUser)))
+	s.mux.Handle("PATCH "+Prefix+"/admin/users/{id}", s.json(s.admin(s.handleChangeUser)))
+	s.mux.Handle("DELETE "+Prefix+"/admin/users/{id}", s.json(s.admin(s.handleDeleteUser)))
+	s.mux.Handle("GET "+Prefix+"/admin/tokens", s.json(s.admin(s.handleAdminTokens)))
+	s.mux.Handle("DELETE "+Prefix+"/admin/tokens/{id}", s.json(s.admin(s.handleRevokeToken)))
 	s.mux.Handle("GET "+Prefix+"/admin/pairings", s.json(s.admin(s.handleAdminPairings)))
 	s.mux.Handle("GET "+Prefix+"/admin/setup-code", s.json(s.admin(s.handleSetupCode)))
 	s.mux.Handle("GET "+Prefix+"/admin/settings", s.json(s.admin(s.handleSettings)))

@@ -38,13 +38,13 @@ func (d *DB) CreateUser(ctx context.Context, name string, pw *model.Password, is
 		if pw != nil {
 			hash, salt, iter = pw.Hash, pw.Salt, pw.Iter
 		}
-		res, err := tx.tx.ExecContext(ctx,
-			`INSERT INTO users (name, pw_hash, pw_salt, pw_iter, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			name, hash, salt, iter, u.IsAdmin, now)
-		if err != nil {
+		var err error
+		if u.ID, err = tx.newID(ctx, "last_user_id", "users"); err != nil {
 			return err
 		}
-		if u.ID, err = res.LastInsertId(); err != nil {
+		if _, err := tx.tx.ExecContext(ctx,
+			`INSERT INTO users (id, name, pw_hash, pw_salt, pw_iter, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			u.ID, name, hash, salt, iter, u.IsAdmin, now); err != nil {
 			return err
 		}
 		// The setup code goes with the first person, however they were
@@ -100,10 +100,14 @@ func (t *Tx) putToken(ctx context.Context, userID int64, dev model.Device, hash 
 	if _, err := t.tx.ExecContext(ctx, `DELETE FROM tokens WHERE user_id = ? AND device_id = ?`, userID, dev.ID); err != nil {
 		return err
 	}
-	_, err := t.tx.ExecContext(ctx,
-		`INSERT INTO tokens (hash, user_id, device_id, device_name, client, created_at, last_used_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		hash, userID, dev.ID, nullString(dev.Name), nullString(dev.Client), now, now)
+	id, err := t.newID(ctx, "last_token_id", "tokens")
+	if err != nil {
+		return err
+	}
+	_, err = t.tx.ExecContext(ctx,
+		`INSERT INTO tokens (id, hash, user_id, device_id, device_name, client, created_at, last_used_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, hash, userID, dev.ID, nullString(dev.Name), nullString(dev.Client), now, now)
 	return err
 }
 

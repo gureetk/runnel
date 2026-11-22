@@ -144,3 +144,161 @@ func (d *DB) Users(ctx context.Context) ([]UserRow, error) {
 	}
 	return out, rows.Err()
 }
+
+// ErrLastAdmin is returned for a change that would leave the server with
+// no admin (docs/04-api.md, section 8.6).
+var ErrLastAdmin = errors.New("db: the server would have no admin")
+
+// UserChange is what a change to a user asks for. Nil fields stay as they
+// are, and NoPassword takes the password away.
+type UserChange struct {
+	Name       *string
+	Password   *model.Password
+	NoPassword bool
+	IsAdmin    *bool
+}
+
+// ChangeUser renames a user, gives them a new password or takes it away,
+// and makes them an admin or not, all in one transaction. Their tokens
+// stay valid. ErrNotFound: no such user. ErrNameTaken: another user has
+// the name, compared without case. ErrLastAdmin: the change would leave
+// the server without an admin.
+func (d *DB) ChangeUser(ctx context.Context, id int64, c UserChange) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		var u model.User
+		err := tx.tx.QueryRowContext(ctx, `SELECT name, is_admin FROM users WHERE id = ?`, id).Scan(&u.Name, &u.IsAdmin)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if c.Name != nil {
+			var taken bool
+			if err := tx.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE name = ? AND id <> ?)`, *c.Name, id).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return ErrNameTaken
+			}
+			u.Name = *c.Name
+		}
+		if c.IsAdmin != nil {
+			if u.IsAdmin && !*c.IsAdmin {
+				if err := lastAdmin(ctx, tx, id); err != nil {
+					return err
+				}
+			}
+			u.IsAdmin = *c.IsAdmin
+		}
+		if _, err := tx.tx.ExecContext(ctx, `UPDATE users SET name = ?, is_admin = ? WHERE id = ?`, u.Name, u.IsAdmin, id); err != nil {
+			return err
+		}
+		switch {
+		case c.Password != nil:
+			_, err = tx.tx.ExecContext(ctx, `UPDATE users SET pw_hash = ?, pw_salt = ?, pw_iter = ? WHERE id = ?`,
+				c.Password.Hash, c.Password.Salt, c.Password.Iter, id)
+		case c.NoPassword:
+			_, err = tx.tx.ExecContext(ctx, `UPDATE users SET pw_hash = NULL, pw_salt = NULL, pw_iter = NULL WHERE id = ?`, id)
+		}
+		return err
+	})
+	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNameTaken) && !errors.Is(err, ErrLastAdmin) {
+		return fmt.Errorf("db: change user %d: %w", id, err)
+	}
+	return err
+}
+
+// lastAdmin is ErrLastAdmin when no admin other than the user exists.
+func lastAdmin(ctx context.Context, tx *Tx, id int64) error {
+	var others bool
+	if err := tx.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE is_admin = 1 AND id <> ?)`, id).Scan(&others); err != nil {
+		return err
+	}
+	if !others {
+		return ErrLastAdmin
+	}
+	return nil
+}
+
+// DeleteUser removes a user, with their watch state, their list, their
+// track choices and their sign-ins. Their rows of the start-time log stay,
+// as the snapshots they are, without the user's id
+// (docs/03-data-model.md, section 4). ErrNotFound: no such user.
+// ErrLastAdmin: they are the last admin.
+func (d *DB) DeleteUser(ctx context.Context, id int64) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		var admin bool
+		err := tx.tx.QueryRowContext(ctx, `SELECT is_admin FROM users WHERE id = ?`, id).Scan(&admin)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if admin {
+			if err := lastAdmin(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.tx.ExecContext(ctx, `UPDATE play_log SET user_id = NULL WHERE user_id = ?`, id); err != nil {
+			return err
+		}
+		_, err = tx.tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+		return err
+	})
+	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrLastAdmin) {
+		return fmt.Errorf("db: remove user %d: %w", id, err)
+	}
+	return err
+}
+
+// SignedIn is a person signed in on a device, with who they are.
+type SignedIn struct {
+	Device
+	UserID   int64
+	UserName string
+}
+
+// AllDevices lists every signed-in device, one entry for each person on a
+// device, the one used last first (docs/04-api.md, section 8.6).
+func (d *DB) AllDevices(ctx context.Context) ([]SignedIn, error) {
+	rows, err := d.r.QueryContext(ctx, `SELECT t.id, t.device_name, t.client, t.created_at, t.last_used_at, u.id, u.name
+		FROM tokens t JOIN users u ON u.id = t.user_id
+		WHERE t.revoked_at IS NULL ORDER BY COALESCE(t.last_used_at, t.created_at) DESC, t.id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("db: read devices: %w", err)
+	}
+	defer rows.Close()
+	out := []SignedIn{}
+	for rows.Next() {
+		var s SignedIn
+		var name, client sql.NullString
+		var last sql.NullInt64
+		if err := rows.Scan(&s.ID, &name, &client, &s.SignedInAt, &last, &s.UserID, &s.UserName); err != nil {
+			return nil, fmt.Errorf("db: read devices: %w", err)
+		}
+		s.Name, s.Client, s.LastUsedAt = name.String, client.String, last.Int64
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// RevokeToken signs out one device of anyone's. ErrNotFound: no such
+// token.
+func (d *DB) RevokeToken(ctx context.Context, tokenID int64) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		res, err := tx.tx.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, tokenID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("db: sign out a token: %w", err)
+	}
+	return err
+}

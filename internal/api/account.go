@@ -3,6 +3,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -137,6 +138,17 @@ func (s *Server) handleSignOutDevice(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type adminUserBody struct {
+	userBody
+	HasPassword  bool   `json:"has_password"`
+	Devices      int    `json:"devices"`
+	LastActiveAt *int64 `json:"last_active_at"`
+}
+
+func adminUserJSON(u db.UserRow) adminUserBody {
+	return adminUserBody{userJSON(u.User), u.HasPassword, u.Devices, int64OrNil(u.LastActiveAt)}
+}
+
 // handleAdminUsers is GET /admin/users (docs/04-api.md, section 8.6).
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	list, err := s.db.Users(r.Context())
@@ -144,15 +156,157 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	type row struct {
-		userBody
-		HasPassword  bool   `json:"has_password"`
-		Devices      int    `json:"devices"`
-		LastActiveAt *int64 `json:"last_active_at"`
-	}
-	out := []row{}
+	out := []adminUserBody{}
 	for _, u := range list {
-		out = append(out, row{userJSON(u.User), u.HasPassword, u.Devices, int64OrNil(u.LastActiveAt)})
+		out = append(out, adminUserJSON(u))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
+// pathID reads the {id} of the path, or answers 404 with what it names.
+func (s *Server) pathID(w http.ResponseWriter, r *http.Request, what string) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such "+what)
+		return 0, false
+	}
+	return id, true
+}
+
+// handleChangeUser is PATCH /admin/users/{id}: a new name, a new password
+// or none, and admin or not, all of it or none (docs/04-api.md, section
+// 8.6). It returns the person as GET /admin/users lists them.
+func (s *Server) handleChangeUser(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r, "user")
+	if !ok {
+		return
+	}
+	var req map[string]json.RawMessage
+	if !s.decode(w, r, &req) {
+		return
+	}
+	var c db.UserChange
+	for k, raw := range req {
+		switch k {
+		case "name":
+			if json.Unmarshal(raw, &c.Name) != nil || c.Name == nil || !validName(*c.Name) {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", "a name has 1 to 40 characters, no control characters, and no space at either end")
+				return
+			}
+		case "password":
+			var pw *string
+			if json.Unmarshal(raw, &pw) != nil {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", "password is a string, or null for none")
+				return
+			}
+			if pw == nil {
+				c.NoPassword = true
+				continue
+			}
+			hashed, err := auth.HashPassword(*pw)
+			if errors.Is(err, auth.ErrWeakPassword) {
+				s.fail(w, r, http.StatusBadRequest, "weak_password", "a password has at least ten characters")
+				return
+			}
+			if err != nil {
+				s.internal(w, r, err)
+				return
+			}
+			c.Password = &hashed
+		case "is_admin":
+			if json.Unmarshal(raw, &c.IsAdmin) != nil || c.IsAdmin == nil {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", "is_admin is true or false")
+				return
+			}
+		default:
+			s.fail(w, r, http.StatusBadRequest, "bad_request", "a person's changes are name, password and is_admin")
+			return
+		}
+	}
+	switch err := s.db.ChangeUser(r.Context(), id, c); {
+	case errors.Is(err, db.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such user")
+		return
+	case errors.Is(err, db.ErrNameTaken):
+		s.fail(w, r, http.StatusConflict, "conflict", "a user with that name exists")
+		return
+	case errors.Is(err, db.ErrLastAdmin):
+		s.fail(w, r, http.StatusConflict, "last_admin", "the server would have no admin")
+		return
+	case err != nil:
+		s.internal(w, r, err)
+		return
+	}
+	list, err := s.db.Users(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	for _, u := range list {
+		if u.ID == id {
+			writeJSON(w, http.StatusOK, adminUserJSON(u))
+			return
+		}
+	}
+	s.fail(w, r, http.StatusNotFound, "not_found", "no such user")
+}
+
+// handleDeleteUser is DELETE /admin/users/{id}: the person goes with
+// their progress, their list and their sign-ins.
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r, "user")
+	if !ok {
+		return
+	}
+	switch err := s.db.DeleteUser(r.Context(), id); {
+	case errors.Is(err, db.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such user")
+	case errors.Is(err, db.ErrLastAdmin):
+		s.fail(w, r, http.StatusConflict, "last_admin", "the server would have no admin")
+	case err != nil:
+		s.internal(w, r, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleAdminTokens is GET /admin/tokens: every signed-in device, one
+// entry for each person on a device, shaped as GET /auth/me/devices
+// shapes them, with the person.
+func (s *Server) handleAdminTokens(w http.ResponseWriter, r *http.Request) {
+	list, err := s.db.AllDevices(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	type ref struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	type row struct {
+		myDeviceBody
+		User ref `json:"user"`
+	}
+	current := callerOf(r.Context()).tokenID
+	out := []row{}
+	for _, d := range list {
+		out = append(out, row{myDeviceJSON(d.Device, current), ref{d.UserID, d.UserName}})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": out})
+}
+
+// handleRevokeToken is DELETE /admin/tokens/{id}: signs a device out.
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r, "device")
+	if !ok {
+		return
+	}
+	switch err := s.db.RevokeToken(r.Context(), id); {
+	case errors.Is(err, db.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such device")
+	case err != nil:
+		s.internal(w, r, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

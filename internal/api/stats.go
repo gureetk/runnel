@@ -45,7 +45,7 @@ func (s *Server) handlePlaylog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type userRef struct {
-		ID   int64  `json:"id"`
+		ID   *int64 `json:"id"` // null once the person is removed
 		Name string `json:"name"`
 	}
 	type rowBody struct {
@@ -81,7 +81,7 @@ func (s *Server) handlePlaylog(w http.ResponseWriter, r *http.Request) {
 			ClientLoadedMS: p.LoadedMS, ClientPlayingMS: p.PlayingMS, Decoder: strOrNil(p.Decoder), Hardware: p.Hardware,
 			DroppedFrames: p.DroppedFrames}
 		if p.UserID != 0 || p.User != "" {
-			b.User = &userRef{ID: p.UserID, Name: p.User}
+			b.User = &userRef{ID: int64OrNil(p.UserID), Name: p.User}
 		}
 		body.Rows = append(body.Rows, b)
 	}
