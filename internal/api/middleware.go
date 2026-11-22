@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -51,7 +52,13 @@ func (s *Server) base(next http.Handler) http.Handler {
 			if !sw.wrote {
 				status = http.StatusOK // what net/http sends for a handler that wrote nothing
 			}
-			s.log.Info("request", "id", id, "method", r.Method, "path", r.URL.Path,
+			// A health check that passes is logged at debug level, so that
+			// one every few seconds does not fill the log.
+			level := slog.LevelInfo
+			if r.URL.Path == healthPath && status == http.StatusOK {
+				level = slog.LevelDebug
+			}
+			s.log.Log(r.Context(), level, "request", "id", id, "method", r.Method, "path", r.URL.Path,
 				"status", status, "ms", time.Since(start).Milliseconds())
 			if v == http.ErrAbortHandler {
 				// The handler gave up on a client that went away. Let

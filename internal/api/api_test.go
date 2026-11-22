@@ -229,3 +229,35 @@ func TestStatusWriterPassesReadFrom(t *testing.T) {
 		t.Fatalf("copied %d (%v), ReadFrom calls %d, status %d", n, err, under.calls, sw.status)
 	}
 }
+
+// TestHealth: GET /healthz answers without a token, outside the API, and a
+// check that passes is logged at debug level only.
+func TestHealth(t *testing.T) {
+	ts := newTestServer(t)
+	logs := &syncBuffer{}
+	ts.log = logs
+	ts.Server.log = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	for _, method := range []string{"GET", "HEAD"} {
+		rec := ts.do(t, method, "/healthz", nil, nil)
+		if rec.Code != 200 || rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" ||
+			rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s /healthz: %d %v", method, rec.Code, rec.Header())
+		}
+		// A recorder keeps a HEAD's body, which net/http drops.
+		if method == "GET" && rec.Body.String() != "ok\n" {
+			t.Errorf("GET /healthz: body %q", rec.Body.String())
+		}
+	}
+	if strings.Contains(logs.String(), "/healthz") {
+		t.Fatalf("a passing health check was logged at info level:\n%s", logs)
+	}
+	if rec := ts.do(t, "POST", "/healthz", nil, nil); rec.Code != 405 {
+		t.Errorf("POST /healthz: %d", rec.Code)
+	}
+	if !strings.Contains(logs.String(), "path=/healthz status=405") {
+		t.Errorf("a health check that did not pass was not logged:\n%s", logs)
+	}
+	if rec := ts.do(t, "GET", "/api/v1/healthz", nil, nil); rec.Code != 404 {
+		t.Errorf("GET /api/v1/healthz: %d", rec.Code)
+	}
+}

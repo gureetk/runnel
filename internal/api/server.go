@@ -56,3 +56,15 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		Transcode: transcodeBody{HW: "none", Video: []string{}, Depth10: []string{}, Slots: 0},
 	})
 }
+
+// healthPath is outside the API, for a supervisor's health check
+// (docs/04-api.md, section 8.7).
+const healthPath = "/healthz"
+
+// handleHealth needs no token and reads nothing: it says that the server is
+// up and answering.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte("ok\n"))
+}
