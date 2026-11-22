@@ -936,7 +936,9 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 ```
 
 - `state` is `running`, `done` or `failed`. `missing` holds the first 100 rows that did not join.
-- `400` with code `bad_key` when Jellyfin refuses the key. `502` with code `upstream` when it cannot be reached.
+- `400` with code `bad_key` when Jellyfin refuses the key. `502` with code `upstream` when it cannot be reached, or answers with something the server does not read.
+- `url` is Jellyfin's address, `http` or `https`, with its base path if it has one. `api_key` is a key made in Jellyfin's dashboard: 1 to 200 printable characters, without `"` or `,`. Either one missing or malformed is `400` with code `bad_request`.
+- `version` is the `Version` that Jellyfin's `GET /System/Info/Public` gives. The users are listed by name.
 
 ### 8.6 People and devices
 

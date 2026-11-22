@@ -85,6 +85,8 @@ type Server struct {
 
 	changesMu   sync.Mutex
 	changesRows int // rows /changes wrote since memory was last handed back
+
+	jellyfinHTTP *http.Client // for the import's calls; nil times out after a minute
 }
 
 // New builds the API on an open database.
@@ -187,6 +189,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST "+Prefix+"/admin/tasks/retry", s.json(s.admin(s.handleWork(true))))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
+	s.mux.Handle("POST "+Prefix+"/admin/import/jellyfin/users", s.json(s.admin(s.handleJellyfinUsers)))
 	s.mux.Handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))
 	s.mux.Handle("GET "+Prefix+"/admin/stats", s.json(s.admin(s.handleStats)))
 }

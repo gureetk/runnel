@@ -73,6 +73,7 @@ internal/tasks/        the background queue and its workers
 internal/discover/     the responder that announces the server on the local network (stage 6)
 internal/web/          the built web interface, embedded, and the handler that serves it (stage 5)
 internal/testmedia/    small media files made with ffmpeg's test sources, for tests only
+internal/meta/jellyfin/standin/  a stand-in Jellyfin server that answers the import's calls, for tests only
 web/                   the web interface's source (stage 5)
 deploy/                the systemd unit
 docs/                  these documents, in their public editions
