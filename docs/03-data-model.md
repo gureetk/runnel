@@ -402,7 +402,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 **Images**
 
 - A local image has `source = 'local'` and `rank` 0. Its `source_ref` holds the root, the path below it, the size and the time of the file it was made from, so that a scan can tell an unchanged file without reading it.
-- Writing an item's image of a kind replaces its other local image of that kind, and bumps the item's `updated_seq`. So does removing one. The files of a key that no image has any more are deleted.
+- Writing an item's image of a kind replaces its other local image of that kind, and bumps the item's `updated_seq`. So does removing one. The files of a key that no image has any more are deleted: at once when an image is replaced or removed, and when its item went, by a sweep of `images/` at start and each night. The sweep leaves files younger than an hour, since an image task writes its files before the row that names them, and keys that a person's photo has.
 
 **External tracks**
 
@@ -419,7 +419,8 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A file that holds episodes 1 and 2 is one episode item with `episode_number = 1` and `episode_number_end = 2`.
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
-- An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together.
+- An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
+- An item's id is never given again once the item is gone, and neither is a library's or a library folder's. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `meta.last_library_id` and `meta.last_root_id` hold the highest ids given.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Collections**

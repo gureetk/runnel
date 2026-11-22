@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -11,17 +12,26 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gureetk/runnel/internal/config"
 )
 
 const libraryUsage = `Usage: runnel library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
+       runnel library list
+       runnel library remove <id> [--yes]
 
-Adds a library to the running server, with one or more folders (--root,
-given once for each). Its first scan starts at once; the server's log
-says when it is done.
+add adds a library to the running server, with one or more folders
+(--root, given once for each). Its first scan starts at once; the
+server's log says when it is done.
+
+list prints the libraries, their folders, and each folder's last scan.
+
+remove removes a library, with its items and everyone's watch state for
+them. It asks first on a terminal; elsewhere it needs --yes.
 `
 
 const scanUsage = `Usage: runnel scan [--library <id>]
@@ -52,8 +62,36 @@ func subcommand(stderr io.Writer, fn func(ctx context.Context, c *adminClient) e
 	return 0
 }
 
-func libraryCmd(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "add" {
+func libraryCmd(args []string, stdin *os.File, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, libraryUsage)
+		return 2
+	}
+	switch args[0] {
+	case "add":
+	case "list":
+		if len(args) != 1 {
+			fmt.Fprint(stderr, libraryUsage)
+			return 2
+		}
+		return subcommand(stderr, func(ctx context.Context, c *adminClient) error { return libraryList(ctx, c, stdout) })
+	case "remove":
+		fs := flag.NewFlagSet("runnel library remove", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		yes := fs.Bool("yes", false, "remove without asking")
+		rest, err := parseArgs(fs, args[1:])
+		var id int64
+		if err == nil && len(rest) == 1 {
+			id, err = strconv.ParseInt(rest[0], 10, 64)
+		}
+		if err != nil || len(rest) != 1 || id <= 0 {
+			fmt.Fprint(stderr, libraryUsage)
+			return 2
+		}
+		return subcommand(stderr, func(ctx context.Context, c *adminClient) error {
+			return libraryRemove(ctx, c, id, *yes, stdin, stdout, stderr)
+		})
+	default:
 		fmt.Fprint(stderr, libraryUsage)
 		return 2
 	}
@@ -102,6 +140,119 @@ func libraryAdd(ctx context.Context, c *adminClient, name, kind, profile string,
 	}
 	fmt.Fprintf(stdout, "Added library %d, %s (%s), with folders: %s.\nIts first scan has started.\n",
 		lib.ID, lib.Name, lib.Kind, strings.Join(folders, ", "))
+	return nil
+}
+
+// adminLibrary is a library as GET /admin/libraries gives it.
+type adminLibrary struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Profile string `json:"profile"`
+	Items   int    `json:"items"`
+	Scan    struct {
+		State string `json:"state"`
+		Done  int    `json:"done"`
+		Total int    `json:"total"`
+	} `json:"scan"`
+	Roots []struct {
+		ID        int64  `json:"id"`
+		Path      string `json:"path"`
+		Available bool   `json:"available"`
+		LastScan  *struct {
+			At      int64   `json:"at"`
+			MS      int64   `json:"ms"`
+			Added   int     `json:"added"`
+			Changed int     `json:"changed"`
+			Removed int     `json:"removed"`
+			Error   *string `json:"error"`
+		} `json:"last_scan"`
+	} `json:"roots"`
+}
+
+func adminLibraries(ctx context.Context, c *adminClient) ([]adminLibrary, error) {
+	var body struct {
+		Libraries []adminLibrary `json:"libraries"`
+	}
+	err := c.do(ctx, "GET", "/admin/libraries", nil, &body)
+	return body.Libraries, err
+}
+
+// libraryList prints the libraries, with GET /admin/libraries.
+func libraryList(ctx context.Context, c *adminClient, stdout io.Writer) error {
+	libs, err := adminLibraries(ctx, c)
+	if err != nil {
+		return err
+	}
+	if len(libs) == 0 {
+		fmt.Fprintln(stdout, "There is no library yet. Add one with runnel library add.")
+		return nil
+	}
+	for _, l := range libs {
+		kind := l.Kind
+		if l.Profile != "default" {
+			kind += ", " + l.Profile
+		}
+		scan := l.Scan.State
+		if scan == "probing" {
+			scan = fmt.Sprintf("probing, %d of %d files", l.Scan.Done, l.Scan.Total)
+		}
+		fmt.Fprintf(stdout, "%d  %s (%s): %d films and series; scan: %s\n", l.ID, l.Name, kind, l.Items, scan)
+		for _, r := range l.Roots {
+			line := fmt.Sprintf("   folder %d  %s", r.ID, r.Path)
+			if !r.Available {
+				line += "  (away)"
+			}
+			if ls := r.LastScan; ls == nil {
+				line += "  not scanned yet"
+			} else {
+				line += fmt.Sprintf("  scanned %s in %d ms: %d added, %d changed, %d removed",
+					time.UnixMilli(ls.At).Format("2006-01-02 15:04"), ls.MS, ls.Added, ls.Changed, ls.Removed)
+				if ls.Error != nil {
+					line += "; " + *ls.Error
+				}
+			}
+			fmt.Fprintln(stdout, line)
+		}
+	}
+	return nil
+}
+
+// libraryRemove removes a library, with DELETE /admin/libraries/{id},
+// after asking on a terminal.
+func libraryRemove(ctx context.Context, c *adminClient, id int64, yes bool, stdin *os.File, stdout, prompt io.Writer) error {
+	libs, err := adminLibraries(ctx, c)
+	if err != nil {
+		return err
+	}
+	var lib *adminLibrary
+	for i := range libs {
+		if libs[i].ID == id {
+			lib = &libs[i]
+		}
+	}
+	if lib == nil {
+		return fmt.Errorf("there is no library %d", id)
+	}
+	if !yes {
+		if stdin == nil || !isTerminal(stdin.Fd()) {
+			return errors.New("library remove asks before it removes anything; give --yes to remove without asking")
+		}
+		fmt.Fprintf(prompt, "Remove library %d, %s, with its %d films and series and everyone's watch state for them? Type yes to go on: ",
+			lib.ID, lib.Name, lib.Items)
+		answer, err := bufio.NewReader(stdin).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if strings.TrimSpace(answer) != "yes" {
+			fmt.Fprintln(stdout, "Nothing was removed.")
+			return nil
+		}
+	}
+	if err := c.do(ctx, "DELETE", "/admin/libraries/"+strconv.FormatInt(id, 10), nil, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Removed library %d, %s.\n", lib.ID, lib.Name)
 	return nil
 }
 

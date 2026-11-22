@@ -245,3 +245,27 @@ func TestNetworkFS(t *testing.T) {
 		t.Errorf("a temporary folder is on %q", got)
 	}
 }
+
+// TestForget: a root taken out of its library is neither watched nor
+// polled.
+func TestForget(t *testing.T) {
+	e := newWatchEnv(t, "A Film (2001)")
+	e.w.Forget(e.root.ID)
+	e.w.mu.Lock()
+	watching := e.w.sys.watching(e.root.ID)
+	e.w.mu.Unlock()
+	if watching {
+		t.Fatal("still watched")
+	}
+	os.WriteFile(e.path("A Film (2001)/A Film (2001).mkv"), []byte("x"), 0o644)
+	e.nothing()
+
+	e.w.Watch(model.Root{ID: e.root.ID, Path: e.root.Path})
+	e.w.Forget(e.root.ID)
+	e.w.mu.Lock()
+	_, polled := e.w.polled[e.root.ID]
+	e.w.mu.Unlock()
+	if polled {
+		t.Fatal("still polled")
+	}
+}

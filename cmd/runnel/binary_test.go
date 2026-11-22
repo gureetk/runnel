@@ -187,6 +187,20 @@ func TestTheBuiltBinary(t *testing.T) {
 		t.Fatalf("report with a flag and no value: %d %q", status, errOut)
 	}
 
+	if out, errOut, status = run("", "library", "list"); status != 0 || !strings.HasPrefix(out, "1  Films (movies): 2 films and series; scan: ") ||
+		!strings.Contains(out, "\n2  Shows (shows): 1 films and series; scan: ") {
+		t.Fatalf("library list: %d %q %q", status, out, errOut)
+	}
+	if _, errOut, status = run("yes\n", "library", "remove", "2"); status != 1 || !strings.Contains(errOut, "give --yes") {
+		t.Fatalf("library remove without a terminal: %d %q", status, errOut)
+	}
+	if out, errOut, status = run("", "library", "remove", "--yes", "2"); status != 0 || out != "Removed library 2, Shows.\n" {
+		t.Fatalf("library remove: %d %q %q", status, out, errOut)
+	}
+	if out, _, _ = run("", "library", "list"); strings.Contains(out, "Shows") {
+		t.Fatalf("library list after the removal:\n%s", out)
+	}
+
 	// SIGTERM stops the server cleanly, within the 5 seconds of
 	// docs/02-architecture.md, section 5.
 	start := time.Now()

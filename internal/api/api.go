@@ -48,6 +48,9 @@ type Config struct {
 	Gate Gate
 	// Images is where images' files are kept. Nil serves none.
 	Images Images
+	// Work is the background queue, which admin calls look at and wake.
+	// Nil has nothing paused by a provider.
+	Work Work
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -62,6 +65,7 @@ type Server struct {
 	scans     Scans
 	gate      Gate
 	images    Images
+	work      Work
 	startedAt time.Time
 	mux       *http.ServeMux
 	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
@@ -102,6 +106,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		scans:         c.Scans,
 		gate:          gate,
 		images:        c.Images,
+		work:          c.Work,
 		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
@@ -168,7 +173,14 @@ func (s *Server) routes() {
 	s.mux.Handle("GET "+Prefix+"/admin/setup-code", s.json(s.admin(s.handleSetupCode)))
 	s.mux.Handle("GET "+Prefix+"/admin/settings", s.json(s.admin(s.handleSettings)))
 	s.mux.Handle("PATCH "+Prefix+"/admin/settings", s.json(s.admin(s.handlePatchSettings)))
+	s.mux.Handle("GET "+Prefix+"/admin/libraries", s.json(s.admin(s.handleAdminLibraries)))
 	s.mux.Handle("POST "+Prefix+"/admin/libraries", s.json(s.admin(s.handleCreateLibrary)))
+	s.mux.Handle("PATCH "+Prefix+"/admin/libraries/{id}", s.json(s.admin(s.handleChangeLibrary)))
+	s.mux.Handle("DELETE "+Prefix+"/admin/libraries/{id}", s.json(s.admin(s.handleDeleteLibrary)))
+	s.mux.Handle("GET "+Prefix+"/admin/fs", s.json(s.admin(s.handleFS)))
+	s.mux.Handle("GET "+Prefix+"/admin/tasks", s.json(s.admin(s.handleTasks)))
+	s.mux.Handle("POST "+Prefix+"/admin/tasks/cancel", s.json(s.admin(s.handleWork(false))))
+	s.mux.Handle("POST "+Prefix+"/admin/tasks/retry", s.json(s.admin(s.handleWork(true))))
 	s.mux.Handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
 	s.mux.Handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
 	s.mux.Handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))

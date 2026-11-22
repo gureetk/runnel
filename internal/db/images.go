@@ -83,6 +83,31 @@ func (d *DB) RemoveImages(ctx context.Context, ids []int64) ([]string, error) {
 	return gone, nil
 }
 
+// KeysInUse reports which of the keys an image or a person's photo still
+// has.
+func (d *DB) KeysInUse(ctx context.Context, keys []string) (map[string]bool, error) {
+	list, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := d.r.QueryContext(ctx, `
+		SELECT key FROM images WHERE key IN (SELECT value FROM json_each(?1))
+		UNION SELECT image_key FROM people WHERE image_key IN (SELECT value FROM json_each(?1))`, string(list))
+	if err != nil {
+		return nil, fmt.Errorf("db: read image keys: %w", err)
+	}
+	defer rows.Close()
+	used := map[string]bool{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, fmt.Errorf("db: read image keys: %w", err)
+		}
+		used[k] = true
+	}
+	return used, rows.Err()
+}
+
 func keyUnused(ctx context.Context, tx *Tx, key string) (bool, error) {
 	var used bool
 	err := tx.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM images WHERE key = ?)`, key).Scan(&used)

@@ -20,8 +20,9 @@ const StampBatch = 500
 // Write.
 type Tx struct {
 	tx   *sql.Tx
-	seq  int64 // 0 until Seq is first called
-	used int   // rows stamped with seq so far
+	seq  int64            // 0 until Seq is first called
+	used int              // rows stamped with seq so far
+	ids  map[string]int64 // the next id newID gives, by its key in meta
 }
 
 // Write runs fn in a write transaction and commits it if fn returns nil.
@@ -54,14 +55,43 @@ func (d *DB) Write(ctx context.Context, fn func(ctx context.Context, tx *Tx) err
 		}
 	}()
 
-	if err := fn(ctx, &Tx{tx: sqlTx}); err != nil {
+	t := &Tx{tx: sqlTx}
+	if err := fn(ctx, t); err != nil {
 		return err
+	}
+	for key, next := range t.ids {
+		if _, err := sqlTx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES (?, ?)
+			ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, next-1); err != nil {
+			return fmt.Errorf("db: record the ids given: %w", err)
+		}
 	}
 	if err := sqlTx.Commit(); err != nil {
 		return fmt.Errorf("db: commit: %w", err)
 	}
 	committed = true
 	return nil
+}
+
+// newID returns the id for a new row of an item, a library or a library's
+// folder: one above any id such a row has had, so that a removed row's id
+// is never given to another. A client that missed the removal would take
+// the new row for the old one, and so would work queued for it, or a call
+// made from a page loaded before (docs/03-data-model.md, section 4). key
+// names the highest id given in meta, which is written when the
+// transaction commits. table is an internal name, never input.
+func (t *Tx) newID(ctx context.Context, key, table string) (int64, error) {
+	next, ok := t.ids[key]
+	if !ok {
+		if err := t.tx.QueryRowContext(ctx, `SELECT max(COALESCE((SELECT max(id) FROM `+table+`), 0),
+			  COALESCE((SELECT CAST(value AS INTEGER) FROM meta WHERE key = ?), 0)) + 1`, key).Scan(&next); err != nil {
+			return 0, fmt.Errorf("db: next id of %s: %w", table, err)
+		}
+		if t.ids == nil {
+			t.ids = map[string]int64{}
+		}
+	}
+	t.ids[key] = next + 1
+	return next, nil
 }
 
 // Seq returns the sequence value to stamp on one row that this transaction

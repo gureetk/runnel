@@ -125,7 +125,7 @@ Where one call carries data that a later stage brings, stage 2 builds the part i
 
 **Exit:**
 
-1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, sessions and `GET /admin/sessions` (a session is an ffmpeg child's, `05-playback.md`, section 5), `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, collections, credits and people. Stage 5: `GET /admin/update` (`04-api.md`, section 8.8). Stage 6, with the TV app: discovery. Stage 7: playing in a browser (`04-api.md`, section 7.9). Stage 10: the sidecar.
+1. Every endpoint of `04-api.md` is implemented and has a test, except those that belong to later stages. Stage 3: transcoding, sessions and `GET /admin/sessions` (a session is an ffmpeg child's, `05-playback.md`, section 5), `prepare` for transcodes, the encoder check. Stage 4: the metadata key, matching and review, fetching details again (`POST /admin/libraries/{id}/refresh`), collections, credits and people. Stage 5: `GET /admin/update` (`04-api.md`, section 8.8). Stage 6, with the TV app: discovery. Stage 7: playing in a browser (`04-api.md`, section 7.9). Stage 10: the sidecar.
 2. The import's dry run joins at least 99% of Jellyfin's films and episodes to local items by path. What is left is explained.
 3. After the import, played flags and positions equal Jellyfin's for a sample of 50 items per user.
 4. A copy built from `GET /changes?since=0` equals a copy built later from zero, after a day of scans and playback in between.

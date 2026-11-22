@@ -85,6 +85,21 @@ func (q *Queue) Register(k Kind) {
 	q.kinds = append(q.kinds, &kind{Kind: k})
 }
 
+// Paused reports whether a kind waits for a cause that is not its tasks'
+// own: a Pause one of its runs returned (docs/04-api.md, section 8.3,
+// paused_by "provider").
+func (q *Queue) Paused(name string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now().UnixMilli()
+	for _, k := range q.kinds {
+		if k.Name == name {
+			return k.until > now
+		}
+	}
+	return false
+}
+
 // Wake tells the queue that tasks were queued.
 func (q *Queue) Wake() {
 	select {

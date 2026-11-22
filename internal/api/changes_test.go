@@ -137,6 +137,8 @@ func (b *browse) sync(t *testing.T, token string, limit int, c *localCopy) int {
 		if counted > max(limit, db.StampBatch) {
 			t.Fatalf("page %d holds %d rows, with a limit of %d", pages, counted, limit)
 		}
+		// A library that is gone goes with its items, and with what the
+		// user had on them.
 		live := map[int64]bool{}
 		for _, id := range p.LibraryIDs {
 			live[id] = true
@@ -145,6 +147,14 @@ func (b *browse) sync(t *testing.T, token string, limit int, c *localCopy) int {
 			if !live[r.LibraryID] {
 				delete(c.items, id)
 				delete(c.rows, id)
+				delete(c.state, id)
+				delete(c.list, id)
+				delete(c.prefs, id)
+			}
+		}
+		for id := range c.libraries {
+			if !live[id] {
+				delete(c.libraries, id)
 			}
 		}
 		// Applied on its own, the copy has every episode's season and

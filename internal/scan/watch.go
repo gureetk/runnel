@@ -142,6 +142,18 @@ func (w *Watcher) Watch(root model.Root) {
 	}
 }
 
+// Forget stops watching a root that was taken out of its library, and
+// polling it, and drops the changes gathered for it.
+func (w *Watcher) Forget(rootID int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sys != nil {
+		w.sys.removeTree(rootID, "")
+	}
+	delete(w.polled, rootID)
+	delete(w.changed, rootID)
+}
+
 func (w *Watcher) poll(root model.Root, why string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -41,6 +41,12 @@ func TestCommands(t *testing.T) {
 	if code := run([]string{"user", "remove", "ada"}, os.Stdin, &out, &errOut); code != 2 {
 		t.Errorf("user remove: %d", code)
 	}
+	for _, args := range [][]string{{"library"}, {"library", "list", "extra"}, {"library", "remove"}, {"library", "remove", "x"},
+		{"library", "remove", "0"}, {"library", "rename", "1"}} {
+		if code := run(args, os.Stdin, &out, &errOut); code != 2 {
+			t.Errorf("%v: %d", args, code)
+		}
+	}
 	if code := run(nil, os.Stdin, &out, &errOut); code != 2 {
 		t.Errorf("no command: %d", code)
 	}
@@ -311,6 +317,34 @@ func TestLibraryAddAndScan(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("the report lacks %q:\n%s", want, out.String())
 		}
+	}
+
+	// The list, once the second scan has built its items, and the
+	// library's removal.
+	srv.waitFor(t, `msg="items built" library=1 ms=\d+ added=0 changed=0 removed=0`)
+	out.Reset()
+	if err := libraryList(ctx, client, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"1  Films (movies): 2 films and series; scan: idle\n", "   folder 1  " + root + "  scanned ",
+		" ms: 0 added, 0 changed, 0 removed\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("the list lacks %q:\n%s", want, out.String())
+		}
+	}
+	if err := libraryRemove(ctx, client, 1, false, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("without a terminal or --yes: %v", err)
+	}
+	if err := libraryRemove(ctx, client, 9, true, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "no library 9") {
+		t.Fatalf("an unknown library: %v", err)
+	}
+	out.Reset()
+	if err := libraryRemove(ctx, client, 1, true, nil, &out, io.Discard); err != nil || out.String() != "Removed library 1, Films.\n" {
+		t.Fatalf("remove: %q %v", out.String(), err)
+	}
+	out.Reset()
+	if err := libraryList(ctx, client, &out); err != nil || !strings.HasPrefix(out.String(), "There is no library yet.") {
+		t.Fatalf("an empty list: %q %v", out.String(), err)
 	}
 }
 

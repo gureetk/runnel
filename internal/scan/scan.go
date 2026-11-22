@@ -58,6 +58,11 @@ type Scanner struct {
 	// Nightly, when set, is called when Run starts and at nightlyAt each
 	// night, before the walk: the cleanup that runs with it.
 	Nightly func(ctx context.Context)
+	// Forgotten, when set, is called for each root that Forget is told
+	// of. The watcher stops watching it.
+	Forgotten func(rootID int64)
+
+	walking int64 // the library a scan goes through now; guarded by mu
 
 	// found is, for each root scanned since its library's items were
 	// built, the images the scan found and what it looked at.
@@ -104,6 +109,22 @@ func (s *Scanner) RequestFolders(rootID int64, folders []string) {
 	}
 	s.mu.Unlock()
 	s.poke()
+}
+
+// Forget drops the scans asked for of roots that were taken out of their
+// library, or removed with it, and tells Forgotten of each.
+func (s *Scanner) Forget(rootIDs []int64) {
+	s.mu.Lock()
+	for _, id := range rootIDs {
+		delete(s.folders, id)
+		delete(s.later, id)
+	}
+	s.mu.Unlock()
+	if s.Forgotten != nil {
+		for _, id := range rootIDs {
+			s.Forgotten(id)
+		}
+	}
 }
 
 func (s *Scanner) poke() {
@@ -211,11 +232,14 @@ func (s *Scanner) runAsked(ctx context.Context) bool {
 		}
 		return false
 	}
+	defer s.setWalking(0)
 	for _, lib := range libs {
 		if asked[0] || asked[lib.ID] {
+			s.setWalking(lib.ID)
 			if _, err := s.ScanLibrary(ctx, lib); err != nil && ctx.Err() == nil {
 				s.log.Error("scan failed", "library", lib.ID, "err", err)
 			}
+			s.setWalking(0)
 			continue
 		}
 		scanned := false
@@ -228,6 +252,7 @@ func (s *Scanner) runAsked(ctx context.Context) bool {
 			if !f[""] {
 				list = outermost(f)
 			}
+			s.setWalking(lib.ID)
 			if _, err := s.scanRoot(ctx, root, list); err != nil {
 				if ctx.Err() == nil {
 					s.log.Error("scan failed", "root", root.Path, "err", err)
@@ -241,8 +266,26 @@ func (s *Scanner) runAsked(ctx context.Context) bool {
 				s.log.Error("scan: cannot build items", "library", lib.ID, "err", err)
 			}
 		}
+		s.setWalking(0)
 	}
 	return true
+}
+
+// setWalking records which library a scan is going through now, with
+// building its items, 0 for none.
+func (s *Scanner) setWalking(libraryID int64) {
+	s.mu.Lock()
+	s.walking = libraryID
+	s.mu.Unlock()
+}
+
+// Walking reports whether a scan is going through a library's folders
+// now, or building its items from what it found (docs/04-api.md, section
+// 8.2, scan.state "walking").
+func (s *Scanner) Walking(libraryID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.walking != 0 && s.walking == libraryID
 }
 
 // outermost lists the folders that lie inside none of the others, in
