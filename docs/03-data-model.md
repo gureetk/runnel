@@ -399,6 +399,11 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - A root going away or coming back bumps its library's `updated_seq`, and nothing else. That one record is how a client knows that everything under the folder is unavailable (`04-api.md`, sections 2.1 and 5).
 - A file that is gone from a healthy root gets `missing_since`. It stays, shown as unavailable, for 30 days. After that the file row goes, and any item left with no file goes with it.
 
+**Images**
+
+- A local image has `source = 'local'` and `rank` 0. Its `source_ref` holds the root, the path below it, the size and the time of the file it was made from, so that a scan can tell an unchanged file without reading it.
+- Writing an item's image of a kind replaces its other local image of that kind, and bumps the item's `updated_seq`. So does removing one. The files of a key that no image has any more are deleted.
+
 **External tracks**
 
 - A row of `external_tracks` is a subtitle or audio file beside a video, named for it (`06-library-and-metadata.md`, section 4.7). Its `id` is the `external_id` that clients fetch it by, so a row that stays keeps it.

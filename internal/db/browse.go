@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -36,8 +37,18 @@ type Card struct {
 	Available   bool
 	Episodes    int // a series: its episodes outside the specials; a season: its episodes
 	Seasons     int // a series: its seasons outside the specials
+	Images      map[string]CardImage
 	AddedAt     int64
 	Seq         int64
+}
+
+// CardImage is an image as a card shows it: its key, the widths stored,
+// its aspect ratio and its placeholder colour.
+type CardImage struct {
+	Key    string   `json:"key"`
+	W      []int    `json:"w"`
+	Aspect *float64 `json:"ar"`
+	Color  *string  `json:"color"`
 }
 
 // cardColumns reads a card. available is whether any of the item's own
@@ -61,6 +72,8 @@ const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_titl
   CASE i.type
     WHEN 'series' THEN (SELECT count(*) FROM items e WHERE e.series_id = i.id AND e.type = 'season' AND e.season_number > 0)
     ELSE 0 END,
+  (SELECT json_group_object(im.kind, json_object('key', im.key, 'w', json(im.widths), 'ar', im.aspect, 'color', im.color))
+     FROM images im WHERE im.item_id = i.id AND im.rank = 0),
   i.added_at, i.updated_seq`
 
 func scanCards(rows *sql.Rows) ([]Card, error) {
@@ -69,10 +82,15 @@ func scanCards(rows *sql.Rows) ([]Card, error) {
 	for rows.Next() {
 		var c Card
 		var root, year, parent, series, season, episode, end, absolute sql.NullInt64
-		var seriesTitle sql.NullString
+		var seriesTitle, images sql.NullString
 		if err := rows.Scan(&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
-			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &c.AddedAt, &c.Seq); err != nil {
+			&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq); err != nil {
 			return nil, err
+		}
+		if images.String != "" && images.String != "{}" {
+			if err := json.Unmarshal([]byte(images.String), &c.Images); err != nil {
+				return nil, fmt.Errorf("db: read a card's images: %w", err)
+			}
 		}
 		c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
 		c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
