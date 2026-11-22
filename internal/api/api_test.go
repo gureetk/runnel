@@ -124,7 +124,7 @@ func TestServerInfo(t *testing.T) {
 		"version":     "0.0.0-test",
 		"instance_id": ts.info.InstanceID,
 		"setup_done":  false,
-		"api":         map[string]any{"version": 1.0, "features": []any{"prepare"}},
+		"api":         map[string]any{"version": 1.0, "features": []any{"changes", "list", "pairing", "prepare"}},
 		"transcode":   map[string]any{"hw": "none", "video": []any{}, "depth10": []any{}, "slots": 0.0},
 	}
 	gotJSON, _ := json.Marshal(got)

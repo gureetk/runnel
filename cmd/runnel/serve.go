@@ -82,6 +82,16 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Without a person, the first run needs the setup code (D35): the one
+	// an earlier start made, or a new one.
+	setupCode, err := database.SetupCode(ctx, auth.NewSetupCode)
+	if err != nil {
+		return err
+	}
+	if setupCode != "" {
+		log.Warn("no person exists yet: open the server's address and enter the setup code, or run runnel user add",
+			"setup_code", auth.ShowSetupCode(setupCode))
+	}
 
 	// The background queue, paused while a playback starts, and the probes
 	// it runs. Without ffprobe the server still indexes, and probes
@@ -160,7 +170,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}()
 
 	handler := api.New(database, log, api.Config{
-		Info:           api.Info{Name: name, Version: version, InstanceID: instanceID},
+		Info:           api.Info{Name: name, NameFromEnv: cfg.Name != "", Version: version, InstanceID: instanceID},
 		AdminTokenHash: adminHash,
 		Scans:          scanner,
 		Gate:           gate,

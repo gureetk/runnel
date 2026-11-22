@@ -44,7 +44,12 @@ func (d *DB) CreateUser(ctx context.Context, name string, pw *model.Password, is
 		if err != nil {
 			return err
 		}
-		u.ID, err = res.LastInsertId()
+		if u.ID, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		// The setup code goes with the first person, however they were
+		// made (docs/03-data-model.md, section 4).
+		_, err = tx.tx.ExecContext(ctx, `DELETE FROM meta WHERE key = 'setup_code'`)
 		return err
 	})
 	if err != nil {
