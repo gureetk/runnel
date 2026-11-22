@@ -6,10 +6,11 @@ A lean, fast media server for a home library, built together with its own offici
 
 Read this file first. Then read the document for the part being worked on.
 
-## 1. Where things stand (21 November 2026)
+## 1. Where things stand (22 November 2026)
 
 - **Stage 1 is built:** a server that serves files (`01-roadmap.md`, section 3). Its exit criteria pass in a development sandbox on generated files, and are still to be checked on real hardware (D48).
-- **Stage 2 is being built:** a library a client can use (`01-roadmap.md`, section 4). It opens by hardening the parser against shapes that real names may have.
+- **Stage 2 is built:** a library a client can use (`01-roadmap.md`, section 4). Its exit criteria pass in a development sandbox, on generated files and with a stand-in Jellyfin, and are still to be checked on real hardware, in one run with stage 1's (D48).
+- **Stage 3 is next:** transcoding (`01-roadmap.md`, section 5).
 - **Decided:** the server's design (D1 to D19), the name and the logo (D20, D21), the order of the stages (D22, D25), official clients and their designs (D23 to D26, D29 to D37), the licence (D38), how a browser is fed (D39, D40), what each client is built with (D41 to D44), installing and updating (D46, D47), and when a stage may start (D48).
 - **Proposed, to confirm in use:** encoder arguments, limits, thresholds, discovery on the local network (P1 to P8).
 - **Open:** O5, O6, O8, O12 and O13 in `08-decisions.md`. None of them blocks the server.

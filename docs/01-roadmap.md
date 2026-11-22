@@ -132,6 +132,8 @@ Where one call carries data that a later stage brings, stage 2 builds the part i
 5. Resident memory stays under 30 MB while a client browses. `GET /home` answers in under 20 ms on real hardware.
 6. A new file dropped into a library is playable through the API within 15 seconds, without a manual scan.
 
+State on 22 November 2026: built (D48). Everything on the list is merged, and the six criteria pass in a development sandbox, on generated files and with a stand-in Jellyfin for the import. None has been run on real hardware yet. That check is an open issue of the stage's milestone, run together with stage 1's, and the milestone stays open until it is met.
+
 ## 5. Stage 3: transcoding
 
 The piped transcode and its warm-up, on the server, with mpv on a desktop standing in for a client. About 1 to 2 weekends. Browser delivery (`04-api.md`, section 7.9) shares this stage's argument builder. It is built at the start of stage 7, or here if there is room.
