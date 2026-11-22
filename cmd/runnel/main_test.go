@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gureetk/runnel/internal/config"
+	"github.com/gureetk/runnel/internal/meta/jellyfin/standin"
 	tm "github.com/gureetk/runnel/internal/testmedia"
 )
 
@@ -45,7 +46,8 @@ func TestCommands(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"library"}, {"library", "list", "extra"}, {"library", "remove"}, {"library", "remove", "x"},
-		{"library", "remove", "0"}, {"library", "rename", "1"}} {
+		{"library", "remove", "0"}, {"library", "rename", "1"}, {"import"}, {"import", "plex"}, {"import", "jellyfin"},
+		{"import", "jellyfin", "users", "--url", "http://jf.lan", "--write"}, {"import", "jellyfin", "--url", "http://jf.lan", "--user", "ada"}} {
 		if code := run(args, os.Stdin, &out, &errOut); code != 2 {
 			t.Errorf("%v: %d", args, code)
 		}
@@ -463,4 +465,62 @@ func TestANewFileIsPlayableSoon(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("not playable after 20 seconds:\n%s", srv.logs.String())
+}
+
+func TestImportJellyfin(t *testing.T) {
+	srv := startServer(t)
+	ctx := context.Background()
+	client, err := newAdminClient(config.Config{Listen: srv.addr, DataDir: srv.data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pollEvery = 10 * time.Millisecond
+	if err := userAdd(ctx, client, "ada", "correct horse", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "films")
+	film := filepath.Join(root, "Low Water (2001)", "Low Water (2001).mkv")
+	os.MkdirAll(filepath.Dir(film), 0o755)
+	os.WriteFile(film, []byte("not a video"), 0o644)
+	tm.Settle(t, root)
+	if err := libraryAdd(ctx, client, "Films", "movies", "", []string{root}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	srv.waitFor(t, `msg="items built" library=1 ms=\d+ added=1`)
+
+	jf := &standin.Server{Key: "0123456789abcdef0123456789abcdef", Version: "12.4.0",
+		Users: []standin.User{{ID: "4a3c19a6d4ce4e1f9f1c2d3e4f5a6b7c", Name: "Ada"}},
+		Items: []standin.Item{{ID: "a1", Type: "Movie", Path: "/films/Low Water (2001)/Low Water (2001).mkv",
+			UserData: map[string]standin.UserData{"4a3c19a6d4ce4e1f9f1c2d3e4f5a6b7c": {Played: true, PlayCount: 1, LastPlayedDate: "2026-10-01T20:00:00Z"}}},
+			{ID: "a2", Type: "Movie", Path: "/films/Gone (2000)/Gone (2000).mkv"}}}
+	url := jf.Start(t).URL
+
+	var out bytes.Buffer
+	if err := jellyfinUsers(ctx, client, url, jf.Key, &out); err != nil || out.String() != "Jellyfin 12.4.0 has 1 users:\n  Ada\n" {
+		t.Fatalf("users: %q %v", out.String(), err)
+	}
+	body := map[string]any{"url": url, "api_key": jf.Key, "users": map[string]string{"ada": "ada"},
+		"paths": []map[string]string{{"from": "/films", "to": root}}, "dry_run": true}
+	out.Reset()
+	if err := importJellyfin(ctx, client, body, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"A dry run against Jellyfin 12.4.0: nothing was written.", "Films and episodes: 1 joined, 1 not (50.0% joined).",
+		"Play states for ada: 1.", "Not joined (1):\n  movie\t/films/Gone (2000)/Gone (2000).mkv\tno file at that path here\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("the dry run's report lacks %q:\n%s", want, out.String())
+		}
+	}
+	body["dry_run"] = false
+	out.Reset()
+	if err := importJellyfin(ctx, client, body, &out); err != nil || !strings.HasPrefix(out.String(), "Imported from Jellyfin 12.4.0.\n") ||
+		!strings.Contains(out.String(), "Play states for ada: 1.") {
+		t.Fatalf("the import: %q %v", out.String(), err)
+	}
+	body["api_key"] = "wrong-key"
+	var e *apiError
+	if err := importJellyfin(ctx, client, body, &out); !errors.As(err, &e) || e.Code != "bad_key" {
+		t.Fatalf("a wrong key: %v", err)
+	}
+	srv.waitFor(t, `msg="Jellyfin import done" dry_run=false joined=1 not_joined=1`)
 }

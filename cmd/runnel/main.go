@@ -32,6 +32,8 @@ Commands:
   scan [--library <id>]        Ask the running server to scan.
   report [--library <id>] [--class <class>|all]
                                Print how every file's name parsed.
+  import jellyfin --url <address> [--user <jellyfin>=<here>]... [--path <from>=<to>]... [--write]
+                               Import from Jellyfin; a dry run without --write.
   version                      Print the version.
 
 Settings are environment variables that start with RUNNEL_. They are listed
@@ -63,6 +65,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return scanCmd(args[1:], stdout, stderr)
 	case "report":
 		return reportCmd(args[1:], stdout, stderr)
+	case "import":
+		return importCmd(args[1:], stdin, stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

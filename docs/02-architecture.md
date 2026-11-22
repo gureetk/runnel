@@ -146,7 +146,7 @@ Subcommands of the one binary:
 | `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |
 | `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code, and prints the device's name and client. It finds the user with `GET /admin/users`, the device with `GET /auth/pair/{code}`, and approves with `POST /auth/pair/approve` (`04-api.md`, section 3.3). |
 | `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it. |
-| `runnel import jellyfin …` | The one-time import. |
+| `runnel import jellyfin --url <address> [--user <name in Jellyfin>=<name here>]… [--path <from>=<to>]… [--write]`, `import jellyfin users --url <address>` | The one-time import, a dry run without `--write`, and Jellyfin's users for the `--user` map (`06-library-and-metadata.md`, section 7). |
 | `runnel version` | |
 
 Subcommands that change data talk to the running server over its API on localhost, with a token kept in the data directory. They never open the database behind the server's back.
@@ -154,7 +154,8 @@ Subcommands that change data talk to the running server over its API on localhos
 - **The local admin token.** At every start the server makes a new random token, writes it to `admin.token` in the data directory, readable by its own user only, and keeps only its hash, in memory. The token is not a row in `tokens`: it belongs to no user, so it also works before the first user exists. The server takes it for the calls of `04-api.md`, section 8, and only from its own host: a loopback address, or the address the request arrived at.
 - **Finding the server.** A subcommand reads the same `RUNNEL_LISTEN` and `RUNNEL_DATA` as the server. It connects to `127.0.0.1` when the server listens on every address. It has to run as the server's user, or as root, to read the token: `sudo -u runnel runnel user add ada`.
 - **`runnel user add`** and **`runnel user passwd`** ask for the password twice, without echo, on a terminal. Otherwise they read the first line of standard input. `passwd` finds the user by name, compared without case, before it asks.
-- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel library remove`** asks on a terminal before it removes anything, and needs `--yes` elsewhere. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`. A scan of some folders also gives `folders`, and one that left files alone as still being written gives `being_written`.
+- **`runnel library add`** takes `--root` once for each folder, and makes a relative path absolute. **`runnel library remove`** asks on a terminal before it removes anything, and needs `--yes` elsewhere.
+- **`runnel import jellyfin`** asks for the API key without echo on a terminal, or reads it from the first line of standard input. It waits for the import to end and prints its report: how many films and episodes joined, as a share, the series, the provider ids and play states written, and the rows that did not join. **`runnel scan`** does not wait for the scan: the server logs each folder's result, `scan done`, with the time it took and the files added, changed, moved and missing, and then `probing done`. A scan of some folders also gives `folders`, and one that left files alone as still being written gives `being_written`.
 
 ## 7. The data directory
 
@@ -187,8 +188,9 @@ The server's instance id, its settings and the setup code are rows in the databa
 | The web interface | Its files are part of the binary. To be measured at stage 5. | Not measured |
 | A first sync of 20,000 items from `/changes` | Inside "under API load" | Measured in the sandbox, 21 November 2026, on generated files: 28.6 to 31.8 MiB at its peak, sampled every 50 ms, with pages of 500 or 2,000 |
 | The first build of a library of 20,000 items | Above a scan's budget | Measured in the sandbox, 21 November 2026: 44 to 57 MiB at its peak, 21 to 24 MiB idle after it. Not looked into yet |
+| The Jellyfin import of 19,000 films and episodes and 200 series, for two people | Above "under API load" while it runs, a few seconds | Measured in the sandbox, 22 November 2026, against a stand-in Jellyfin on the same machine: 33.3 to 35.6 MiB at its peak, sampled every 50 ms; 24.1 to 26.6 MiB after it, with the memory handed back. Untested against a real Jellyfin |
 
-After a batch of scans, after a probe pass, and at the end of a `/changes` sync that wrote 5,000 rows or more, the server hands the memory it freed back to the system (`debug.FreeOSMemory`). In the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files, and from 28 to 31 MiB to 24 to 26 MiB after the first sync of 20,000 items.
+After a batch of scans, after a probe pass, after a Jellyfin import, and at the end of a `/changes` sync that wrote 5,000 rows or more, the server hands the memory it freed back to the system (`debug.FreeOSMemory`). In the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files, and from 28 to 31 MiB to 24 to 26 MiB after the first sync of 20,000 items.
 
 Set `GOMEMLIMIT=64MiB` in the service. In the prototype a 16 MiB limit with `GOGC=50` held the server at 21.8 MB after load.
 
