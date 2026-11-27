@@ -79,7 +79,7 @@ func (s *Server) handlePlaylog(w http.ResponseWriter, r *http.Request) {
 		b := rowBody{ID: p.ID, At: p.At, Device: strOrNil(p.Device), Client: strOrNil(p.Client), ItemID: int64OrNil(p.ItemID),
 			Title: strOrNil(p.Title), Mode: p.Mode, Warmed: p.Warmed, ServerFirstByteMS: p.ServerFirstByteMS,
 			ClientLoadedMS: p.LoadedMS, ClientPlayingMS: p.PlayingMS, Decoder: strOrNil(p.Decoder), Hardware: p.Hardware,
-			DroppedFrames: p.DroppedFrames}
+			DroppedFrames: p.DroppedFrames, Encoder: strOrNil(p.Encoder)}
 		if p.UserID != 0 || p.User != "" {
 			b.User = &userRef{ID: int64OrNil(p.UserID), Name: p.User}
 		}

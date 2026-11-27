@@ -27,6 +27,9 @@ type PlayStart struct {
 	Decoder             string
 	Hardware            *bool
 	DroppedFrames       *int64
+	// A transcode's request to its first byte sent, and its encoder.
+	ServerFirstByteMS *int64
+	Encoder           string
 }
 
 // playDetail is the snapshot a row of the start-time log keeps, so that it
@@ -40,13 +43,14 @@ type playDetail struct {
 	Decoder       string `json:"decoder,omitempty"`
 	Hardware      *bool  `json:"hardware,omitempty"`
 	DroppedFrames *int64 `json:"dropped_frames,omitempty"`
+	Encoder       string `json:"encoder,omitempty"`
 }
 
 // LogPlay writes a row of the start-time log and keeps the newest
 // PlayLogKeep rows.
 func (d *DB) LogPlay(ctx context.Context, p PlayStart) error {
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
-		detail := playDetail{Decoder: p.Decoder, Hardware: p.Hardware, DroppedFrames: p.DroppedFrames}
+		detail := playDetail{Decoder: p.Decoder, Hardware: p.Hardware, DroppedFrames: p.DroppedFrames, Encoder: p.Encoder}
 		var user, device, client sql.NullString
 		if err := tx.tx.QueryRowContext(ctx, `SELECT (SELECT name FROM users WHERE id = ?),
 			  (SELECT device_name FROM tokens WHERE id = ?), (SELECT client FROM tokens WHERE id = ?)`,
@@ -74,9 +78,9 @@ func (d *DB) LogPlay(ctx context.Context, p PlayStart) error {
 			return err
 		}
 		if _, err := tx.tx.ExecContext(ctx, `INSERT INTO play_log
-			  (at, user_id, item_id, file_id, mode, warmed, client_loaded_ms, client_playing_ms, detail)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.At, p.UserID, p.ItemID, p.FileID, p.Mode, p.Warmed, p.LoadedMS, p.PlayingMS, string(js)); err != nil {
+			  (at, user_id, item_id, file_id, mode, warmed, server_first_byte_ms, client_loaded_ms, client_playing_ms, detail)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.At, p.UserID, p.ItemID, p.FileID, p.Mode, p.Warmed, p.ServerFirstByteMS, p.LoadedMS, p.PlayingMS, string(js)); err != nil {
 			return err
 		}
 		_, err = tx.tx.ExecContext(ctx, `DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - ?`, PlayLogKeep)
@@ -104,6 +108,7 @@ type PlayRow struct {
 	Decoder           string
 	Hardware          *bool
 	DroppedFrames     *int64
+	Encoder           string
 }
 
 // PlayLog reads the start-time log, newest first: at most limit rows with
@@ -137,7 +142,7 @@ func (d *DB) PlayLog(ctx context.Context, before int64, limit int) ([]PlayRow, e
 			}
 		}
 		p.User, p.Device, p.Client, p.Title = snap.User, snap.Device, snap.Client, snap.Title
-		p.Decoder, p.Hardware, p.DroppedFrames = snap.Decoder, snap.Hardware, snap.DroppedFrames
+		p.Decoder, p.Hardware, p.DroppedFrames, p.Encoder = snap.Decoder, snap.Hardware, snap.DroppedFrames, snap.Encoder
 		out = append(out, p)
 	}
 	return out, rows.Err()

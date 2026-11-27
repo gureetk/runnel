@@ -59,33 +59,38 @@ type Config struct {
 	// Slots is how many transcodes run at once (RUNNEL_TRANSCODE_SLOTS);
 	// one when zero.
 	Slots int
+	// Transcodes runs the ffmpeg children of transcodes. Nil transcodes
+	// nothing.
+	Transcodes Transcodes
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
 
 // Server is the API. Build one with New and serve its Handler.
 type Server struct {
-	db        *db.DB
-	log       *slog.Logger
-	info      Info
-	adminHash []byte
-	now       func() time.Time
-	scans     Scans
-	gate      Gate
-	images    Images
-	work      Work
-	imports   Imports
-	encoders  Encoders
-	slots     int
-	startedAt time.Time
-	mux       *http.ServeMux
-	patterns  []string      // the routes, as added
-	deadline  time.Duration // for JSON routes: jsonDeadline, shorter in tests
+	db         *db.DB
+	log        *slog.Logger
+	info       Info
+	adminHash  []byte
+	now        func() time.Time
+	scans      Scans
+	gate       Gate
+	images     Images
+	work       Work
+	imports    Imports
+	encoders   Encoders
+	slots      int
+	transcodes Transcodes
+	startedAt  time.Time
+	mux        *http.ServeMux
+	patterns   []string      // the routes, as added
+	deadline   time.Duration // for JSON routes: jsonDeadline, shorter in tests
 
 	warm          warmups
-	sessions      sessions      // playbacks that report progress
-	firstByteHold time.Duration // firstByteHold, shorter in tests
-	prepareHold   time.Duration // prepareHold, shorter in tests
+	sessions      sessions         // playbacks that report progress
+	streams       transcodeStreams // transcodes
+	firstByteHold time.Duration    // firstByteHold, shorter in tests
+	prepareHold   time.Duration    // prepareHold, shorter in tests
 
 	logins      *auth.Limiter // wrong sign-ins by address
 	pairStarts  *auth.Limiter // pairings started, by address
@@ -124,6 +129,8 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		imports:       c.Imports,
 		encoders:      c.Encoders,
 		slots:         max(c.Slots, 1),
+		transcodes:    c.Transcodes,
+		streams:       transcodeStreams{running: map[*transcodeStream]bool{}, last: map[sessionKey]*transcodeStream{}},
 		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
@@ -169,6 +176,7 @@ func (s *Server) routes() {
 	s.handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))
 	s.handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
 	s.handle("GET "+Prefix+"/files/{id}/external/{external_id}", s.media(s.handleExternal))
+	s.handle("GET "+Prefix+"/files/{id}/transcode.mkv", s.media(s.handleTranscode))
 	s.handle("POST "+Prefix+"/files/{id}/prepare", s.json(s.signedIn(s.handlePrepare)))
 	s.handle("POST "+Prefix+"/progress", s.json(s.signedIn(s.handleProgress)))
 	s.handle("PUT "+Prefix+"/items/{id}/played", s.json(s.signedIn(s.handlePlayed(true))))

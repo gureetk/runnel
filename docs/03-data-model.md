@@ -483,7 +483,7 @@ CREATE INDEX images_key ON images(key);
 - A row left `running` by a server that stopped is queued again at the next start, and that run does not count in `attempts`.
 - A probe queued again while it runs, for a file that changed meanwhile, stays queued when the run ends, and runs again.
 - `play_log` keeps its newest 1,000 rows (P7). Inserting a row deletes what is older.
-- A `play_log` row comes from the first progress report of a playback that carries timings or stats (`04-api.md`, section 7.6). Its `mode` is the report's, so it can also be `remux` (section 7.9 there), which the comment in migration 0001 leaves out. `detail` keeps the user's name, the device's name and client, the item's title and the client's stats as they were, so that the row still reads the same after the device signs out or the item goes. Removing a user sets `user_id` to NULL in their rows.
+- A `play_log` row comes from the first progress report of a playback that carries timings or stats (`04-api.md`, section 7.6). Its `mode` is the report's, so it can also be `remux` (section 7.9 there), which the comment in migration 0001 leaves out. When the session had a transcode, `server_first_byte_ms`, the encoder in `detail` and `warmed` come from the session's last stream (`05-playback.md`, section 5). `detail` keeps the user's name, the device's name and client, the item's title and the client's stats as they were, so that the row still reads the same after the device signs out or the item goes. Removing a user sets `user_id` to NULL in their rows.
 
 **Search index**
 

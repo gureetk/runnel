@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -163,7 +164,7 @@ func TestTheBuiltBinary(t *testing.T) {
 	films := filepath.Join(t.TempDir(), "films")
 	shows := filepath.Join(t.TempDir(), "shows")
 	media := map[string]string{
-		filepath.Join(films, "Invented Film (2001)", "Invented Film (2001).mkv"):                  "1",
+		filepath.Join(films, "Invented Film (2001)", "Invented Film (2001).mkv"):                  "30",
 		filepath.Join(films, "Lone Film (1999).mp4"):                                              "1",
 		filepath.Join(shows, "Harbor Lantern (2021)", "Season 01", "Harbor Lantern - S01E01.mkv"): "1",
 		// In a folder that is not a season folder: the report notes it.
@@ -230,8 +231,45 @@ func TestTheBuiltBinary(t *testing.T) {
 		t.Fatalf("library list after the removal:\n%s", out)
 	}
 
+	// A transcode streams from the built server, and is still running
+	// when it is told to stop.
+	resp, err = http.Post("http://"+addr+"/api/v1/auth/login", "application/json", strings.NewReader(
+		`{"name": "ada", "password": "a new long horse", "device": {"id": "binary-test", "name": "Test", "client": "runnel-test/0"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var signedIn struct{ Token string }
+	json.NewDecoder(resp.Body).Decode(&signedIn)
+	resp.Body.Close()
+	var film int64
+	for id := int64(1); id <= 2 && film == 0; id++ {
+		req, _ := http.NewRequest("GET", "http://"+addr+"/api/v1/files/"+strconv.FormatInt(id, 10), nil)
+		req.Header.Set("Authorization", "Bearer "+signedIn.Token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f struct {
+			DurationMS int64 `json:"duration_ms"`
+		}
+		json.NewDecoder(resp.Body).Decode(&f)
+		resp.Body.Close()
+		if f.DurationMS > 20000 {
+			film = id
+		}
+	}
+	stream, err := http.Get("http://" + addr + "/api/v1/files/" + strconv.FormatInt(film, 10) + "/transcode.mkv?v=h264&t=" + signedIn.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if _, err := io.ReadFull(stream.Body, make([]byte, 16<<10)); err != nil || stream.StatusCode != 200 ||
+		stream.Header.Get("X-Runnel-Encoder") != "libx264" {
+		t.Fatalf("transcode of file %d: %d %v %v", film, stream.StatusCode, stream.Header, err)
+	}
+
 	// SIGTERM stops the server cleanly, within the 5 seconds of
-	// docs/02-architecture.md, section 5.
+	// docs/02-architecture.md, section 5, and takes ffmpeg with it.
 	start := time.Now()
 	serve.Process.Signal(syscall.SIGTERM)
 	select {
@@ -247,6 +285,12 @@ func TestTheBuiltBinary(t *testing.T) {
 		t.Fatalf("no stopped line:\n%s", logs.String())
 	}
 	t.Logf("stopped in %v", time.Since(start))
+	dirs, _ := os.ReadDir("/proc")
+	for _, d := range dirs {
+		if b, err := os.ReadFile("/proc/" + d.Name() + "/cmdline"); err == nil && bytes.Contains(b, []byte(films)) {
+			t.Errorf("a child outlived the server: %q", b)
+		}
+	}
 	if _, errOut, status = run("", "scan"); status != 1 || !strings.Contains(errOut, "is runnel serve running?") {
 		t.Fatalf("scan with the server stopped: %d %q", status, errOut)
 	}
