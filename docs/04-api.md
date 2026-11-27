@@ -616,7 +616,7 @@ Behaviour:
 - `Content-Type: video/x-matroska`, chunked, `Cache-Control: no-store`. No `Range`: the stream cannot seek.
 - Timestamps are the original file's. A stream that starts at 12:45 says 12:45. With mpv, set `rebase-start-time=no` so the position it reports is the real one.
 - The stream has no duration in it. The client takes the duration from `files[].duration_ms`.
-- A seek outside what the player has buffered is a new request with a new `start_ms`. So is an audio switch when the sidecar is not in use.
+- A seek outside what the player has buffered is a new request with a new `start_ms`. So is an audio switch when the sidecar is not in use. A device's new request that finds every slot taken ends that device's own running transcode and takes its slot, so that it never waits for a stream its player is leaving to notice.
 - The stream ends when the file ends or the client disconnects. On disconnect the server kills ffmpeg at once.
 - Response headers: `X-Runnel-Encoder` (such as `hevc_vaapi`) and `X-Runnel-Warmed` (`1` when a warm-up was claimed, `0` otherwise).
 - The answer starts with ffmpeg's first output. Until then nothing is sent, so an error is still an ordinary answer.

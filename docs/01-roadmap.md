@@ -151,6 +151,8 @@ Build: the argument builder with its fallback ladder, sessions, relaying, killin
 5. A transcode with every hazard file from the test set (a subtitle track with long gaps, tens of megabytes of fonts, image-based subtitles) starts within the same limits or is listed as a known exception.
 6. The server's own memory stays under 30 MB during a transcode. The child's memory is measured. A figure from a development sandbox goes into `05-playback.md`, and the one from real hardware stays outside the repository (D28).
 
+State on 27 November 2026: built (D48). Everything on the list is merged, and the six criteria pass in a development sandbox with software encoding, mpv 0.37 standing in for a client, and generated 1080p 10-bit files with the hazards of criterion 5. There is one known exception: a warm-up of the file with 30 MB of fonts holds them in the server's memory, which reached 50 MiB (`05-playback.md`, section 6). None of the criteria has run on real hardware yet. That check is an open issue of the stage's milestone, and the milestone stays open until it is met.
+
 ## 6. Stage 4: metadata
 
 About 2 to 4 weekends, then a long tail of odd cases, and perhaps one more weekend for the third part (an estimate). In three parts. The first two are split because the Jellyfin import already supplies provider ids for most of the library:

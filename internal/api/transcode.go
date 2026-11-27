@@ -239,7 +239,12 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	s.handOver(c.tokenID, id)
 	if child == nil {
 		child, err = s.transcodes.Start(r.Context(), src, t)
-		// A playback comes before a warm-up: one that holds the slot goes.
+		// A device's new request, a seek or a change of track, comes
+		// before its own stream, which it is leaving and which may not have
+		// noticed yet; and a playback comes before a warm-up.
+		if errors.Is(err, play.ErrNoSlot) && s.stopStreamsOf(c.tokenID) {
+			child, err = s.transcodes.Start(r.Context(), src, t)
+		}
 		if errors.Is(err, play.ErrNoSlot) && s.dropTranscodeWarmups() {
 			child, err = s.transcodes.Start(r.Context(), src, t)
 		}
@@ -256,7 +261,12 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		target: t, encoder: child.Encoder, warmed: warmed, started: arrived}
 	st.firstByteMS.Store(-1)
 	s.streams.add(st, s.now().UnixMilli())
-	defer func() { s.streams.end(st, s.now().UnixMilli()) }()
+	// Listed until its slot is free, so that the device's next request
+	// can always find what holds it.
+	defer func() {
+		child.Stop()
+		s.streams.end(st, s.now().UnixMilli())
+	}()
 
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	h := w.Header()
@@ -287,6 +297,19 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Debug("transcode ended", "file", id, "encoder", child.Encoder, "warmed", warmed,
 		"client_went", err != nil || r.Context().Err() != nil)
+}
+
+// stopStreamsOf ends a token's transcodes, and reports whether there were
+// any. Their slots are free when it returns.
+func (s *Server) stopStreamsOf(tokenID int64) bool {
+	stopped := false
+	for _, st := range s.streams.list() {
+		if st.tokenID == tokenID {
+			st.child.Stop()
+			stopped = true
+		}
+	}
+	return stopped
 }
 
 // transcodeRequest finds a transcode's file and reads its parameters,

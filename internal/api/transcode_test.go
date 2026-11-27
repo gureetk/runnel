@@ -215,9 +215,10 @@ func TestTranscodeSlotsAndDisconnects(t *testing.T) {
 		}
 		if i == 0 {
 			var e apiError
-			rec := b.call(t, "GET", "/api/v1/files/"+idStr(long.ID)+"/transcode.mkv?v=h264", b.token, "", nil, &e)
+			noor := b.signIn(t, "noor", false, "tv")
+			rec := b.call(t, "GET", "/api/v1/files/"+idStr(long.ID)+"/transcode.mkv?v=h264", noor, "", nil, &e)
 			if rec.Code != 503 || e.Error.Code != "busy" || rec.Header().Get("Retry-After") != "5" {
-				t.Fatalf("a second transcode: %d %+v %v", rec.Code, e, rec.Header())
+				t.Fatalf("someone else's transcode: %d %+v %v", rec.Code, e, rec.Header())
 			}
 		}
 		if n := ffmpegsOf(path); n != 1 {
@@ -376,5 +377,48 @@ func TestTranscodeWarmUps(t *testing.T) {
 	}
 	if held() != 0 || g.held() != 0 {
 		t.Errorf("refused prepares hold %d slots, the gate %d times", held(), g.held())
+	}
+}
+
+// TestADeviceTakesOverItsOwnStream: a device's new transcode, such as a
+// seek, while its old stream still holds the one slot, ends the old one
+// and starts, rather than waiting for the old one to notice its client
+// went.
+func TestADeviceTakesOverItsOwnStream(t *testing.T) {
+	b, tr := newTranscodes(t, 1)
+	srv := httptest.NewServer(b.Handler())
+	defer srv.Close()
+	long := b.fileOf(t, "Long Water")
+	get := func(start string) *http.Response {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/api/v1/files/" + idStr(long.ID) + "/transcode.mkv?v=h264&start_ms=" + start + "&t=" + b.token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	old := get("0")
+	defer old.Body.Close()
+	if _, err := io.ReadFull(old.Body, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	seek := get("30000")
+	defer seek.Body.Close()
+	if seek.StatusCode != 200 {
+		t.Fatalf("the seek: %d", seek.StatusCode)
+	}
+	if _, err := io.ReadFull(seek.Body, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	// The old stream ended: what is left of it is read to its end.
+	done := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, old.Body); done <- err }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old stream still runs")
+	}
+	if tr.Running() != 1 {
+		t.Errorf("running %d", tr.Running())
 	}
 }

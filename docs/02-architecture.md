@@ -183,7 +183,7 @@ The server's instance id, its settings and the setup code are rows in the databa
 | A scan | 13–15 MB peak, inside the above | Prototype |
 | A probe | 54 MB per ffprobe child, for a moment | Measured |
 | A transcode | The ffmpeg child: 220–500 MB in software at 1080p. The server itself: about 0 extra | Measured. In the sandbox, 27 November 2026: software H.264 from a 1280×720 AV1 file, the child at 130 MiB at its peak, the server at 18.6 to 19.3 MiB. On real hardware with VAAPI, measured, and kept outside the repository (D28) |
-| A held warm-up | A transcode's memory, no CPU. In the server, its buffer: the file's attachments plus 4 MiB | Measured. In the sandbox, 27 November 2026, a file without attachments: the server at 23.6 to 24.2 MiB while it was held, from 18.3 to 18.9 before |
+| A held warm-up | A transcode's memory, no CPU. In the server, its buffer: the file's attachments plus 4 MiB | Measured. In the sandbox, 27 November 2026, a file without attachments: the server at 23.6 to 24.2 MiB while it was held, from 18.3 to 18.9 before. A file with 30 MB of fonts: the server at 50.3 MiB at its peak, a known exception to the 30 MB goal |
 | A browser playback with the video copied | Two ffmpeg children, 56 to 58 MB each at their peak | Measured in the sandbox, 20 November 2026 |
 | The web interface | Its files are part of the binary. To be measured at stage 5. | Not measured |
 | A first sync of 20,000 items from `/changes` | Inside "under API load" | Measured in the sandbox, 21 November 2026, on generated files: 28.6 to 31.8 MiB at its peak, sampled every 50 ms, with pages of 500 or 2,000 |
