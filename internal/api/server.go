@@ -51,10 +51,20 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 			// A feature is listed once this server implements it.
 			Features: []string{"changes", "list", "pairing", "prepare"},
 		},
-		// This server encodes nothing yet, so it lists nothing a client
-		// could ask for.
-		Transcode: transcodeBody{HW: "none", Video: []string{}, Depth10: []string{}, Slots: 0},
+		Transcode: s.transcodeInfo(),
 	})
+}
+
+// transcodeInfo is what the last check found this server can encode. One
+// that can encode nothing has no slots.
+func (s *Server) transcodeInfo() transcodeBody {
+	res := s.lastEncoders()
+	video, depth10 := res.Video()
+	b := transcodeBody{HW: res.HW(), Video: video, Depth10: depth10}
+	if len(video) > 0 {
+		b.Slots = s.slots
+	}
+	return b
 }
 
 // healthPath is outside the API, for a supervisor's health check

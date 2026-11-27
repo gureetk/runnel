@@ -34,6 +34,7 @@ Commands:
                                Print how every file's name parsed.
   import jellyfin --url <address> [--user <jellyfin>=<here>]... [--path <from>=<to>]... [--write]
                                Import from Jellyfin; a dry run without --write.
+  doctor                       Check ffmpeg, ffprobe, the GPU and what can be encoded.
   version                      Print the version.
 
 Settings are environment variables that start with RUNNEL_. They are listed
@@ -67,6 +68,8 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return reportCmd(args[1:], stdout, stderr)
 	case "import":
 		return importCmd(args[1:], stdin, stdout, stderr)
+	case "doctor":
+		return doctorCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

@@ -53,6 +53,12 @@ type Config struct {
 	Work Work
 	// Imports runs the Jellyfin import. Nil runs none.
 	Imports Imports
+	// Encoders is what the server found it can encode. Nil encodes
+	// nothing.
+	Encoders Encoders
+	// Slots is how many transcodes run at once (RUNNEL_TRANSCODE_SLOTS);
+	// one when zero.
+	Slots int
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -69,6 +75,8 @@ type Server struct {
 	images    Images
 	work      Work
 	imports   Imports
+	encoders  Encoders
+	slots     int
 	startedAt time.Time
 	mux       *http.ServeMux
 	patterns  []string      // the routes, as added
@@ -114,6 +122,8 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		images:        c.Images,
 		work:          c.Work,
 		imports:       c.Imports,
+		encoders:      c.Encoders,
+		slots:         max(c.Slots, 1),
 		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
 		deadline:      jsonDeadline,
@@ -199,6 +209,8 @@ func (s *Server) routes() {
 	s.handle("GET "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleImportReport)))
 	s.handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))
 	s.handle("GET "+Prefix+"/admin/stats", s.json(s.admin(s.handleStats)))
+	s.handle("GET "+Prefix+"/admin/encoders", s.json(s.admin(s.handleEncoders)))
+	s.handle("POST "+Prefix+"/admin/encoders/check", s.json(s.admin(s.handleCheckEncoders)))
 
 	s.handle("GET "+healthPath, http.HandlerFunc(s.handleHealth))
 }

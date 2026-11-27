@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -30,23 +31,35 @@ type Config struct {
 	// the ones found on PATH.
 	FFprobe string
 	FFmpeg  string
+	// HWAccel is how the server encodes on a GPU: "auto", "vaapi" or
+	// "none" (D50).
+	HWAccel string
+	// VAAPIDevice is the render device. Always an absolute path.
+	VAAPIDevice string
+	// TranscodeSlots is how many transcodes run at once: 1 to 16.
+	TranscodeSlots int
 	// LogLevel is the lowest level that is logged.
 	LogLevel slog.Level
 }
 
 // Defaults, as docs/02-architecture.md, section 6, gives them.
 const (
-	DefaultListen  = ":8610"
-	DefaultDataDir = "/var/lib/runnel"
+	DefaultListen      = ":8610"
+	DefaultDataDir     = "/var/lib/runnel"
+	DefaultHWAccel     = "auto"
+	DefaultVAAPIDevice = "/dev/dri/renderD128"
 )
 
 // FromEnv reads the configuration through getenv, which is os.Getenv
 // outside tests.
 func FromEnv(getenv func(string) string) (Config, error) {
 	c := Config{
-		Listen:   DefaultListen,
-		DataDir:  DefaultDataDir,
-		LogLevel: slog.LevelInfo,
+		Listen:         DefaultListen,
+		DataDir:        DefaultDataDir,
+		HWAccel:        DefaultHWAccel,
+		VAAPIDevice:    DefaultVAAPIDevice,
+		TranscodeSlots: 1,
+		LogLevel:       slog.LevelInfo,
 	}
 
 	if v := getenv("RUNNEL_LISTEN"); v != "" {
@@ -73,6 +86,28 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.Name = strings.TrimSpace(getenv("RUNNEL_NAME"))
 	c.FFprobe = getenv("RUNNEL_FFPROBE")
 	c.FFmpeg = getenv("RUNNEL_FFMPEG")
+
+	if v := getenv("RUNNEL_HWACCEL"); v != "" {
+		switch v = strings.ToLower(v); v {
+		case "auto", "vaapi", "none":
+			c.HWAccel = v
+		default:
+			return Config{}, fmt.Errorf("RUNNEL_HWACCEL=%q: want auto, vaapi or none", v)
+		}
+	}
+	if v := getenv("RUNNEL_VAAPI_DEVICE"); v != "" {
+		if !filepath.IsAbs(v) {
+			return Config{}, fmt.Errorf("RUNNEL_VAAPI_DEVICE=%q: want an absolute path, such as %s", v, DefaultVAAPIDevice)
+		}
+		c.VAAPIDevice = filepath.Clean(v)
+	}
+	if v := getenv("RUNNEL_TRANSCODE_SLOTS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 16 {
+			return Config{}, fmt.Errorf("RUNNEL_TRANSCODE_SLOTS=%q: want a number from 1 to 16", v)
+		}
+		c.TranscodeSlots = n
+	}
 
 	if v := getenv("RUNNEL_LOG"); v != "" {
 		switch strings.ToLower(v) {

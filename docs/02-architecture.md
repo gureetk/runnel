@@ -124,8 +124,8 @@ Two settings can also be changed while the server runs, by an admin in the web i
 | `RUNNEL_DATA` | `/var/lib/runnel` | Data directory. |
 | `RUNNEL_FFMPEG`, `RUNNEL_FFPROBE` | found on `PATH` | Paths to the binaries. Jellyfin's ffmpeg build is a good choice where it is installed, since it is known to work with the GPU there. Without ffprobe the server still scans, says so in its log, and probes nothing. |
 | `RUNNEL_HWACCEL` | `auto` | `auto`, `vaapi` or `none` (D50). |
-| `RUNNEL_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device. |
-| `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once. |
+| `RUNNEL_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device, an absolute path. |
+| `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once, 1 to 16. |
 | `RUNNEL_FFMPEG_MAX_RSS_MB` | `1024` | A child above this is killed. |
 | `RUNNEL_SIDECAR_CACHE_MB` | `4096` | Size cap of the sidecar cache. |
 | `RUNNEL_TMDB_KEY` | none | The metadata key. It can be set in the web interface instead. Without a key nothing is fetched and items keep the titles from their names. |
@@ -145,7 +145,7 @@ Subcommands of the one binary:
 | `runnel scan [--library <id>]` | Asks the running server to scan. |
 | `runnel report [--library <id>] [--class <class>\|all] [--noted]` | Prints how every file's name parsed, by class, with the count of noted files, then the files that need a look, and the files ffprobe could not read. `--noted` lists only the files with a note (`04-api.md`, section 8.2). |
 | `runnel pair approve <code> --user <name>` | Approves a device that is showing a pairing code, and prints the device's name and client. It finds the user with `GET /admin/users`, the device with `GET /auth/pair/{code}`, and approves with `POST /auth/pair/approve` (`04-api.md`, section 3.3). |
-| `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it. |
+| `runnel doctor` | Checks ffmpeg, ffprobe, the render device and what can be encoded, and prints it: the server's own check (`05-playback.md`, section 8), run here with the same settings, without a running server. It also says whether its user can open the render device. It exits with 1 when ffmpeg or ffprobe is missing or nothing can be encoded. |
 | `runnel import jellyfin --url <address> [--user <name in Jellyfin>=<name here>]… [--path <from>=<to>]… [--write]`, `import jellyfin users --url <address>` | The one-time import, a dry run without `--write`, and Jellyfin's users for the `--user` map (`06-library-and-metadata.md`, section 7). |
 | `runnel version` | |
 

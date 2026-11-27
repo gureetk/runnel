@@ -990,6 +990,11 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 
 A target that has no row, such as AV1, is one this version of the server does not produce.
 
+- The four rows are always there, in this order. `error` is null for a row that works, and otherwise says why it does not: ffmpeg's first line of error, `this ffmpeg has no hevc_vaapi`, `no render device at /dev/dri/renderD128`, `RUNNEL_HWACCEL is none`, or `ffmpeg is not on PATH` (`05-playback.md`, section 8).
+- `hw` is `vaapi` when a hardware row works, and `none` otherwise.
+- The first check runs before the server listens, so `checked_at` is always set.
+- `POST /admin/encoders/check` answers as `GET` does, with the new result.
+
 `GET /admin/stats`:
 
 ```json
