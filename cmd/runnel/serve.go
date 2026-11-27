@@ -68,6 +68,9 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 	defer database.Close()
+	if database.Backup != "" {
+		log.Info("database copied before a migration that rebuilds tables", "copy", database.Backup, "schema", db.SchemaVersion())
+	}
 
 	started := time.Now()
 	instanceID, err := database.InstanceID(ctx)

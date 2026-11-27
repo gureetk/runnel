@@ -393,6 +393,66 @@ Migration `0002_images_key.sql`, because `GET /img` finds an image by its key, a
 CREATE INDEX images_key ON images(key);
 ```
 
+Migration `0003_kinds.sql`, for the two kinds of library of D49, `mixed` and `videos`, and the item type of a home video, `video`. Both lists are CHECK constraints, which SQLite cannot change in place, so the migration makes `libraries` and `items` again by the procedure of section 7. Every column, row and id is copied as it was, and the indexes of `items` are made again:
+
+```sql
+CREATE TABLE new_libraries (
+  id          INTEGER PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  kind        TEXT NOT NULL CHECK (kind IN ('movies','shows','mixed','videos')),
+  profile     TEXT NOT NULL DEFAULT 'default' CHECK (profile IN ('default','anime')),
+  created_at  INTEGER NOT NULL,
+  updated_seq INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO new_libraries (id, name, kind, profile, created_at, updated_seq)
+  SELECT id, name, kind, profile, created_at, updated_seq FROM libraries;
+DROP TABLE libraries;
+ALTER TABLE new_libraries RENAME TO libraries;
+
+CREATE TABLE new_items (
+  id               INTEGER PRIMARY KEY,
+  library_id       INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  type             TEXT NOT NULL CHECK (type IN ('movie','series','season','episode','collection','video')),
+  parent_id        INTEGER REFERENCES items(id) ON DELETE CASCADE,  -- season -> series, episode -> season
+  series_id        INTEGER REFERENCES items(id) ON DELETE CASCADE,  -- seasons and episodes
+  season_number    INTEGER,
+  episode_number   INTEGER,
+  episode_number_end INTEGER,                    -- a file that holds several episodes
+  absolute_number  INTEGER,
+  numbering        TEXT CHECK (numbering IN ('seasons','absolute')), -- series only
+  root_id          INTEGER REFERENCES roots(id) ON DELETE CASCADE,   -- movies and series
+  collection_id    INTEGER REFERENCES items(id) ON DELETE SET NULL,  -- movies: the collection shown for it
+  path_key         TEXT,                         -- the folder (or lone file) the item was built from
+  title            TEXT NOT NULL,
+  sort_title       TEXT NOT NULL,
+  original_title   TEXT,
+  overview         TEXT,
+  release_date     TEXT,
+  year             INTEGER,
+  runtime_ms       INTEGER,
+  rating           REAL,
+  content_rating   TEXT,
+  match_state      TEXT NOT NULL DEFAULT 'unmatched'
+                   CHECK (match_state IN ('unmatched','matched','manual','review','ignored')),
+  match_confidence REAL,
+  match_note       TEXT,                         -- JSON from the matcher: why the item is on the review list
+  added_at         INTEGER NOT NULL,
+  refreshed_at     INTEGER,
+  updated_seq      INTEGER NOT NULL
+);
+INSERT INTO new_items (id, library_id, type, parent_id, series_id, season_number, episode_number, episode_number_end, absolute_number, numbering, root_id, collection_id, path_key, title, sort_title, original_title, overview, release_date, year, runtime_ms, rating, content_rating, match_state, match_confidence, match_note, added_at, refreshed_at, updated_seq)
+  SELECT id, library_id, type, parent_id, series_id, season_number, episode_number, episode_number_end, absolute_number, numbering, root_id, collection_id, path_key, title, sort_title, original_title, overview, release_date, year, runtime_ms, rating, content_rating, match_state, match_confidence, match_note, added_at, refreshed_at, updated_seq FROM items;
+DROP TABLE items;
+ALTER TABLE new_items RENAME TO items;
+CREATE UNIQUE INDEX items_path   ON items(root_id, path_key) WHERE path_key IS NOT NULL;
+CREATE INDEX items_list   ON items(library_id, type, sort_title, id);
+CREATE INDEX items_added  ON items(library_id, type, added_at DESC);
+CREATE INDEX items_parent ON items(parent_id, season_number, episode_number);
+CREATE INDEX items_series ON items(series_id, type, season_number, episode_number);
+CREATE INDEX items_seq    ON items(updated_seq);
+CREATE INDEX items_collection ON items(collection_id) WHERE collection_id IS NOT NULL;
+```
+
 ## 4. Rules that keep it consistent
 
 **Files**
@@ -779,7 +839,13 @@ DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - 1000;
 - Numbered SQL files in the binary (`embed`). `meta.schema_version` records the last one applied.
 - At start the server applies what is missing, each file in its own transaction, and refuses to start on a database newer than itself.
 - A merged migration is never edited, not even a comment in it. A database made with it may exist anywhere, and the server never applies a migration twice, so an edit would go unnoticed where it has run. A change to the schema is a new migration. A test holds every merged migration to the SHA-256 it was merged with, and a new migration adds its own in the pull request that adds it.
-- A migration never rewrites watch state in a way that cannot be reversed from a backup. Before a migration that rebuilds a table, the server copies the database file into `backup/` in the data directory (`02-architecture.md`, section 7).
+- A migration never rewrites watch state in a way that cannot be reversed from a backup. Before a migration that rebuilds a table, the server copies the database file into `backup/` in the data directory (`02-architecture.md`, section 7):
+  - **When.** At start, before the first pending migration whose header says `-- Rebuilds:`, and only for a database that held a schema already. A new database is not copied. One copy covers every migration of that start.
+  - **How.** `VACUUM INTO`, which writes a consistent snapshot of the database into a new file [checked: SQLite's page on VACUUM, 27 November 2026]. It is written as `….partial`, readable by the server's own user only, synced, and renamed once complete, so a copy cut short by a crash or a power loss is never taken for a backup. Partial files left by an earlier start are deleted.
+  - **Its name**: `backup/runnel-schema<N>-<YYYYMMDD-HHMMSS>.db`, `N` the schema version it holds and the time in UTC. It is an ordinary database: copied back over `runnel.db`, with the `-wal` and `-shm` files removed, it is the server as it was before, and an older release of the server opens it.
+  - **How many.** The newest three. Older ones are deleted after a new copy is made.
+  - **Without room.** The copy and the rebuilt tables need about twice the database's size free in the data directory. Without it, or when the copy cannot be written, the server refuses to start, says how much room it needs and where, and changes nothing.
+- **A migration that rebuilds a table that others point at** follows SQLite's procedure for it [checked: SQLite's page on ALTER TABLE, section "Making Other Kinds Of Table Schema Changes", 27 November 2026]. Foreign keys are turned off first, on the writing connection and outside any transaction, since the pragma does nothing inside one. Then, in one transaction: the new table is made under a new name, filled from the old, the old one dropped, the new one renamed to the old name, and its indexes made again; `PRAGMA foreign_key_check` must find nothing, or the transaction is rolled back and the server does not start. Then foreign keys are turned on again. With them on, dropping `items` would delete every row that points at it, watch state among them. Since SQLite 3.26.0 a renamed table's foreign key references are always rewritten, so a table that others point at is never renamed out of the way first: that is the order the procedure warns against.
 - Anything derived from the media or from providers (`files`, `streams`, `chapters`, `items`, `images`, `people`, `credits`, `provider_cache`) can be rebuilt by a rescan. Only `users`, `tokens`, `user_state`, `user_list`, `series_prefs`, `overrides` and the settings in `meta` are irreplaceable. A backup is those, or the whole file.
 
 ## 8. Sizes to expect
