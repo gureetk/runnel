@@ -109,6 +109,13 @@ func TestTheBuiltBinary(t *testing.T) {
 	if out, _, status := run("", "version"); status != 0 || strings.TrimSpace(out) != "v0.0.0-test" {
 		t.Fatalf("version: %d %q", status, out)
 	}
+	// The check of what can encode ran before the server listened. No
+	// render device is in the test's environment, so it is software.
+	srv.waitFor(t, `msg="encoders checked" hw=none ms=\d+ hevc10=`)
+	if out, _, status := run("", "doctor"); status != 0 || !strings.Contains(out, "ffmpeg: ") ||
+		!regexp.MustCompile(`(?m)^  h264   8-bit  software  libx264     yes$`).MatchString(out) {
+		t.Errorf("doctor: %d\n%s", status, out)
+	}
 	resp, err := http.Get("http://" + addr + "/api/v1/server")
 	if err != nil {
 		t.Fatal(err)

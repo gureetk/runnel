@@ -18,6 +18,7 @@ import (
 
 	"github.com/gureetk/runnel/internal/auth"
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/play"
 )
 
 // syncBuffer is a log destination that tests can read while the server
@@ -131,6 +132,31 @@ func TestServerInfo(t *testing.T) {
 	wantJSON, _ := json.Marshal(want)
 	if !bytes.Equal(gotJSON, wantJSON) {
 		t.Fatalf("GET /server\n got %s\nwant %s", gotJSON, wantJSON)
+	}
+
+	// What the last check found, with the slots.
+	row := func(v string, depth int, how string, works bool) play.Row {
+		return play.Row{V: v, Depth: depth, How: how, Works: works}
+	}
+	for _, c := range []struct {
+		rows []play.Row
+		want string
+	}{
+		{[]play.Row{row("hevc", 10, "hardware", true), row("hevc", 8, "hardware", true), row("h264", 8, "hardware", true), row("h264", 8, "software", true)},
+			`{"hw":"vaapi","video":["hevc","h264"],"depth10":["hevc"],"slots":2}`},
+		{[]play.Row{row("hevc", 10, "hardware", false), row("hevc", 8, "hardware", false), row("h264", 8, "hardware", false), row("h264", 8, "software", true)},
+			`{"hw":"none","video":["h264"],"depth10":[],"slots":2}`},
+		{[]play.Row{row("hevc", 10, "hardware", false), row("h264", 8, "software", false)},
+			`{"hw":"none","video":[],"depth10":[],"slots":0}`},
+	} {
+		ts.encoders, ts.slots = &fakeEncoders{res: play.Result{CheckedAt: time.Now(), Rows: c.rows}}, 2
+		var got struct {
+			Transcode json.RawMessage `json:"transcode"`
+		}
+		ts.do(t, "GET", "/api/v1/server", nil, &got)
+		if string(got.Transcode) != c.want {
+			t.Errorf("transcode %s, want %s", got.Transcode, c.want)
+		}
 	}
 }
 

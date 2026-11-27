@@ -178,20 +178,20 @@ An exact seek costs decode time in proportion to the distance from the previous 
 
 ## 8. What the server can encode
 
-At start, on `runnel doctor`, and when an admin asks (`POST /admin/encoders/check`, `04-api.md`, section 8.7), the server finds out what works here and reports it in `GET /server`:
+At start, before the server listens, and when an admin asks (`POST /admin/encoders/check`, `04-api.md`, section 8.7), the server finds out what works here and reports it in `GET /server`. `runnel doctor` runs the same check and prints it:
 
-1. Does the configured ffmpeg list `hevc_vaapi` and `h264_vaapi`?
-2. Does a one-second encode of a test pattern succeed for each of: H.264 8-bit, HEVC 8-bit, HEVC 10-bit?
+1. Does the configured ffmpeg list `hevc_vaapi`, `h264_vaapi` and `libx264`?
+2. Does a one-second encode of a test pattern succeed for each of: HEVC 10-bit, HEVC 8-bit and H.264 on the GPU, and H.264 in software? Each encode uses the encoder arguments of section 4.2, and has 3 seconds.
 
    ```
    ffmpeg -hide_banner -loglevel error -nostdin -vaapi_device /dev/dri/renderD128 \
      -f lavfi -i testsrc2=size=1280x720:rate=24 -t 1 \
-     -vf format=p010,hwupload -c:v hevc_vaapi -profile:v main10 -f null -
+     -vf format=p010,hwupload -c:v hevc_vaapi -profile:v main10 -rc_mode CQP -qp 24 -bf 0 -f null -
    ```
 
 3. Hardware decoding is not probed. It is discovered per file through the fallback ladder.
 
-The result is cached in memory, with the time of the check. `RUNNEL_HWACCEL=none` skips the test and offers software H.264 only. A check on request is refused while a transcode runs.
+The result is cached in memory, with the time of the check. A target that does not work says why: ffmpeg's first line of error, an encoder this ffmpeg lacks, a render device that is not there, or `RUNNEL_HWACCEL=none`, which skips the GPU and offers software H.264 only. `auto` and `vaapi` differ only in the log: with `vaapi`, a GPU that encodes nothing is a warning. A check on request is refused while a transcode runs. `runnel doctor` asks no running server, and also says whether its user can open the render device.
 
 On Intel GPUs both VAAPI and QSV are available. Jellyfin's guide prefers QSV on recent generations. One FFmpeg bug report measured QSV holding more than twice the GPU memory of VAAPI for the same 4K transcode. Run by hand on real hardware, QSV was the slower of the two and held more memory (section 12). The server uses VAAPI, and QSV is not built (D50).
 

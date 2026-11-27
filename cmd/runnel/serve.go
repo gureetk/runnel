@@ -24,6 +24,7 @@ import (
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/meta"
 	"github.com/gureetk/runnel/internal/meta/jellyfin"
+	"github.com/gureetk/runnel/internal/play"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
 	"github.com/gureetk/runnel/internal/tasks"
@@ -180,6 +181,13 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		watcher.Run(background)
 	}()
 
+	// What the server can encode, checked before it listens, so that the
+	// first GET /server already says (docs/05-playback.md, section 8).
+	encoders := play.NewEncoders(encoderCheck(cfg, ffmpeg))
+	checkStart := time.Now()
+	checked, _ := encoders.Check(ctx)
+	logEncoders(log, cfg, checked, time.Since(checkStart))
+
 	handler := api.New(database, log, api.Config{
 		Info:           api.Info{Name: name, NameFromEnv: cfg.Name != "", Version: version, InstanceID: instanceID},
 		AdminTokenHash: adminHash,
@@ -188,6 +196,8 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Images:         artwork,
 		Work:           queue,
 		Imports:        importer,
+		Encoders:       encoders,
+		Slots:          cfg.TranscodeSlots,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{
@@ -236,4 +246,31 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 	log.Info("stopped", "ms", time.Since(start).Milliseconds())
 	return nil
+}
+
+// encoderCheck is the check of what this server can encode, with the
+// settings of docs/02-architecture.md, section 6.
+func encoderCheck(cfg config.Config, ffmpeg string) play.Check {
+	return play.Check{FFmpeg: ffmpeg, HWAccel: cfg.HWAccel, Device: cfg.VAAPIDevice}
+}
+
+// logEncoders says what the check found. A GPU that was asked for and does
+// not work is a warning; one that is simply not there is not.
+func logEncoders(log *slog.Logger, cfg config.Config, res play.Result, took time.Duration) {
+	attrs := []any{"hw", res.HW(), "ms", took.Milliseconds()}
+	for _, r := range res.Rows {
+		if r.Works {
+			attrs = append(attrs, play.RowName(r), "works")
+		} else {
+			attrs = append(attrs, play.RowName(r), r.Error)
+		}
+	}
+	log.Info("encoders checked", attrs...)
+	video, _ := res.Video()
+	switch {
+	case len(video) == 0:
+		log.Warn("this server can transcode nothing: run runnel doctor to see why")
+	case cfg.HWAccel == play.HWVAAPI && res.HW() != "vaapi":
+		log.Warn("RUNNEL_HWACCEL is vaapi, and the GPU encodes nothing: transcodes are in software; run runnel doctor to see why")
+	}
 }
