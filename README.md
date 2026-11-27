@@ -9,7 +9,7 @@ A lean, fast media server for a home library, built together with its own client
 
 ## Status
 
-Stages 1 and 2 of the roadmap are built: a server that indexes a library, probes its files and serves them by byte range, with everything a client needs for browsing, watch state and direct play, and a one-time import of the watch history in Jellyfin. Their checks pass in a development sandbox and are still to be run on real hardware. **There is no client yet.** Builds for Linux on amd64 are attached to the [releases](https://github.com/gureetk/runnel/releases); a pre-release is a build for testing.
+Stages 1 to 3 of the roadmap are built: a server that indexes a library, probes its files and serves them by byte range, with everything a client needs for browsing, watch state and direct play, a one-time import of the watch history in Jellyfin, and a piped transcode with its warm-up for players that cannot decode a file. Their checks pass in a development sandbox and are still to be run on real hardware. **There is no client yet.** Builds for Linux on amd64 are attached to the [releases](https://github.com/gureetk/runnel/releases); a pre-release is a build for testing.
 
 The design is in [`docs/`](docs/00-start-here.md). The [roadmap](docs/01-roadmap.md) lists the stages in which it gets built, and what each stage must prove before it is done.
 

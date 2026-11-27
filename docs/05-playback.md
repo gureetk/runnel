@@ -109,7 +109,7 @@ A failure is remembered for the process's life by the source's codec, profile an
 
 | Limit | Default | Notes |
 |---|---|---|
-| Transcode slots | 1 | Streams running at once. A request beyond that is `503 busy`. |
+| Transcode slots | 1 | Streams running at once. A request beyond that is `503 busy`, unless the device that asks has a stream of its own running: a seek or a change of track ends it and takes its slot. |
 | Warm-ups held | 1 | A held warm-up takes a transcode slot. A real request without its ticket that finds every slot taken evicts it, and a newer `prepare` replaces it. |
 | ffmpeg resident memory | 1024 MB | Read from `/proc/<pid>/statm` every 2 s, from the child's start. Above the limit the child is killed, the stream ends, and the server logs it. This does not see GPU memory. |
 
@@ -122,7 +122,9 @@ What one ffmpeg held in the tests, same 1080p 10-bit input, software codecs:
 | Decode, x264 `veryfast` | 380 MB |
 | Decode, x265 `veryfast` | 496 MB |
 
-Launch style made no difference (387 MB as a stock-server-style HLS command, 382 MB piped). With hardware codecs the frames live in GPU memory, which on an integrated GPU is system RAM that `ps` does not show. It was measured by hand on real hardware (section 12), and the figures are kept outside the repository (D28).
+Launch style made no difference (387 MB as a stock-server-style HLS command, 382 MB piped).
+
+Measured again with the server's own command in a development sandbox on 27 November 2026, for stage 3's exit criterion 6 (ffmpeg 6.1, 2 vCPUs, generated 1080p H.264 High 10 files with two AAC tracks, sampled every 50 ms): software decode and x264 `ultrafast`, 159 to 168 MiB at its peak. The same with 30 MB of fonts copied in, 419 MiB. With hardware codecs the frames live in GPU memory, which on an integrated GPU is system RAM that `ps` does not show. It was measured by hand on real hardware (section 12), and the figures are kept outside the repository (D28).
 
 ## 5. Sessions
 
@@ -161,7 +163,7 @@ How it works:
 Rules:
 
 - **Buffer size is `attachments_bytes` plus 4 MiB.** A buffer smaller than the attachments blocks ffmpeg before it has written any video. With a 742 KiB font and a 512 KiB buffer the gain shrank from about 350 ms to about 120 ms.
-- **The buffer is the server's own memory.** It is kept as the pieces ffmpeg wrote, so that nothing is copied as it grows, and handed back when the warm-up ends, claimed or not. A file with tens of megabytes of fonts makes a warm-up hold that much (`02-architecture.md`, section 8).
+- **The buffer is the server's own memory.** It is kept as the pieces ffmpeg wrote, so that nothing is copied as it grows, and handed back when the warm-up ends, claimed or not. A file with tens of megabytes of fonts makes a warm-up hold that much (`02-architecture.md`, section 8): with 30 MB of fonts the server reached 50 MiB in the sandbox, a known exception to stage 3's memory criterion.
 - **A waiting ffmpeg keeps its memory.** 372–376 MB in the software 1080p test. That is why one warm-up is held at a time and for 30 seconds at most.
 - **Matching is exact.** The ticket is tied to the file and the normalised parameters. A request that differs starts fresh.
 - **No time limits.** The warm-up is held back by its full pipe. Rule 7.
@@ -216,7 +218,8 @@ Confirmed on desktop: one sidecar with audio, subtitles and a font worked, the f
 - In direct play the player reads subtitles and fonts from the file.
 - In a piped transcode they are copied in, with rule 6. Attachments are written before the first video packet, so the player downloads every font before the first frame. Harmless for one small font, costly for a release with tens of megabytes of them. The sidecar moves them out of the stream. `fonts=0` is there for a client that already has them.
 - A font cache on the client, keyed by hash, is a later step.
-- Image-based subtitles (PGS, VobSub) are copied the same way. Untested.
+- Image-based subtitles (PGS, VobSub) are copied the same way. A generated PGS track was copied into a transcode in a development sandbox, and started within the limits of section 14 (stage 3's check, 27 November 2026). VobSub is untested, and so is how a TV's player draws either.
+- Measured in the same check, on the same machine as the player, so that no network carried the fonts: a file with 30 MB of fonts gave its first byte after 0.27 to 0.38 s and mpv its first frame after 0.45 to 0.63 s, against 0.11 to 0.21 s and 0.20 to 0.35 s without them. Over a network the fonts come first: at 100 Mbit/s, 30 MB takes about 2.4 s. A warm-up of such a file holds the fonts in the server's memory (section 6).
 - In a browser the page draws text subtitles itself, from files the server extracts. Image-based subtitles are not shown there in version 1 (section 13).
 
 ## 11. Player settings
