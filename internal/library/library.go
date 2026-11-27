@@ -246,13 +246,34 @@ func (p *planned) addFilm(files []db.LibraryFile, t *title, eps []parse.Episode)
 		folder, _, _ = strings.Cut(t.inner[0], "/")
 	}
 	p.films = append(p.films, db.DesiredFilm{RootID: t.root, Key: t.key, Title: pf.Title, Year: pf.Year,
-		Files: versions(files, t.at, folder)})
+		IDs: filmIDs(t), Files: versions(files, t.at, folder)})
 	p.groups = append(p.groups, group{files: t.at, what: "the film"})
 	if eps != nil && len(numbers(t, eps, parse.Anchored, parse.Dash, parse.Guess)) > 1 {
 		for _, n := range t.at {
 			p.read[n].note = joinNotes(p.read[n].note, filmLooksLikeEpisodes)
 		}
 	}
+}
+
+// filmIDs are the providers' ids that a film's names carry: its folder's
+// first, then its files' for any provider the folder does not name, in the
+// order of the files (docs/06-library-and-metadata.md, section 4.5).
+func filmIDs(t *title) map[string]string {
+	var out map[string]string
+	if !t.lone {
+		out = parse.IDs(path.Base(t.key))
+	}
+	for _, rel := range t.inner {
+		for p, v := range parse.IDs(parse.Base(rel)) {
+			if _, ok := out[p]; !ok {
+				if out == nil {
+					out = map[string]string{}
+				}
+				out[p] = v
+			}
+		}
+	}
+	return out
 }
 
 // addSeries reads a title as a series, from its files read as episodes.
@@ -275,7 +296,8 @@ func (p *planned) addSeries(files []db.LibraryFile, t *title, eps []parse.Episod
 		return
 	}
 	first := all[0].p
-	s := db.DesiredSeries{RootID: t.root, Key: t.key, Title: first.SeriesTitle, Year: first.SeriesYear}
+	s := db.DesiredSeries{RootID: t.root, Key: t.key, Title: first.SeriesTitle, Year: first.SeriesYear,
+		IDs: parse.IDs(path.Base(t.key))}
 	// A number past what a season holds, without a token, makes the
 	// series one running count: then every such number is the episode's
 	// running number, which is its key. A token, or the specials' folder,

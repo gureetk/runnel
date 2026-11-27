@@ -520,6 +520,10 @@ ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: 
 - A row is read again only while it is younger than what its reader allows (`06-library-and-metadata.md`, section 6.3); an older one is fetched again and replaced.
 - A row not fetched again for 180 days is deleted, at start and each night (D53).
 
+**Ids in names**
+
+- The providers' ids that a film's or a series' names carry (`06-library-and-metadata.md`, section 4.5) are written into `external_ids` by every build, and make the item `matched`, unless its `match_state` is `manual` or `ignored`. Ids that differ from the item's replace all of its rows of `external_ids` and set `refreshed_at` to NULL, so that the new title is fetched. A change stamps the item.
+
 **Manual matches**
 
 - A manual match writes `overrides`, keyed by folder. Matching reads `overrides` before anything else. A rescan that drops and rebuilds an item therefore finds the same match again.
