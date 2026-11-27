@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -21,7 +22,10 @@ type Transcodes interface {
 	// Start takes a slot and starts ffmpeg on the first rung of the ladder
 	// that produces output (play.Transcoder).
 	Start(ctx context.Context, src play.Source, t play.Target) (*play.Child, error)
-	// Running is how many transcodes hold a slot now.
+	// Warm starts one as Start does, and holds up to limit bytes of its
+	// output for the request that claims it.
+	Warm(ctx context.Context, src play.Source, t play.Target, limit int) (*play.Warm, error)
+	// Running is how many transcodes hold a slot now, warm-ups too.
 	Running() int
 }
 
@@ -196,77 +200,31 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r.Context())
-	s.handOver(c.tokenID, id)
-	f, err := s.db.RawFileOf(r.Context(), id)
-	switch {
-	case errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrOutsideRoot):
-		s.fail(w, r, http.StatusNotFound, "not_found", "no such file")
-		return
-	case err != nil:
-		s.internal(w, r, err)
-		return
-	}
-	d, err := s.db.FileDetailOf(r.Context(), id)
-	switch {
-	case errors.Is(err, db.ErrNotFound):
-		s.fail(w, r, http.StatusNotFound, "not_found", "no such file, or it is not offered for playback")
-		return
-	case err != nil:
-		s.internal(w, r, err)
-		return
-	}
-	src := play.Source{Path: f.Path}
-	audio := map[int]bool{}
-	hasVideo := false
-	for _, st := range d.Streams {
-		switch {
-		case st.Kind == "video" && !hasVideo:
-			hasVideo = true
-			src.Codec, src.Profile, src.Depth, src.Height = st.Codec, st.Profile, st.BitDepth, st.Height
-		case st.Kind == "audio":
-			audio[st.Index] = true
-		}
-	}
 	q := r.URL.Query()
-	t, bad := transcodeTarget(q, src, audio)
-	if bad != "" {
-		s.fail(w, r, http.StatusBadRequest, "bad_request", bad)
-		return
-	}
-	if !hasVideo {
-		s.unsupported(w, "the file has no video to encode")
-		return
-	}
-	if hw, sw := s.lastEncoders().Can(t.V, t.Depth); s.transcodes == nil || !hw && !sw {
-		s.unsupported(w, "this server cannot encode "+t.V+" at "+strconv.Itoa(t.Depth)+" bits")
-		return
-	}
-	if !f.Available {
-		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the file is missing or its disk is away")
+	src, t, ok := s.transcodeRequest(w, r, id, q)
+	if !ok {
+		s.handOver(c.tokenID, id)
 		return
 	}
 
-	child, err := s.transcodes.Start(r.Context(), src, t)
-	var failed *play.FailedError
-	switch {
-	case errors.Is(err, play.ErrNoSlot):
-		w.Header().Set("Retry-After", busyRetry)
-		s.fail(w, r, http.StatusServiceUnavailable, "busy", "every transcode slot is in use")
-		return
-	case errors.Is(err, play.ErrUnsupported):
-		s.unsupported(w, "this server cannot encode "+t.V+" at "+strconv.Itoa(t.Depth)+" bits")
-		return
-	case errors.Is(err, play.ErrClosed):
-		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the server is stopping")
-		return
-	case errors.As(err, &failed):
-		s.log.Warn("a transcode could not start", "file", id, "v", t.V, "depth", t.Depth, "err", failed.Message)
-		s.fail(w, r, http.StatusInternalServerError, "encode_failed", failed.Message)
-		return
-	case r.Context().Err() != nil:
-		return // the client went before the first output
-	case err != nil:
-		s.internal(w, r, err)
+	// The token's warm-up, when the ticket matches; otherwise one of the
+	// same file is of no more use.
+	var child *play.Child
+	warmed := false
+	if tk := q.Get("ticket"); tk != "" {
+		if wu := s.claim(c.tokenID, tk, id, t); wu != nil {
+			child, warmed = wu.Claim(), true
+		}
+	}
+	s.handOver(c.tokenID, id)
+	if child == nil {
+		child, err = s.transcodes.Start(r.Context(), src, t)
+		// A playback comes before a warm-up: one that holds the slot goes.
+		if errors.Is(err, play.ErrNoSlot) && s.dropTranscodeWarmups() {
+			child, err = s.transcodes.Start(r.Context(), src, t)
+		}
+	}
+	if s.startFailed(w, r, id, t, err) {
 		return
 	}
 	defer child.Stop()
@@ -275,7 +233,7 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	defer stopWhenGone()
 
 	st := &transcodeStream{key: sessionKey{user: c.user.ID, id: q.Get("session")}, tokenID: c.tokenID, fileID: id,
-		target: t, encoder: child.Encoder, started: arrived}
+		target: t, encoder: child.Encoder, warmed: warmed, started: arrived}
 	st.firstByteMS.Store(-1)
 	s.streams.add(st, s.now().UnixMilli())
 	defer func() { s.streams.end(st, s.now().UnixMilli()) }()
@@ -285,7 +243,11 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "video/x-matroska")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Runnel-Encoder", child.Encoder)
-	h.Set("X-Runnel-Warmed", "0")
+	if warmed {
+		h.Set("X-Runnel-Warmed", "1")
+	} else {
+		h.Set("X-Runnel-Warmed", "0")
+	}
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
 	first := true
@@ -298,5 +260,86 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 			time.AfterFunc(s.firstByteHold, release)
 		}
 	})
-	s.log.Debug("transcode ended", "file", id, "encoder", child.Encoder, "client_went", err != nil || r.Context().Err() != nil)
+	if warmed {
+		// The warm-up's buffer was megabytes: give them back
+		// (docs/02-architecture.md, section 8).
+		defer debug.FreeOSMemory()
+	}
+	s.log.Debug("transcode ended", "file", id, "encoder", child.Encoder, "warmed", warmed,
+		"client_went", err != nil || r.Context().Err() != nil)
+}
+
+// transcodeRequest finds a transcode's file and reads its parameters,
+// for GET /files/{id}/transcode.mkv and a transcode's prepare. It answers
+// the request itself, and returns false, when the transcode cannot be.
+func (s *Server) transcodeRequest(w http.ResponseWriter, r *http.Request, id int64, q url.Values) (play.Source, play.Target, bool) {
+	f, err := s.db.RawFileOf(r.Context(), id)
+	switch {
+	case errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrOutsideRoot):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such file")
+		return play.Source{}, play.Target{}, false
+	case err != nil:
+		s.internal(w, r, err)
+		return play.Source{}, play.Target{}, false
+	}
+	d, err := s.db.FileDetailOf(r.Context(), id)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "not_found", "no such file, or it is not offered for playback")
+		return play.Source{}, play.Target{}, false
+	case err != nil:
+		s.internal(w, r, err)
+		return play.Source{}, play.Target{}, false
+	}
+	src := play.Source{Path: f.Path, Attachments: d.AttachmentsBytes}
+	audio := map[int]bool{}
+	hasVideo := false
+	for _, st := range d.Streams {
+		switch {
+		case st.Kind == "video" && !hasVideo:
+			hasVideo = true
+			src.Codec, src.Profile, src.Depth, src.Height = st.Codec, st.Profile, st.BitDepth, st.Height
+		case st.Kind == "audio":
+			audio[st.Index] = true
+		}
+	}
+	t, bad := transcodeTarget(q, src, audio)
+	switch hw, sw := s.lastEncoders().Can(t.V, t.Depth); {
+	case bad != "":
+		s.fail(w, r, http.StatusBadRequest, "bad_request", bad)
+	case !hasVideo:
+		s.unsupported(w, "the file has no video to encode")
+	case s.transcodes == nil || !hw && !sw:
+		s.unsupported(w, "this server cannot encode "+t.V+" at "+strconv.Itoa(t.Depth)+" bits")
+	case !f.Available:
+		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the file is missing or its disk is away")
+	default:
+		return src, t, true
+	}
+	return play.Source{}, play.Target{}, false
+}
+
+// startFailed answers a transcode, or a warm-up, that could not start, and
+// reports whether there was such an error.
+func (s *Server) startFailed(w http.ResponseWriter, r *http.Request, id int64, t play.Target, err error) bool {
+	var failed *play.FailedError
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, play.ErrNoSlot):
+		w.Header().Set("Retry-After", busyRetry)
+		s.fail(w, r, http.StatusServiceUnavailable, "busy", "every transcode slot is in use")
+	case errors.Is(err, play.ErrUnsupported):
+		s.unsupported(w, "this server cannot encode "+t.V+" at "+strconv.Itoa(t.Depth)+" bits")
+	case errors.Is(err, play.ErrClosed):
+		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the server is stopping")
+	case errors.As(err, &failed):
+		s.log.Warn("a transcode could not start", "file", id, "v", t.V, "depth", t.Depth, "err", failed.Message)
+		s.fail(w, r, http.StatusInternalServerError, "encode_failed", failed.Message)
+	case r.Context().Err() != nil:
+		// The client went before the first output.
+	default:
+		s.internal(w, r, err)
+	}
+	return true
 }

@@ -182,8 +182,8 @@ The server's instance id, its settings and the setup code are rows in the databa
 | A direct stream | about 0 extra | Prototype |
 | A scan | 13–15 MB peak, inside the above | Prototype |
 | A probe | 54 MB per ffprobe child, for a moment | Measured |
-| A transcode | The ffmpeg child: 220–500 MB in software at 1080p. Hardware not measured. | Measured |
-| A held warm-up | A transcode's memory, no CPU | Measured |
+| A transcode | The ffmpeg child: 220–500 MB in software at 1080p. The server itself: about 0 extra | Measured. In the sandbox, 27 November 2026: software H.264 from a 1280×720 AV1 file, the child at 130 MiB at its peak, the server at 18.6 to 19.3 MiB. On real hardware with VAAPI, measured, and kept outside the repository (D28) |
+| A held warm-up | A transcode's memory, no CPU. In the server, its buffer: the file's attachments plus 4 MiB | Measured. In the sandbox, 27 November 2026, a file without attachments: the server at 23.6 to 24.2 MiB while it was held, from 18.3 to 18.9 before |
 | A browser playback with the video copied | Two ffmpeg children, 56 to 58 MB each at their peak | Measured in the sandbox, 20 November 2026 |
 | The web interface | Its files are part of the binary. To be measured at stage 5. | Not measured |
 | A first sync of 20,000 items from `/changes` | Inside "under API load" | Measured in the sandbox, 21 November 2026, on generated files: 28.6 to 31.8 MiB at its peak, sampled every 50 ms, with pages of 500 or 2,000 |
@@ -191,7 +191,7 @@ The server's instance id, its settings and the setup code are rows in the databa
 | A build after a scan that found one new file in that library | Above a scan's budget, while the build lasts | Measured in the sandbox with the static build, 22 November 2026: 45.7 to 47.1 MiB at its peak, for a build of 0.35 to 0.44 s, and 17.6 to 17.9 MiB after it. Items are built for the whole library after every scan (`06-library-and-metadata.md`, section 5), so each scan of a large library costs about what its first build did. Building only what a scan touched is issue #59 |
 | The Jellyfin import of 19,000 films and episodes and 200 series, for two people | Above "under API load" while it runs, a few seconds | Measured in the sandbox, 22 November 2026, against a stand-in Jellyfin on the same machine: 33.3 to 35.6 MiB at its peak, sampled every 50 ms; 24.1 to 26.6 MiB after it, with the memory handed back. Untested against a real Jellyfin |
 
-After a batch of scans, after a probe pass, after a Jellyfin import, and at the end of a `/changes` sync that wrote 5,000 rows or more, the server hands the memory it freed back to the system (`debug.FreeOSMemory`). In the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files, and from 28 to 31 MiB to 24 to 26 MiB after the first sync of 20,000 items.
+After a batch of scans, after a probe pass, after a Jellyfin import, at the end of a `/changes` sync that wrote 5,000 rows or more, and when a transcode's warm-up ends, claimed or not, the server hands the memory it freed back to the system (`debug.FreeOSMemory`). In the sandbox that took the idle server from 21.7 MB to 17.1 MB after the first index and probe of 3,166 files, and from 28 to 31 MiB to 24 to 26 MiB after the first sync of 20,000 items.
 
 Set `GOMEMLIMIT=64MiB` in the service. In the prototype a 16 MiB limit with `GOGC=50` held the server at 21.8 MB after load.
 

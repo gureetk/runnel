@@ -234,3 +234,147 @@ func TestTranscodeSlotsAndDisconnects(t *testing.T) {
 		}
 	}
 }
+
+type prepareAnswer struct {
+	Ticket    string `json:"ticket"`
+	ExpiresIn int    `json:"expires_in"`
+	Sidecar   *struct {
+		Ready bool `json:"ready"`
+	} `json:"sidecar"`
+}
+
+// TestTranscodeWarmUps: a prepare starts ffmpeg and holds its output for
+// the request that brings its ticket; one held at a time, replaced by a
+// newer prepare, put aside by a playback that needs its slot, and gone
+// after its 30 seconds (docs/04-api.md, section 7.5).
+func TestTranscodeWarmUps(t *testing.T) {
+	b, tr := newTranscodes(t, 1)
+	srv := httptest.NewServer(b.Handler())
+	defer srv.Close()
+	g := &countGate{}
+	b.gate = g
+	b.firstByteHold = 100 * time.Millisecond
+	long := b.fileOf(t, "Long Water")
+	noor := b.signIn(t, "noor", false, "tv")
+	body := map[string]any{"mode": "transcode", "v": "h264", "start_ms": 10000, "audio": "all", "subs": "all", "fonts": 1}
+	prepare := func(token string, body map[string]any) prepareAnswer {
+		t.Helper()
+		var a prepareAnswer
+		if rec := b.call(t, "POST", "/api/v1/files/"+idStr(long.ID)+"/prepare", token, "", body, &a); rec.Code != 200 {
+			t.Fatalf("prepare: %d %s", rec.Code, rec.Body.String())
+		}
+		return a
+	}
+	// play reads a transcode to its end, or the first 64 KiB with short,
+	// and returns its X-Runnel-Warmed.
+	play := func(token, query string, short bool) string {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/api/v1/files/" + idStr(long.ID) + "/transcode.mkv?" + query + "&t=" + token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if short {
+			_, err = io.ReadFull(resp.Body, make([]byte, 64<<10))
+		} else {
+			_, err = io.Copy(io.Discard, resp.Body)
+		}
+		if resp.StatusCode != 200 || err != nil {
+			t.Fatalf("transcode %s: %d %v", query, resp.StatusCode, err)
+		}
+		return resp.Header.Get("X-Runnel-Warmed")
+	}
+	held := func() int { return tr.Running() }
+
+	a := prepare(b.token, body)
+	if len(a.Ticket) != 14 || !strings.HasPrefix(a.Ticket, "p_") || a.ExpiresIn != 30 || a.Sidecar == nil || a.Sidecar.Ready {
+		t.Fatalf("prepare's answer %+v", a)
+	}
+	if held() != 1 || g.held() != 1 {
+		t.Fatalf("a warm-up: %d slots, gate held %d times", held(), g.held())
+	}
+	// Claimed by the request with its ticket and the same parameters.
+	if warmed := play(b.token, "v=h264&start_ms=10000&session=w1&ticket="+a.Ticket, false); warmed != "1" {
+		t.Fatalf("with the ticket: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+	waitUntil(t, "the gate is open", func() bool { return g.held() == 0 })
+	b.call(t, "POST", "/api/v1/progress", b.token, "", map[string]any{"session": "w1", "item_id": b.film(t, "Long Water").ID,
+		"file_id": long.ID, "position_ms": 11000, "state": "playing", "mode": "transcode",
+		"timings": map[string]any{"pressed_to_loaded_ms": 120, "pressed_to_playing_ms": 200}}, nil)
+	var log struct {
+		Rows []struct {
+			Warmed bool `json:"warmed"`
+		} `json:"rows"`
+	}
+	b.call(t, "GET", "/api/v1/admin/playlog", b.adminToken, local, nil, &log)
+	if len(log.Rows) != 1 || !log.Rows[0].Warmed {
+		t.Fatalf("playlog %+v", log.Rows)
+	}
+
+	// The ticket is good once.
+	if warmed := play(b.token, "v=h264&start_ms=10000&ticket="+a.Ticket, true); warmed != "0" {
+		t.Errorf("the ticket again: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+
+	// Other parameters start fresh, and the warm-up goes.
+	a = prepare(b.token, body)
+	if warmed := play(b.token, "v=h264&start_ms=20000&ticket="+a.Ticket, true); warmed != "0" {
+		t.Errorf("other parameters: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+
+	// Someone else's playback needs the one slot: the warm-up goes, and
+	// the playback is not refused.
+	a = prepare(b.token, body)
+	if warmed := play(noor, "v=h264", true); warmed != "0" {
+		t.Errorf("another's playback: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+	if warmed := play(b.token, "v=h264&start_ms=10000&ticket="+a.Ticket, true); warmed != "0" {
+		t.Errorf("a ticket whose warm-up was put aside: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+
+	// One warm-up is held at a time: a newer prepare, of anyone, replaces it.
+	first := prepare(b.token, body)
+	second := prepare(noor, body)
+	if held() != 1 {
+		t.Fatalf("two prepares hold %d slots", held())
+	}
+	if warmed := play(b.token, "v=h264&start_ms=10000&ticket="+first.Ticket, true); warmed != "0" {
+		t.Errorf("a replaced warm-up: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free", func() bool { return held() == 0 })
+	_ = second
+
+	// Unclaimed, a warm-up goes after its time.
+	b.prepareHold = 300 * time.Millisecond
+	a = prepare(b.token, body)
+	waitUntil(t, "the warm-up ends", func() bool { return held() == 0 && g.held() == 0 })
+	if warmed := play(b.token, "v=h264&start_ms=10000&ticket="+a.Ticket, true); warmed != "0" {
+		t.Errorf("an expired ticket: warmed %q", warmed)
+	}
+	waitUntil(t, "the slot is free and the gate open", func() bool { return held() == 0 && g.held() == 0 })
+
+	var e apiError
+	for _, c := range []struct {
+		body   map[string]any
+		status int
+		code   string
+	}{
+		{map[string]any{"mode": "transcode", "v": "hevc"}, 409, "unsupported"},
+		{map[string]any{"mode": "transcode", "v": "h264", "audio": true}, 400, "bad_request"},
+		{map[string]any{"mode": "transcode", "v": "h264", "audio": 9}, 400, "bad_request"},
+		{map[string]any{"mode": "transcode"}, 400, "bad_request"},
+	} {
+		e = apiError{}
+		if rec := b.call(t, "POST", "/api/v1/files/"+idStr(long.ID)+"/prepare", b.token, "", c.body, &e); rec.Code != c.status || e.Error.Code != c.code {
+			t.Errorf("prepare %v: %d %+v", c.body, rec.Code, e)
+		}
+	}
+	if held() != 0 || g.held() != 0 {
+		t.Errorf("refused prepares hold %d slots, the gate %d times", held(), g.held())
+	}
+}

@@ -110,7 +110,7 @@ A failure is remembered for the process's life by the source's codec, profile an
 | Limit | Default | Notes |
 |---|---|---|
 | Transcode slots | 1 | Streams running at once. A request beyond that is `503 busy`. |
-| Warm-ups held | 1 | A real request without a ticket evicts a held warm-up. |
+| Warm-ups held | 1 | A held warm-up takes a transcode slot. A real request without its ticket that finds every slot taken evicts it, and a newer `prepare` replaces it. |
 | ffmpeg resident memory | 1024 MB | Read from `/proc/<pid>/statm` every 2 s, from the child's start. Above the limit the child is killed, the stream ends, and the server logs it. This does not see GPU memory. |
 
 What one ffmpeg held in the tests, same 1080p 10-bit input, software codecs:
@@ -156,11 +156,12 @@ How it works:
 
 1. `prepare` starts the same ffmpeg command a transcode request would.
 2. A goroutine reads its output into a bounded buffer. When the buffer is full the goroutine stops reading, the pipe fills, and ffmpeg blocks.
-3. The transcode request that carries the ticket is handed the buffer, then the live output.
+3. The transcode request that carries the ticket is handed the buffer, then the live output. A read under way when it comes finishes first.
 
 Rules:
 
 - **Buffer size is `attachments_bytes` plus 4 MiB.** A buffer smaller than the attachments blocks ffmpeg before it has written any video. With a 742 KiB font and a 512 KiB buffer the gain shrank from about 350 ms to about 120 ms.
+- **The buffer is the server's own memory.** It is kept as the pieces ffmpeg wrote, so that nothing is copied as it grows, and handed back when the warm-up ends, claimed or not. A file with tens of megabytes of fonts makes a warm-up hold that much (`02-architecture.md`, section 8).
 - **A waiting ffmpeg keeps its memory.** 372–376 MB in the software 1080p test. That is why one warm-up is held at a time and for 30 seconds at most.
 - **Matching is exact.** The ticket is tied to the file and the normalised parameters. A request that differs starts fresh.
 - **No time limits.** The warm-up is held back by its full pipe. Rule 7.

@@ -26,6 +26,9 @@ type Source struct {
 	Depth   int
 	// Height is the video's, for max_h. Zero is unknown.
 	Height int
+	// Attachments is the size of the file's attachments, which ffmpeg
+	// writes before the first video packet: a warm-up holds them.
+	Attachments int64
 }
 
 // AllAudio and NoAudio are the values of Target.Audio other than a stream
