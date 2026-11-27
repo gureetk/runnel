@@ -138,7 +138,7 @@ State on 22 November 2026: built (D48). Everything on the list is merged, and th
 
 The piped transcode and its warm-up, on the server, with mpv on a desktop standing in for a client. About 1 to 2 weekends. Browser delivery (`04-api.md`, section 7.9) shares this stage's argument builder. It is built at the start of stage 7, or here if there is room.
 
-Do first, by hand: the checklist in `05-playback.md`, section 12. It settles the encoder arguments on real hardware before any code depends on them.
+Do first, by hand: the checklist in `05-playback.md`, section 12. It settles the encoder arguments on real hardware before any code depends on them. Items 1, 2 and 9, which need the server alone, ran on 27 November 2026, and settled the arguments and D50.
 
 Build: the argument builder with its fallback ladder, sessions, relaying, killing on disconnect, slots, the memory limit, finding out what the server can encode and checking again on request (`GET /admin/encoders`), `GET /files/{id}/transcode.mkv`, `POST /files/{id}/prepare` with tickets, and the memory of each ffmpeg child in `GET /admin/sessions`.
 
@@ -149,7 +149,7 @@ Build: the argument builder with its fallback ladder, sessions, relaying, killin
 3. Restarting the stream at the current position with another audio track: within 1.5 s.
 4. No ffmpeg process is left one second after a player disconnects, in 20 tries.
 5. A transcode with every hazard file from the test set (a subtitle track with long gaps, tens of megabytes of fonts, image-based subtitles) starts within the same limits or is listed as a known exception.
-6. The server's own memory stays under 30 MB during a transcode. The child's memory is measured and written into `05-playback.md`.
+6. The server's own memory stays under 30 MB during a transcode. The child's memory is measured. A figure from a development sandbox goes into `05-playback.md`, and the one from real hardware stays outside the repository (D28).
 
 ## 6. Stage 4: metadata
 

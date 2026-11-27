@@ -153,9 +153,12 @@ Stage 1 is built, and its six exit criteria pass in a development sandbox on gen
 **D49. Two more kinds of library: mixed films and shows, and home videos. Built in stage 4.** 27 November 2026.
 A library is films or shows, and the schema enforces it. That leaves out a folder that holds both, and videos that are neither, such as home videos, which nothing should try to match. Jellyfin has a mixed type, and its documentation discourages it because of unreliable metadata [checked: its page on libraries, 27 November 2026]. So a mixed library here settles what each folder is before anything is matched, by rules the parse report shows. In a mixed library (`mixed`) a folder is a series when it holds a season folder, a file with an `SxxEyy` token, or two files that the anchored class gives different numbers and that the film rules do not read as parts. Every other folder is a film, and the report notes one whose files look like episodes. A lone file at the top of a root is a film, unless it has an `SxxEyy` token: then it makes no item, as in a shows library. Grouping folders are read the same way in films, shows and mixed libraries: a folder without a year that holds no video and no season folder of its own, and whose folders are each a film's, a series' or another grouping folder, makes no item, and the folders in it are read as if they were at the top of the root. Until now such a folder became one film or one series. In a home-videos library (`videos`) every video file is an item of a new type, `video`. It is titled from its file name, and dated by the container's `creation_time` where ffprobe reports one, otherwise by the file's modification time. ffprobe reports the tag on generated MP4 and Matroska files [checked in a development sandbox, ffprobe 6.1]. What phones and cameras write is untested. A video has no versions, parts or extras, is never sent to a provider and is never on the review list. Its picture is a frame taken from it. It is browsed by folder, and folders are not items. It is played, resumed and listed as a film is. A films or a shows library may be changed to mixed, and no other change of kind is allowed: what reads the same keeps its id and watch state, and what now reads as the other kind becomes a new item, and the old one's watch state goes with it. Both kinds are CHECK constraints, so their migration rebuilds `libraries` and `items`, and the database is copied into `backup/` first (`03-data-model.md`, section 7). The web design gains the two kinds and a folder view before stage 5 is specified. Whether the Jellyfin import can bring the watch state of Jellyfin's home videos is checked against its API when this part is specified.
 
+**D50. VAAPI on Intel GPUs. QSV is not used.** 27 November 2026.
+ffmpeg reaches an Intel GPU both ways. Run by hand on real hardware on the same input, QSV was the slower of the two and held more memory (`05-playback.md`, section 12), and the VAAPI form is the one known to work there. The figures are kept outside the repository (D28). So the server encodes with VAAPI, or else in software, and `RUNNEL_HWACCEL` takes `auto`, `vaapi` or `none`. This closes O5. One GPU is one data point: QSV can come back by a new decision if another GPU shows the opposite.
+
 ## Proposed, to confirm on real hardware or in use
 
-**P1. Encoder arguments.** HEVC 10-bit for 10-bit sources when the client decodes it, quality-based rate control, no B-frames, VAAPI first. Untested on hardware. `05-playback.md`, sections 4 and 12.
+**P1. Encoder arguments.** HEVC 10-bit for 10-bit sources when the client decodes it, quality-based rate control, no B-frames, VAAPI first (D50). The HEVC forms and the second rung of the ladder ran by hand on real hardware. H.264 on the GPU, scaling, and the output on a TV are still to be checked. `05-playback.md`, sections 4 and 12.
 
 **P2. Limits.** One transcode slot, one held warm-up, a 1024 MB cap on an ffmpeg child. `05-playback.md`, section 4.4.
 
@@ -172,8 +175,6 @@ A library is films or shows, and the schema enforces it. That leaves out a folde
 **P8. Browser delivery numbers.** Fragments of half a second when the video is copied and a fifth of a second when it is re-encoded. The page keeps about 30 seconds buffered ahead. Not tuned. `05-playback.md`, section 13.
 
 ## Open
-
-**O5. VAAPI or QSV on Intel GPUs.** QSV may be faster and may hold more memory. To be measured. `05-playback.md`, section 12.
 
 **O6. The pure-Go SQLite driver.** Would remove cgo. Not measured.
 
