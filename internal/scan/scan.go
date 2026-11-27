@@ -43,8 +43,10 @@ type Scanner struct {
 	now func() time.Time
 
 	// Built, when set, is called after a library has been scanned. It
-	// builds the library's items.
-	Built func(ctx context.Context, libraryID int64) error
+	// builds the library's items: those of the scope, the top folders that
+	// the scan looked at, or of the whole library when the scope is nil
+	// (docs/06-library-and-metadata.md, section 5).
+	Built func(ctx context.Context, libraryID int64, scope db.Scope) error
 	// Queued, when set, is called after probes were queued.
 	Queued func()
 	// Images, when set, is called after a library's items are built, for
@@ -67,6 +69,9 @@ type Scanner struct {
 	// found is, for each root scanned since its library's items were
 	// built, the images the scan found and what it looked at.
 	found map[int64]foundImages
+	// touched is, for each root scanned since its library's items were
+	// built, the top folders the scans looked at, or nil for all of it.
+	touched db.Scope
 
 	mu      sync.Mutex
 	pending map[int64]bool             // library ids to scan; 0 means all
@@ -83,6 +88,7 @@ func New(d *db.DB, log *slog.Logger) *Scanner {
 		folders: map[int64]map[string]bool{},
 		later:   map[int64]map[string]int64{},
 		found:   map[int64]foundImages{},
+		touched: db.Scope{},
 		wake:    make(chan struct{}, 1),
 	}
 }
@@ -242,33 +248,61 @@ func (s *Scanner) runAsked(ctx context.Context) bool {
 			s.setWalking(0)
 			continue
 		}
-		scanned := false
+		asked := map[int64][]string{}
 		for _, root := range lib.Roots {
 			f := folders[root.ID]
 			if f == nil {
 				continue
 			}
-			var list []string
-			if !f[""] {
+			list := []string{}
+			if f[""] {
+				list = nil
+			} else {
 				list = outermost(f)
 			}
-			s.setWalking(lib.ID)
-			if _, err := s.scanRoot(ctx, root, list); err != nil {
-				if ctx.Err() == nil {
-					s.log.Error("scan failed", "root", root.Path, "err", err)
-				}
-				continue
-			}
-			scanned = true
+			asked[root.ID] = list
 		}
-		if scanned {
-			if err := s.built(ctx, lib); err != nil && ctx.Err() == nil {
+		if len(asked) > 0 {
+			s.setWalking(lib.ID)
+			if err := s.ScanFolders(ctx, lib, asked); err != nil && ctx.Err() == nil {
 				s.log.Error("scan: cannot build items", "library", lib.ID, "err", err)
 			}
 		}
 		s.setWalking(0)
 	}
 	return true
+}
+
+// ScanFolders scans folders of a library's roots, given for each root
+// relative to it, or the whole root for nil, and then builds the items of
+// the top folders the scans looked at (docs/06-library-and-metadata.md,
+// section 5). A root whose scan fails is logged, and the others go on. It
+// returns the build's error.
+func (s *Scanner) ScanFolders(ctx context.Context, lib model.Library, folders map[int64][]string) error {
+	scanned := false
+	for _, root := range lib.Roots {
+		list, ok := folders[root.ID]
+		if !ok {
+			continue
+		}
+		if _, err := s.scanRoot(ctx, root, list); err != nil {
+			if ctx.Err() == nil {
+				s.log.Error("scan failed", "root", root.Path, "err", err)
+			}
+			continue
+		}
+		scanned = true
+	}
+	if !scanned {
+		return nil
+	}
+	scope := db.Scope{}
+	for _, root := range lib.Roots {
+		if tops, ok := s.touched[root.ID]; ok {
+			scope[root.ID] = tops
+		}
+	}
+	return s.built(ctx, lib, scope)
 }
 
 // setWalking records which library a scan is going through now, with
@@ -339,14 +373,17 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib model.Library) ([]model.S
 		}
 		results = append(results, r)
 	}
-	return results, s.built(ctx, lib)
+	return results, s.built(ctx, lib, nil)
 }
 
-// built builds a library's items, and then hands on the images its roots'
-// scans found.
-func (s *Scanner) built(ctx context.Context, lib model.Library) error {
+// built builds a library's items, those of the scope or all of them with
+// nil, and then hands on the images its roots' scans found.
+func (s *Scanner) built(ctx context.Context, lib model.Library, scope db.Scope) error {
+	for _, root := range lib.Roots {
+		delete(s.touched, root.ID)
+	}
 	if s.Built != nil {
-		if err := s.Built(ctx, lib.ID); err != nil {
+		if err := s.Built(ctx, lib.ID, scope); err != nil {
 			return err
 		}
 	}
@@ -433,8 +470,27 @@ func (s *Scanner) scanRoot(ctx context.Context, root model.Root, folders []strin
 	}
 	changes.Result.MS = time.Since(start).Milliseconds()
 
+	// What the scan looked at is what the build reads: the top folders of
+	// the folders walked, or all of the root, and those of the files whose
+	// rows go now, after 30 days missing, wherever they are in the root.
+	purgeBefore := now.Add(-missingFor).UnixMilli()
+	if folders == nil {
+		s.touched.Whole(root.ID)
+	} else {
+		purged, err := s.db.MissingBefore(ctx, root.ID, purgeBefore)
+		if err != nil {
+			return model.ScanResult{}, err
+		}
+		for _, f := range folders {
+			s.touched.Add(root.ID, db.Top(f))
+		}
+		for _, p := range purged {
+			s.touched.Add(root.ID, db.Top(p))
+		}
+	}
+
 	// 5 and 6. Write it all in one transaction, with what the scan found.
-	if err := s.db.ApplyScan(ctx, root.ID, changes, now.UnixMilli(), now.Add(-missingFor).UnixMilli()); err != nil {
+	if err := s.db.ApplyScan(ctx, root.ID, changes, now.UnixMilli(), purgeBefore); err != nil {
 		return model.ScanResult{}, err
 	}
 	inScope := func(rel string) bool { return w.expected(rel) && !underFailed(rel, w.failed) }

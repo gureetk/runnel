@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/model"
 )
 
@@ -161,5 +162,56 @@ func TestRunWalksAtStart(t *testing.T) {
 	<-done
 	if len(e.known()) != 1 {
 		t.Fatal("nothing was scanned at start")
+	}
+}
+
+// TestTheScopeOfABuild: what a scan hands to the build is what it looked
+// at: the top folders of the folders it walked, those of files whose rows
+// go after 30 days missing, wherever they are, or the whole root
+// (docs/06-library-and-metadata.md, section 5).
+func TestTheScopeOfABuild(t *testing.T) {
+	e := newEnv(t, "movies")
+	e.put("A Film (2001)/A Film (2001).mkv", 4000)
+	e.put("B Film (2002)/Extras/B Film (2002) - interview.mkv", 4000)
+	e.put("C Film (2003)/C Film (2003).mkv", 4000)
+	e.put("Lone (1999).mkv", 4000)
+	var scopes []db.Scope
+	e.s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		scopes = append(scopes, scope)
+		return nil
+	}
+	root := e.lib.Roots[0].ID
+	lib, _ := e.db.Library(context.Background(), e.lib.ID)
+	last := func() db.Scope { return scopes[len(scopes)-1] }
+
+	// A scan of the library builds all of it.
+	if _, err := e.s.ScanLibrary(context.Background(), lib); err != nil || last() != nil {
+		t.Fatalf("a scan of the library: %v, scope %v", err, last())
+	}
+	// Folders: their top folders, deeper ones too, and a lone file's name.
+	e.s.RequestFolders(root, []string{"B Film (2002)/Extras", "A Film (2001)"})
+	e.s.runAsked(context.Background())
+	if s := last(); len(s) != 1 || !slices.Equal(slices.Sorted(slices.Values(s[root])), []string{"A Film (2001)", "B Film (2002)"}) {
+		t.Fatalf("a scan of two folders: %v", s)
+	}
+	// The whole root asked for: all of it.
+	e.s.RequestFolders(root, []string{""})
+	e.s.runAsked(context.Background())
+	if s := last(); len(s) != 1 || s[root] != nil {
+		t.Fatalf("a scan of the root: %v", s)
+	}
+	// A file missing for more than 30 days goes with any scan of its root,
+	// and its top folder is built with the folders scanned.
+	os.Remove(filepath.Join(e.root, "C Film (2003)", "C Film (2003).mkv"))
+	e.s.RequestFolders(root, []string{"C Film (2003)"})
+	e.s.runAsked(context.Background())
+	e.now = e.now.Add(31 * 24 * time.Hour)
+	e.s.RequestFolders(root, []string{"A Film (2001)"})
+	e.s.runAsked(context.Background())
+	if s := last(); !slices.Equal(slices.Sorted(slices.Values(s[root])), []string{"A Film (2001)", "C Film (2003)"}) {
+		t.Fatalf("a scan that removes a file elsewhere: %v", s)
+	}
+	if _, ok := e.known()["C Film (2003)/C Film (2003).mkv"]; ok {
+		t.Fatal("the file missing for 31 days is still known")
 	}
 }

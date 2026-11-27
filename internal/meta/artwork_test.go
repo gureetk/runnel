@@ -53,7 +53,10 @@ func newEnv(t *testing.T, kind string) *env {
 	e.q = tasks.New(d, tasks.NewGate(), log)
 	e.q.Register(e.art.Kind())
 	e.s = scan.New(d, log)
-	e.s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, d, id, 1); return err }
+	e.s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		_, err := library.BuildIn(ctx, d, id, scope, 1)
+		return err
+	}
 	e.s.Images = e.art.Sync
 	return e
 }
@@ -245,5 +248,69 @@ func TestSweep(t *testing.T) {
 	}
 	if _, err := os.Stat(e.art.Path(stray, "poster", 342)); err == nil {
 		t.Error("a file that is no image's stayed")
+	}
+}
+
+// A scan of some folders gives their items their images, and leaves the
+// images of every other item as they are, unread: it reads only the items
+// of the top folders whose images it found.
+func TestImagesOfSomeFolders(t *testing.T) {
+	e := newEnv(t, "shows")
+	e.video("Glass Harbor (2020)/Season 01/Glass Harbor - S01E01.mkv")
+	e.image("Glass Harbor (2020)/poster.jpg", 600, 900)
+	e.video("Quiet Station (2012)/Season 01/Quiet Station - S01E01.mkv")
+	e.image("Quiet Station (2012)/poster.jpg", 640, 960) // another picture: two of one have one key
+	e.scan()
+	before := e.images()
+	if len(before) != 2 {
+		t.Fatalf("images %v", before)
+	}
+
+	e.image("Glass Harbor (2020)/Season 01/poster.jpg", 680, 1020)
+	e.image("Glass Harbor (2020)/Season 01/Glass Harbor - S01E01-thumb.jpg", 640, 360)
+	tm.Settle(e.t, e.root)
+	lib, _ := e.db.Library(context.Background(), e.lib.ID)
+	if err := e.s.ScanFolders(context.Background(), lib, map[int64][]string{lib.Roots[0].ID: {"Glass Harbor (2020)/Season 01"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.q.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	after := e.images()
+	if len(after) != 4 || after["Season 1/poster"].Key == "" || after["Episode 1/thumb"].Key == "" {
+		t.Fatalf("after a scan of the season's folder: %v", after)
+	}
+	for k, im := range before {
+		if after[k].Key != im.Key {
+			t.Errorf("%s changed: %+v, was %+v", k, after[k], im)
+		}
+	}
+	// The poster of the folder not scanned stays when its file goes: only
+	// what a scan looked at is removed.
+	os.Remove(filepath.Join(e.root, "Quiet Station (2012)", "poster.jpg"))
+	if err := e.s.ScanFolders(context.Background(), lib, map[int64][]string{lib.Roots[0].ID: {"Glass Harbor (2020)"}}); err != nil {
+		t.Fatal(err)
+	}
+	if im := e.images(); im["Quiet Station/poster"].Key == "" || len(im) != 4 {
+		t.Fatalf("a folder not scanned lost its image: %v", im)
+	}
+}
+
+// Two items with one picture, byte for byte, as a placeholder poster
+// copied into several folders is: both image tasks make the same key at
+// once, and both items get it, with no task failed.
+func TestOnePictureForTwoItems(t *testing.T) {
+	e := newEnv(t, "shows")
+	e.video("Glass Harbor (2020)/Season 01/Glass Harbor - S01E01.mkv")
+	e.image("Glass Harbor (2020)/poster.jpg", 600, 900)
+	e.video("Quiet Station (2012)/Season 01/Quiet Station - S01E01.mkv")
+	e.image("Quiet Station (2012)/poster.jpg", 600, 900)
+	e.scan()
+	im := e.images()
+	if im["Glass Harbor/poster"].Key == "" || im["Glass Harbor/poster"].Key != im["Quiet Station/poster"].Key {
+		t.Fatalf("images %v", im)
+	}
+	if n, _ := e.db.CountTasks(context.Background(), "image", "failed", "queued"); n != 0 {
+		t.Fatalf("%d image tasks failed or wait to be tried again", n)
 	}
 }

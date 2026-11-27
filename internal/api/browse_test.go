@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/probe"
 	"github.com/gureetk/runnel/internal/scan"
@@ -71,7 +72,10 @@ func newBrowseWith(t *testing.T, shows ...string) *browse {
 	s := scan.New(ts.db, logger)
 	q := tasks.New(ts.db, tasks.NewGate(), logger)
 	q.Register(scan.NewProbes(ts.db, probe.New(ffprobe, 2), logger).Kind())
-	s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, ts.db, id, 1); return err }
+	s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		_, err := library.BuildIn(ctx, ts.db, id, scope, 1)
+		return err
+	}
 	for i, root := range []string{b.films, b.shows} {
 		lib, err := ts.db.CreateLibrary(ctx, []string{"Films", "Shows"}[i], []string{"movies", "shows"}[i], "default", []string{root}, 1)
 		if err != nil {

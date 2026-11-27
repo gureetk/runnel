@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -143,9 +144,19 @@ type fields struct {
 // a renamed folder, a renamed file, a corrected parser or a change of
 // numbering keeps the ids that watch state hangs on.
 func (d *DB) BuildItems(ctx context.Context, libraryID int64, films []DesiredFilm, series []DesiredSeries, sortTitle func(string) string, now int64) (BuildResult, error) {
+	return d.BuildItemsIn(ctx, libraryID, nil, films, series, sortTitle, now)
+}
+
+// BuildItemsIn builds the part of a library that a scope holds, as
+// BuildItems builds all of it: films and series whose folders are in the
+// scope, with their seasons and episodes, are what the desired ones say,
+// and nothing else is read or changed. The desired items must be all those
+// that the scope's files make; an item in the scope that none of them is
+// goes. A nil scope is the whole library.
+func (d *DB) BuildItemsIn(ctx context.Context, libraryID int64, scope Scope, films []DesiredFilm, series []DesiredSeries, sortTitle func(string) string, now int64) (BuildResult, error) {
 	var res BuildResult
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
-		b := builder{ctx: ctx, tx: tx, lib: libraryID, sortTitle: sortTitle, now: now, res: &res}
+		b := builder{ctx: ctx, tx: tx, lib: libraryID, scope: scope, sortTitle: sortTitle, now: now, res: &res}
 		if err := b.load(); err != nil {
 			return err
 		}
@@ -161,6 +172,7 @@ type builder struct {
 	ctx       context.Context
 	tx        *Tx
 	lib       int64
+	scope     Scope // nil: the whole library
 	sortTitle func(string) string
 	now       int64
 	res       *BuildResult
@@ -217,10 +229,20 @@ func (b *builder) load() error {
 	b.written = map[int64]bool{}
 	b.touched = map[int64]bool{}
 
-	rows, err := b.tx.tx.QueryContext(b.ctx,
-		`SELECT id, type, root_id, path_key, parent_id, series_id, season_number, episode_number,
-		   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, episode_order
-		 FROM items WHERE library_id = ? AND type IN ('movie', 'series', 'season', 'episode')`, b.lib)
+	// A film or a series is in the scope by its folder, a season or an
+	// episode by its series'.
+	query := `SELECT i.id, i.type, i.root_id, i.path_key, i.parent_id, i.series_id, i.season_number, i.episode_number,
+		   i.episode_number_end, i.absolute_number, i.numbering, i.title, i.sort_title, i.year, i.added_at, i.episode_order
+		 FROM items i`
+	args := []any{b.lib}
+	where := ` WHERE i.library_id = ? AND i.type IN ('movie', 'series', 'season', 'episode')`
+	if b.scope != nil {
+		cond, more := b.scope.where("o.root_id", "o.path_key")
+		query += ` JOIN items o ON o.id = COALESCE(i.series_id, i.id)`
+		where += ` AND ` + cond
+		args = append(args, more...)
+	}
+	rows, err := b.tx.tx.QueryContext(b.ctx, query+where, args...)
 	if err != nil {
 		return err
 	}
@@ -256,8 +278,15 @@ func (b *builder) load() error {
 		}
 	}
 
-	links, err := b.tx.tx.QueryContext(b.ctx,
-		`SELECT l.item_id, l.file_id, l.label, l.part FROM item_files l JOIN items i ON i.id = l.item_id WHERE i.library_id = ?`, b.lib)
+	linkQuery, linkArgs := `SELECT l.item_id, l.file_id, l.label, l.part FROM item_files l JOIN items i ON i.id = l.item_id WHERE i.library_id = ?`, []any{b.lib}
+	if b.scope != nil {
+		ids, err := json.Marshal(slices.Sorted(maps.Keys(b.items)))
+		if err != nil {
+			return err
+		}
+		linkQuery, linkArgs = `SELECT item_id, file_id, label, part FROM item_files WHERE item_id IN (SELECT value FROM json_each(?))`, []any{string(ids)}
+	}
+	links, err := b.tx.tx.QueryContext(b.ctx, linkQuery, linkArgs...)
 	if err != nil {
 		return err
 	}
@@ -295,8 +324,13 @@ func (b *builder) load() error {
 		}
 	}
 
-	seen, err := b.tx.tx.QueryContext(b.ctx,
-		`SELECT f.id, f.first_seen_at FROM files f JOIN roots r ON r.id = f.root_id WHERE r.library_id = ?`, b.lib)
+	seenQuery, seenArgs := `SELECT f.id, f.first_seen_at FROM files f JOIN roots r ON r.id = f.root_id WHERE r.library_id = ?`, []any{b.lib}
+	if b.scope != nil {
+		cond, more := b.scope.where("f.root_id", "f.rel_path")
+		seenQuery += ` AND ` + cond
+		seenArgs = append(seenArgs, more...)
+	}
+	seen, err := b.tx.tx.QueryContext(b.ctx, seenQuery, seenArgs...)
 	if err != nil {
 		return err
 	}
@@ -779,12 +813,28 @@ type ItemSummary struct {
 // LibraryItems lists the items of a library in id order, with the files
 // that play each.
 func (d *DB) LibraryItems(ctx context.Context, libraryID int64) ([]ItemSummary, error) {
-	rows, err := d.r.QueryContext(ctx,
-		`SELECT i.id, i.type, i.root_id, i.path_key, i.parent_id, i.series_id, i.season_number, i.episode_number,
+	return d.LibraryItemsIn(ctx, libraryID, nil)
+}
+
+// LibraryItemsIn lists the items of a library that a scope holds, as
+// LibraryItems does: films and series by their folders, seasons and
+// episodes by their series'. A nil scope is the whole library; collections
+// are in no scope but that.
+func (d *DB) LibraryItemsIn(ctx context.Context, libraryID int64, scope Scope) ([]ItemSummary, error) {
+	query := `SELECT i.id, i.type, i.root_id, i.path_key, i.parent_id, i.series_id, i.season_number, i.episode_number,
 		   i.episode_number_end, i.absolute_number, i.numbering, i.title, i.sort_title, i.year, i.added_at, i.updated_seq,
 		   (SELECT group_concat(file_id || ':' || part || ':' || COALESCE(label, ''), char(31))
 		      FROM (SELECT file_id, part, label FROM item_files WHERE item_id = i.id ORDER BY file_id))
-		 FROM items i WHERE i.library_id = ? ORDER BY i.id`, libraryID)
+		 FROM items i`
+	args := []any{libraryID}
+	where := ` WHERE i.library_id = ?`
+	if scope != nil {
+		cond, more := scope.where("o.root_id", "o.path_key")
+		query += ` JOIN items o ON o.id = COALESCE(i.series_id, i.id)`
+		where += ` AND ` + cond
+		args = append(args, more...)
+	}
+	rows, err := d.r.QueryContext(ctx, query+where+` ORDER BY i.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("db: read items: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"sort"
@@ -26,16 +27,56 @@ const runningPast = 99
 // Build makes the items of a library what its files say. Running it twice
 // changes nothing the second time.
 func Build(ctx context.Context, d *db.DB, libraryID int64, now int64) (db.BuildResult, error) {
+	return BuildIn(ctx, d, libraryID, nil, now)
+}
+
+// BuildIn builds the part of a library that a scope holds: the films and
+// series of the top folders a scan looked at (docs/06-library-and-metadata.md,
+// section 5). A nil scope is the whole library. The scope is widened to the
+// top folders of the items that play its files now, so that an item whose
+// file moved in from another top folder is read with it and can follow
+// it, until nothing more is added. Titles never reach past a top folder of
+// a root, so what it builds is what a build of the whole library would
+// build there.
+func BuildIn(ctx context.Context, d *db.DB, libraryID int64, scope db.Scope, now int64) (db.BuildResult, error) {
 	lib, err := d.Library(ctx, libraryID)
 	if err != nil {
 		return db.BuildResult{}, err
 	}
-	files, err := d.LibraryFiles(ctx, libraryID)
+	if scope != nil {
+		scope = maps.Clone(scope)
+	}
+	files, err := d.LibraryFilesIn(ctx, libraryID, scope)
 	if err != nil {
 		return db.BuildResult{}, err
 	}
+	for scope != nil {
+		ids := make([]int64, len(files))
+		for i, f := range files {
+			ids[i] = f.ID
+		}
+		owners, err := d.ItemsPlaying(ctx, ids)
+		if err != nil {
+			return db.BuildResult{}, err
+		}
+		grown := false
+		for root, tops := range owners {
+			for _, t := range tops {
+				if !scope.Has(root, t) {
+					scope.Add(root, t)
+					grown = true
+				}
+			}
+		}
+		if !grown {
+			break
+		}
+		if files, err = d.LibraryFilesIn(ctx, libraryID, scope); err != nil {
+			return db.BuildResult{}, err
+		}
+	}
 	p := plan(lib, files)
-	return d.BuildItems(ctx, libraryID, p.films, p.series, parse.SortTitle, now)
+	return d.BuildItemsIn(ctx, libraryID, scope, p.films, p.series, parse.SortTitle, now)
 }
 
 // planned is what a library's files say its items should be.

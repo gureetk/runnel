@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5; and for builds of only what a scan looked at, in sections 2.2 and 5.
 
 ## 1. The pipeline
 
@@ -52,7 +52,7 @@ Peak memory was 13–15 MB. On spinning disks a cold walk costs about one seek p
 
 ### 2.2 When scans run
 
-- **On change.** The server watches every folder under each root with inotify. Events are collected for 5 seconds, then the affected folders are scanned. This keeps disks asleep when nothing changes.
+- **On change.** The server watches every folder under each root with inotify. Events are collected for 5 seconds, then the affected folders are scanned, and the items of their top folders built (section 5). This keeps disks asleep when nothing changes.
   - A scan of some folders walks them and what they hold, and compares only what is known under them, so a file outside them is neither missing nor moved. A file that moved between two of them keeps its id, as in a scan of the whole root. A folder that is gone holds nothing: what was known under it is missing, unless it moved.
   - Folders that a scan leaves out (2.3) are not watched, and events for the files it leaves out are dropped.
   - Reading a file reports nothing, so the server's own probes and streams set off no scan [checked in the development sandbox: Linux 6.18, ext4 with `relatime`].
@@ -250,7 +250,10 @@ Each folder's files are read as episodes, all together as section 4.3 reads a fo
 
 ## 5. Building items
 
-Run after every scan. It must be idempotent: a second run changes nothing and bumps no sequence, so a scan that changed nothing changes no item, and a newer parser is applied by the next scan without a file having changed.
+Run after every scan. It must be idempotent: a second run changes nothing and bumps no sequence, so a scan that changed nothing changes no item.
+
+- **What a build reads.** A scan of the whole library, and of a whole root, builds all of it. A scan of some folders, as a change on disk asks for (2.2), builds the items of their top folders: the folders at the top of the root that hold them, with everything below. Those are what the change can touch, since a film's or a series' folder is its top folder or lies inside it, grouping folders and all (4.9). A file at the top of the root is a top folder by itself. The build also reads the top folders of the files whose rows a scan removes after 30 days missing, wherever they are in the root, and those of the items that play its files now, until there are no more: a file that moved in from another top folder is still played by an item there, which can then follow it. Everything else is neither read nor written. What a build of some folders makes is what a build of the whole library makes there; the tests hold every partial build to that.
+- **A newer parser** is applied without a file having changed by the walk of every root at start and each night (2.2), which builds everything.
 
 - **Films.** One movie item per key. Its files are attached as versions or parts.
 - **Series.** One series item per series folder. Season items are created for the season numbers that occur, and a season goes when its last episode does. Episode items are created per episode key: `(series, season, episode)`, or `(series, absolute_number)` in a series numbered in one running count (below).
