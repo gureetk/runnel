@@ -161,6 +161,8 @@ About 2 to 4 weekends, then a long tail of odd cases, and perhaps one more weeke
 2. **Match what has no id**: search and score, the review list with why each item is on it, manual match and unmatch, leaving an item unmatched, the preview of a series match, then the anime profile: the offline title index, the Anime-Lists mapping, and mapping a running count to seasons.
 3. **Two more kinds of library** (D49): mixed libraries, where each folder is read as a film or a series before anything is matched; grouping folders, in films, shows and mixed libraries; home-video libraries, never matched, with a frame of each video for its picture and a view by folder; changing a films or a shows library to mixed; and the migration that rebuilds `libraries` and `items` for them. Their rules are written into `03-data-model.md`, `04-api.md` and `06-library-and-metadata.md` with the code.
 
+**Order.** The third part's mixed libraries and grouping folders are built first, with the migration, and its home videos last. Until each folder is read as the kind it is, a film in a library added as shows makes no item or a wrong one, and a library rooted a level above its titles makes one series of each category folder, so matching and the import's join by path would work on the wrong items. The parser's reading of a folder's own numbering comes first of all, since a mixed library decides by it which folders are series. The migration rebuilds `libraries` and `items` while they hold no metadata, and brings both kinds and the `video` type in one rebuild.
+
 **Exit:**
 
 1. Every item that came with an id has its title, overview and artwork.

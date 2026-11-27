@@ -206,3 +206,74 @@ func TestSortTitle(t *testing.T) {
 		}
 	}
 }
+
+// TestLeadingNumbers reads a folder whose videos begin their names with a
+// number before a dash (docs/06-library-and-metadata.md, section 4.3):
+// each such number alone would be a guess.
+func TestLeadingNumbers(t *testing.T) {
+	type want struct {
+		class   string
+		episode int
+	}
+	cases := []struct {
+		name string
+		rels []string
+		want []want
+	}{
+		{"every video has one, and no two are the same: trusted", []string{
+			"Paper Comets (2005)/Season 01/001 - Paper Comets - The Kite.mkv",
+			"Paper Comets (2005)/Season 01/002 - The Lost Lantern.mkv",
+			"Paper Comets (2005)/Season 01/003 - Help Find Their 2 Lost Bears.mkv",
+			"Paper Comets (2005)/Season 01/104 - Paper Comets - The Island.mkv",
+		}, []want{{Anchored, 1}, {Anchored, 2}, {Anchored, 3}, {Anchored, 104}}},
+		{"underscores, and a version suffix", []string{
+			"Paper Comets (2005)/Season 02/[Grp] 01_-_The Kite.mkv",
+			"Paper Comets (2005)/Season 02/02v2 - The Lost Lantern.mkv",
+		}, []want{{Anchored, 1}, {Anchored, 2}}},
+		{"one video has none: as before", []string{
+			"Paper Comets (2005)/Season 01/001 - The Kite.mkv",
+			"Paper Comets (2005)/Season 01/The Lost Lantern 2.mkv",
+		}, []want{{Guess, 1}, {Guess, 2}}},
+		{"two are the same: as before", []string{
+			"Paper Comets (2005)/Season 01/005 - The Kite.mkv",
+			"Paper Comets (2005)/Season 01/005 - The Kite 2.mkv",
+		}, []want{{Guess, 5}, {Guess, 2}}},
+		{"a name with a token keeps it; the others are trusted", []string{
+			"Paper Comets (2005)/Season 01/001 - Paper Comets - S01E01.mkv",
+			"Paper Comets (2005)/Season 01/002 - The Lost Lantern.mkv",
+		}, []want{{Explicit, 1}, {Anchored, 2}}},
+		{"a decimal follows the numbering and is not read", []string{
+			"Paper Comets (2005)/Season 01/008 - The Kite.mkv",
+			"Paper Comets (2005)/Season 01/08.5 - Recap.mkv",
+			"Paper Comets (2005)/Season 01/009 - The Lost Lantern.mkv",
+		}, []want{{Anchored, 8}, {None, 0}, {Anchored, 9}}},
+		{"the series' year is not a leading number", []string{
+			"Paper Comets (2005)/2005 - Paper Comets.mkv",
+		}, []want{{Guess, 2005}}},
+		{"each folder by itself", []string{
+			"Paper Comets (2005)/Season 01/001 - The Kite.mkv",
+			"Paper Comets (2005)/Season 02/001 - The Kite Returns.mkv",
+			"Paper Comets (2005)/Season 03/Paper Comets 4.mkv",
+		}, []want{{Anchored, 1}, {Anchored, 1}, {Anchored, 4}}},
+		{"no dash after the number: as before", []string{
+			"Paper Comets (2005)/Season 01/001 The Kite.mkv",
+			"Paper Comets (2005)/Season 01/002 The Lost Lantern.mkv",
+		}, []want{{Guess, 1}, {Guess, 2}}},
+	}
+	for _, c := range cases {
+		got := ParseEpisodes(c.rels)
+		for i, w := range c.want {
+			if got[i].Class != w.class || got[i].Episode != w.episode {
+				t.Errorf("%s: %s\n got %s %d, want %s %d", c.name, c.rels[i], got[i].Class, got[i].Episode, w.class, w.episode)
+			}
+		}
+	}
+	// A note about the folder stays; nothing else is added.
+	got := ParseEpisodes([]string{
+		"Paper Comets (2005)/Extra Disc/001 - The Kite.mkv",
+		"Paper Comets (2005)/Extra Disc/002 - The Lost Lantern.mkv",
+	})
+	if got[0].Class != Anchored || got[0].Note != `in the folder "Extra Disc", which is not a season folder` {
+		t.Errorf("%+v", got[0])
+	}
+}

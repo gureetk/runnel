@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/model"
 	"github.com/gureetk/runnel/internal/parse"
 )
 
@@ -299,5 +300,38 @@ func TestALargeBuildStampsInBatches(t *testing.T) {
 	}
 	if most > db.StampBatch || len(perSeq) != 3 || e.seq() != before+3 {
 		t.Fatalf("%d films over %d sequence values, at most %d on one; the sequence moved %d", n, len(perSeq), most, e.seq()-before)
+	}
+}
+
+// TestLeadingNumbersInAFolder builds a series whose files begin with a
+// number before a dash, and reports them anchored: their numbers are
+// trusted, and none of them is a guess.
+func TestLeadingNumbersInAFolder(t *testing.T) {
+	e := newEnv(t, "shows")
+	e.put("Paper Comets (2005)/Season 01/001 - Paper Comets - The Kite.mkv")
+	e.put("Paper Comets (2005)/Season 01/002 - The Lost Lantern.mkv")
+	e.put("Paper Comets (2005)/Season 01/003 - Help Find Their 2 Lost Bears.mkv")
+	e.scan()
+	series := byTitle(e.items(), "series", "Paper Comets")
+	if series == nil {
+		t.Fatal("no series")
+	}
+	_, eps := children(e.items(), series.ID)
+	for n := 1; n <= 3; n++ {
+		if episodeAt(eps, 1, n) == nil {
+			t.Errorf("no S01E%02d among %+v", n, eps)
+		}
+	}
+	if len(eps) != 3 {
+		t.Fatalf("episodes %+v", eps)
+	}
+	rows, err := Report(context.Background(), e.db, []model.Library{e.lib})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Class != "anchored" || r.Note != "" {
+			t.Errorf("%s: %s %q, want anchored with no note", r.Path, r.Class, r.Note)
+		}
 	}
 }
