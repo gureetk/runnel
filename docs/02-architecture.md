@@ -166,7 +166,7 @@ images/ab/<key>_<width>.jpg               artwork; a logo is .png
 sidecar/<file id>-<fingerprint>.mkv       audio-and-subtitle files, a capped cache
 subs/<file id>-<fingerprint>/             text subtitle tracks and attached fonts, extracted for browsers; in the same cap
 import/jellyfin-report.json               the report of the last import or dry run
-backup/                                   database copies made before migrations
+backup/                                   copies of the database made before a migration that rebuilds tables, the newest three (03 §7)
 ```
 
 The server makes the directory at its first start, readable by its own user only, if it is not there. Everything except the database can be deleted and will be rebuilt. `images/` also holds people's photos, which arrive only when a client first asks for one (D33).

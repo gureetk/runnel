@@ -36,6 +36,11 @@ type DB struct {
 	lock chan struct{}
 
 	closed bool // set by Close, read and written only while holding lock
+
+	// Backup is the copy of the database that opening it made in backup/
+	// before a migration that rebuilds a table, or "" when none was made.
+	Backup string
+	path   string
 }
 
 // ErrClosed is returned by a write after Close.
@@ -58,7 +63,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	w.SetConnMaxLifetime(0)
 	w.SetConnMaxIdleTime(0)
 
-	d := &DB{w: w, lock: make(chan struct{}, 1)}
+	d := &DB{w: w, lock: make(chan struct{}, 1), path: path}
 
 	if err := checkFTS5(ctx, w); err != nil {
 		w.Close()
