@@ -24,7 +24,7 @@ What depends on what:
 - Stage 6 needs stage 3, the TV design, and artwork from stage 4 to look right.
 - Stage 7 needs stage 3. How a browser is fed is designed (D39, D40).
 - Stage 8 starts with a spike (D43) and, for iOS, with O13. Stage 9 starts with the choice of a shell (O12).
-- The designs for every client exist and were reviewed (D29). No stage waits for design any more, except the iOS drawings before the iOS half of stage 8.
+- The designs for every client exist and were reviewed (D29). No stage waits for design any more, except the iOS drawings before the iOS half of stage 8, and the two kinds of library of D49 in the web design before stage 5.
 
 Why this order:
 
@@ -153,10 +153,11 @@ Build: the argument builder with its fallback ladder, sessions, relaying, killin
 
 ## 6. Stage 4: metadata
 
-About 2 to 4 weekends, then a long tail of odd cases. In two parts, because the Jellyfin import already supplies provider ids for most of the library:
+About 2 to 4 weekends, then a long tail of odd cases, and perhaps one more weekend for the third part (an estimate). In three parts. The first two are split because the Jellyfin import already supplies provider ids for most of the library:
 
 1. **Fetch by known id**: the metadata key as a setting with its check (D34), the TMDB client and the provider cache, fetching films, series and seasons, artwork downloads, refresh. With them: collections, and cast and crew with people, whose photos are fetched only when a client asks (D33). This is what makes a client look right, and it is the easy half.
 2. **Match what has no id**: search and score, the review list with why each item is on it, manual match and unmatch, leaving an item unmatched, the preview of a series match, then the anime profile: the offline title index, the Anime-Lists mapping, and mapping a running count to seasons.
+3. **Two more kinds of library** (D49): mixed libraries, where each folder is read as a film or a series before anything is matched; grouping folders, in films, shows and mixed libraries; home-video libraries, never matched, with a frame of each video for its picture and a view by folder; changing a films or a shows library to mixed; and the migration that rebuilds `libraries` and `items` for them. Their rules are written into `03-data-model.md`, `04-api.md` and `06-library-and-metadata.md` with the code.
 
 **Exit:**
 
@@ -168,8 +169,13 @@ About 2 to 4 weekends, then a long tail of odd cases. In two parts, because the 
 6. No provider request is made twice for the same thing: a second full refresh of an unchanged library makes none.
 7. A collection appears when a library holds two of its films, and goes when one is left.
 8. A film's and a series' credits arrive with its details. After the whole library is matched, no person's photo has been downloaded. The first request for one fetches it.
+9. In a mixed library built from generated files, every folder that holds a season folder, an `SxxEyy` token or two anchored episode numbers is a series, and every other folder is a film. The parse report names each film folder whose files look like episodes.
+10. Films and series inside grouping folders, nested or not, are built as if their folders were at the top of the root, in films, shows and mixed libraries. A grouping folder makes no item.
+11. A films library and a shows library changed to mixed keep every item that reads the same, with its id and watch state.
+12. In a home-video library every video file is one item, titled from its name, dated, with a frame for its picture, and listed by folder. A full refresh makes no provider request for it, and none of it is on the review list.
+13. A database made by stage 2 upgrades with its copy in `backup/` first, and keeps every user, token and watch state.
 
-Check first, when this stage is specified: how wide the provider's episode stills are. The TV's episode rows are 400 px wide (`11-design-review.md`, U5).
+Check first, when this stage is specified: how wide the provider's episode stills are. The TV's episode rows are 400 px wide (`11-design-review.md`, U5). For the third part: how Jellyfin's API lists home videos, for the import (D49).
 
 ## 7. Stage 5: the web interface
 
