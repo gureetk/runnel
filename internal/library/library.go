@@ -99,8 +99,9 @@ func plan(lib model.Library, files []db.LibraryFile) planned {
 		}
 		bySeries := map[key][]ep{}
 		var order []key
+		parsed := parseEpisodes(files)
 		for i, f := range files {
-			pe := parse.ParseEpisode(f.RelPath)
+			pe := parsed[i]
 			if pe.Class == parse.None {
 				continue
 			}
@@ -164,6 +165,32 @@ func plan(lib model.Library, files []db.LibraryFile) planned {
 	return p
 }
 
+// parseEpisodes reads the files of a library as episodes, each root's
+// files together, so that a folder's videos are read against each other
+// (parse.ParseEpisodes). The result is in the order of files.
+func parseEpisodes(files []db.LibraryFile) []parse.Episode {
+	byRoot := map[int64][]int{}
+	var roots []int64
+	for i, f := range files {
+		if _, ok := byRoot[f.RootID]; !ok {
+			roots = append(roots, f.RootID)
+		}
+		byRoot[f.RootID] = append(byRoot[f.RootID], i)
+	}
+	out := make([]parse.Episode, len(files))
+	for _, r := range roots {
+		at := byRoot[r]
+		rels := make([]string, len(at))
+		for i, n := range at {
+			rels[i] = files[n].RelPath
+		}
+		for i, e := range parse.ParseEpisodes(rels) {
+			out[at[i]] = e
+		}
+	}
+	return out
+}
+
 // versions tells the files of one item apart as versions and parts
 // (docs/06-library-and-metadata.md, section 4.4).
 func versions(files []db.LibraryFile, at []int, folder string) []db.DesiredFile {
@@ -211,13 +238,17 @@ func Report(ctx context.Context, d *db.DB, libs []model.Library) ([]ReportRow, e
 			return nil, fmt.Errorf("report: %w", err)
 		}
 		start := len(rows)
-		for _, f := range files {
+		var episodes []parse.Episode
+		if lib.Kind != "movies" {
+			episodes = parseEpisodes(files)
+		}
+		for i, f := range files {
 			r := ReportRow{FileID: f.ID, LibraryID: lib.ID, Path: f.RelPath}
 			if lib.Kind == "movies" {
 				p := parse.ParseFilm(f.RelPath)
 				r.Class, r.Title, r.Year = p.Class, p.Title, p.Year
 			} else {
-				p := parse.ParseEpisode(f.RelPath)
+				p := episodes[i]
 				r.Class, r.Title, r.Year, r.Note = p.Class, p.SeriesTitle, p.SeriesYear, p.Note
 				r.Season, r.Episode, r.EpisodeEnd = p.Season, p.Episode, p.EpisodeEnd
 			}
