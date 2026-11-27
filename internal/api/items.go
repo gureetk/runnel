@@ -69,7 +69,7 @@ type cardBody struct {
 	SeriesID    *int64                  `json:"series_id,omitempty"`
 	SeriesTitle string                  `json:"series_title,omitempty"`
 	Season      *int                    `json:"season,omitempty"`
-	Episode     *int                    `json:"episode,omitempty"`
+	Episode     *episodeNumber          `json:"episode,omitempty"`
 	EpisodeEnd  *int                    `json:"episode_end,omitempty"`
 	Absolute    *int                    `json:"absolute,omitempty"`
 	Available   bool                    `json:"available"`
@@ -123,7 +123,7 @@ func cardJSON(c db.Card, p personal) cardBody {
 	switch c.Type {
 	case "episode":
 		b.SeriesID, b.SeriesTitle = &c.SeriesID, c.SeriesTitle
-		b.Season, b.Episode = &c.Season, &c.Episode
+		b.Season, b.Episode = &c.Season, &episodeNumber{N: c.Episode, None: c.Unnumbered}
 		if c.EpisodeEnd != 0 {
 			b.EpisodeEnd = &c.EpisodeEnd
 		}
@@ -155,10 +155,11 @@ type titleCursor struct {
 }
 
 type episodeCursor struct {
-	Z bool  `json:"z"`
-	S int   `json:"s"`
-	E int   `json:"e"`
-	I int64 `json:"i"`
+	Z bool    `json:"z"`
+	S int     `json:"s"`
+	P float64 `json:"p"`
+	T string  `json:"t"`
+	I int64   `json:"i"`
 }
 
 type seasonCursor struct {
@@ -168,9 +169,10 @@ type seasonCursor struct {
 }
 
 type numberCursor struct {
-	E int   `json:"e"`
-	A int   `json:"a"`
-	I int64 `json:"i"`
+	P float64 `json:"p"`
+	A int     `json:"a"`
+	T string  `json:"t"`
+	I int64   `json:"i"`
 }
 
 // itemsParams are the parameters of GET /items (docs/04-api.md,
@@ -271,12 +273,14 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if first {
-				c = numberCursor{E: math.MinInt32}
+				c = numberCursor{P: math.Inf(-1)}
 			}
 			if err == nil {
-				cards, err = s.db.EpisodesOfSeason(r.Context(), id, db.NumberKey{Episode: c.E, Absolute: c.A, ID: c.I}, limit+1)
+				cards, err = s.db.EpisodesOfSeason(r.Context(), id, db.NumberKey{Place: c.P, Absolute: c.A, Sort: c.T, ID: c.I}, limit+1)
 			}
-			next = func(c db.Card) string { return encodeCursor(numberCursor{E: c.Episode, A: c.Absolute, I: c.ID}) }
+			next = func(c db.Card) string {
+				return encodeCursor(numberCursor{P: c.Place, A: c.Absolute, T: c.SortTitle, I: c.ID})
+			}
 		}
 	} else if v := q.Get("series"); v != "" {
 		id, perr := strconv.ParseInt(v, 10, 64)
@@ -299,14 +303,14 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if first {
-			c = episodeCursor{S: math.MinInt32, E: math.MinInt32}
+			c = episodeCursor{S: math.MinInt32, P: math.Inf(-1)}
 			total, err = s.db.CountEpisodes(r.Context(), id)
 		}
 		if err == nil {
-			cards, err = s.db.EpisodesOfSeries(r.Context(), id, db.EpisodeKey{Specials: c.Z, Season: c.S, Episode: c.E, ID: c.I}, limit+1)
+			cards, err = s.db.EpisodesOfSeries(r.Context(), id, db.EpisodeKey{Specials: c.Z, Season: c.S, Place: c.P, Sort: c.T, ID: c.I}, limit+1)
 		}
 		next = func(c db.Card) string {
-			return encodeCursor(episodeCursor{Z: c.Season == 0, S: c.Season, E: c.Episode, I: c.ID})
+			return encodeCursor(episodeCursor{Z: c.Season == 0, S: c.Season, P: c.Place, T: c.SortTitle, I: c.ID})
 		}
 	}
 	if err != nil {
@@ -543,7 +547,8 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 				body.Prev = &neighbourBody{ID: prev.ID}
 			}
 			if next.ID != 0 {
-				body.Next = &neighbourBody{ID: next.ID, Title: next.Title, Season: &next.Season, Episode: &next.Episode}
+				body.Next = &neighbourBody{ID: next.ID, Title: next.Title, Season: &next.Season,
+					Episode: &episodeNumber{N: next.Episode, None: next.Unnumbered}}
 			}
 		}
 	case "series":
@@ -560,7 +565,8 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if ok {
-			body.Resume = &resumeBody{ID: at.ID, Season: at.Season, Episode: at.Episode, PositionMS: at.PositionMS}
+			body.Resume = &resumeBody{ID: at.ID, Season: at.Season, Episode: episodeNumber{N: at.Episode, None: at.Unnumbered},
+				PositionMS: at.PositionMS}
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
@@ -598,15 +604,39 @@ type seasonBody struct {
 }
 
 type resumeBody struct {
-	ID         int64 `json:"id"`
-	Season     int   `json:"season"`
-	Episode    int   `json:"episode"`
-	PositionMS int64 `json:"position_ms"`
+	ID         int64         `json:"id"`
+	Season     int           `json:"season"`
+	Episode    episodeNumber `json:"episode"`
+	PositionMS int64         `json:"position_ms"`
 }
 
 type neighbourBody struct {
-	ID      int64  `json:"id"`
-	Title   string `json:"title,omitempty"`
-	Season  *int   `json:"season,omitempty"`
-	Episode *int   `json:"episode,omitempty"`
+	ID      int64          `json:"id"`
+	Title   string         `json:"title,omitempty"`
+	Season  *int           `json:"season,omitempty"`
+	Episode *episodeNumber `json:"episode,omitempty"`
+}
+
+// episodeNumber is an episode's number as JSON: the number, or null for an
+// episode without a number (D51).
+type episodeNumber struct {
+	N    int
+	None bool
+}
+
+func (e episodeNumber) MarshalJSON() ([]byte, error) {
+	if e.None {
+		return []byte("null"), nil
+	}
+	return strconv.AppendInt(nil, int64(e.N), 10), nil
+}
+
+func (e *episodeNumber) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*e = episodeNumber{None: true}
+		return nil
+	}
+	n, err := strconv.Atoi(string(b))
+	*e = episodeNumber{N: n}
+	return err
 }

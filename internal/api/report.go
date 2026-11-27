@@ -79,9 +79,9 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		}
 		libs = []model.Library{lib}
 	}
-	// By default the files that need a look: guess and none, and the files
-	// of the other classes that have a note.
-	listed, withNote := []string{parse.Guess, parse.None}, true
+	// By default the files that need a look: guess, unnumbered and none,
+	// and the files of the other classes that have a note.
+	listed, withNote := []string{parse.Guess, parse.Unnumbered, parse.None}, true
 	switch c := q.Get("class"); {
 	case c == "all":
 		listed = parse.Classes
@@ -138,7 +138,9 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		lib.Counts[row.Class]++
 		// A note on a file in none says why it makes no item. A noted file
 		// is one that makes an item and still has something to look at.
-		noted := row.Note != "" && row.Class != parse.None
+		// A file in none or unnumbered is listed by its class; its reason
+		// does not make it noted.
+		noted := row.Note != "" && row.Class != parse.None && row.Class != parse.Unnumbered
 		if noted {
 			lib.Noted++
 		}
@@ -151,7 +153,7 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		f := reportFile{FileID: row.FileID, LibraryID: row.LibraryID, Path: row.Path, Class: row.Class,
 			Title: row.Title, Year: intOrNil(row.Year, row.Year != 0), Note: row.Note}
 		if lib.Kind == "shows" && row.Class != parse.None {
-			f.Season, f.Episode = intOrNil(row.Season, true), intOrNil(row.Episode, true)
+			f.Season, f.Episode = intOrNil(row.Season, true), intOrNil(row.Episode, row.Class != parse.Unnumbered)
 			f.EpisodeEnd = intOrNil(row.EpisodeEnd, row.EpisodeEnd != 0)
 		}
 		body.Files = append(body.Files, f)

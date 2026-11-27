@@ -199,8 +199,8 @@ func TestTheBuiltBinary(t *testing.T) {
 		t.Fatalf("report: %d %q", status, errOut)
 	}
 	for _, want := range []string{
-		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, none 0. With a note 0. ffprobe could not read 0.\n",
-		"Library 2, Shows (shows): 2 files. explicit 2, anchored 0, dash 0, guess 0, none 0. With a note 1. ffprobe could not read 0.\n",
+		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, unnumbered 0, none 0. With a note 0. ffprobe could not read 0.\n",
+		"Library 2, Shows (shows): 2 files. explicit 2, anchored 0, dash 0, guess 0, unnumbered 0, none 0. With a note 1. ffprobe could not read 0.\n",
 		// A walk goes in name order, and S02 sorts before Season 01.
 		"explicit\t3\tHarbor Lantern (2021) S02E01\tHarbor Lantern (2021)/S02/Harbor Lantern - S02E01.mkv\tin the folder \"S02\", which is not a season folder\n",
 		"explicit\t4\tHarbor Lantern (2021) S01E01\tHarbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv\n",

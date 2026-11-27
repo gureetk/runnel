@@ -75,7 +75,13 @@ type DesiredEpisode struct {
 	// one running count, and then the episode's key. Season and Episode say
 	// where it is shown until the count is mapped to the provider's seasons.
 	Absolute int
-	Files    []DesiredFile
+	// Unnumbered is an episode without a number (D51), made of its one
+	// file, which is its key. Order is the decimal its name gives, or 0;
+	// Title is its name.
+	Unnumbered bool
+	Order      float64
+	Title      string
+	Files      []DesiredFile
 }
 
 // BuildResult counts what a build changed.
@@ -95,6 +101,8 @@ type existing struct {
 	parentID, seriesID   int64
 	season, episode, end int
 	absolute             int
+	unnumbered           bool    // an episode without a number
+	order                float64 // its episode_order, or 0
 	numbering            string
 	title, sort          string
 	year                 int
@@ -112,7 +120,9 @@ type fields struct {
 	parentID, seriesID   int64 // seasons and episodes
 	season, episode, end int
 	absolute             int
-	numbering            string // series
+	unnumbered           bool    // an episode without a number
+	order                float64 // its episode_order, or 0
+	numbering            string  // series
 	title, sort          string
 	year                 int
 	addedAt              int64
@@ -176,6 +186,27 @@ func episodeKey(season, episode, absolute int) string {
 	return "s:" + strconv.Itoa(season) + ":" + strconv.Itoa(episode)
 }
 
+// unnumberedKey is the key of an episode without a number: the file it is
+// made of (D51).
+func unnumberedKey(file int64) string { return "u:" + strconv.FormatInt(file, 10) }
+
+// keyOfDesired is a desired episode's key.
+func keyOfDesired(ep DesiredEpisode) string {
+	if ep.Unnumbered && len(ep.Files) > 0 {
+		return unnumberedKey(ep.Files[0].ID)
+	}
+	return episodeKey(ep.Season, ep.Episode, ep.Absolute)
+}
+
+// keyOfExisting is an existing episode's key; one without a number is
+// keyed by the lowest file it plays.
+func keyOfExisting(e *existing) string {
+	if e.unnumbered {
+		return unnumberedKey(e.lowest)
+	}
+	return episodeKey(e.season, e.episode, e.absolute)
+}
+
 func (b *builder) load() error {
 	b.items = map[int64]*existing{}
 	b.byKey = map[string]*existing{}
@@ -188,7 +219,7 @@ func (b *builder) load() error {
 
 	rows, err := b.tx.tx.QueryContext(b.ctx,
 		`SELECT id, type, root_id, path_key, parent_id, series_id, season_number, episode_number,
-		   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at
+		   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, episode_order
 		 FROM items WHERE library_id = ? AND type IN ('movie', 'series', 'season', 'episode')`, b.lib)
 	if err != nil {
 		return err
@@ -197,14 +228,16 @@ func (b *builder) load() error {
 		e := existing{links: map[int64]link{}}
 		var root, parent, series, season, episode, end, absolute, year sql.NullInt64
 		var key, numbering sql.NullString
+		var order sql.NullFloat64
 		if err := rows.Scan(&e.id, &e.typ, &root, &key, &parent, &series, &season, &episode, &end, &absolute,
-			&numbering, &e.title, &e.sort, &year, &e.addedAt); err != nil {
+			&numbering, &e.title, &e.sort, &year, &e.addedAt, &order); err != nil {
 			rows.Close()
 			return err
 		}
 		e.rootID, e.key, e.parentID, e.seriesID = root.Int64, key.String, parent.Int64, series.Int64
 		e.season, e.episode, e.end, e.absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
 		e.numbering, e.year = numbering.String, int(year.Int64)
+		e.unnumbered, e.order = e.typ == "episode" && !episode.Valid, order.Float64
 		b.items[e.id] = &e
 	}
 	rows.Close()
@@ -220,11 +253,6 @@ func (b *builder) load() error {
 				b.seasons[e.seriesID] = map[int]*existing{}
 			}
 			b.seasons[e.seriesID][e.season] = e
-		case "episode":
-			if b.episodes[e.seriesID] == nil {
-				b.episodes[e.seriesID] = map[string]*existing{}
-			}
-			b.episodes[e.seriesID][episodeKey(e.season, e.episode, e.absolute)] = e
 		}
 	}
 
@@ -256,6 +284,14 @@ func (b *builder) load() error {
 	for _, e := range b.items {
 		if s := b.items[e.seriesID]; e.typ == "episode" && s != nil && e.lowest != 0 && (s.lowest == 0 || e.lowest < s.lowest) {
 			s.lowest = e.lowest
+		}
+		// Episodes are keyed once their files are known: one without a
+		// number by its file.
+		if e.typ == "episode" {
+			if b.episodes[e.seriesID] == nil {
+				b.episodes[e.seriesID] = map[string]*existing{}
+			}
+			b.episodes[e.seriesID][keyOfExisting(e)] = e
 		}
 	}
 
@@ -369,12 +405,12 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 	for i, s := range series {
 		if si := seriesItems[i]; si != nil {
 			for _, ep := range s.Episodes {
-				wantedEpisode[strconv.FormatInt(si.id, 10)+"|"+episodeKey(ep.Season, ep.Episode, ep.Absolute)] = true
+				wantedEpisode[strconv.FormatInt(si.id, 10)+"|"+keyOfDesired(ep)] = true
 			}
 		}
 	}
 	free := func(o *existing) bool {
-		return !wantedEpisode[strconv.FormatInt(o.seriesID, 10)+"|"+episodeKey(o.season, o.episode, o.absolute)]
+		return !wantedEpisode[strconv.FormatInt(o.seriesID, 10)+"|"+keyOfExisting(o)]
 	}
 	episodeItems := make([][]*existing, len(series))
 	for i, s := range series {
@@ -382,7 +418,7 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 		for j, ep := range s.Episodes {
 			var e *existing
 			if si := seriesItems[i]; si != nil {
-				if e = b.episodes[si.id][episodeKey(ep.Season, ep.Episode, ep.Absolute)]; e != nil && e.matched {
+				if e = b.episodes[si.id][keyOfDesired(ep)]; e != nil && e.matched {
 					e = nil
 				}
 			}
@@ -455,7 +491,8 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 			}
 			title := episodeTitle(ep)
 			if _, err := b.put(e, fields{typ: "episode", seriesID: seriesID, parentID: parent, season: ep.Season,
-				episode: ep.Episode, end: ep.EpisodeEnd, absolute: ep.Absolute, title: title, sort: b.sortTitle(title),
+				episode: ep.Episode, end: ep.EpisodeEnd, absolute: ep.Absolute, unnumbered: ep.Unnumbered, order: ep.Order,
+				title: title, sort: b.sortTitle(title),
 				addedAt: b.addedAt(ep.Files), links: linksOf(ep.Files)}); err != nil {
 				return err
 			}
@@ -496,6 +533,9 @@ func seasonTitle(n int) string {
 }
 
 func episodeTitle(ep DesiredEpisode) string {
+	if ep.Unnumbered {
+		return ep.Title
+	}
 	if ep.EpisodeEnd > ep.Episode {
 		return "Episodes " + strconv.Itoa(ep.Episode) + "–" + strconv.Itoa(ep.EpisodeEnd)
 	}
@@ -535,11 +575,11 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 		}
 		if _, err := b.tx.tx.ExecContext(b.ctx,
 			`INSERT INTO items (id, library_id, type, root_id, path_key, parent_id, series_id, season_number, episode_number,
-			   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, updated_seq)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			   episode_number_end, absolute_number, numbering, title, sort_title, year, added_at, updated_seq, episode_order)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, b.lib, f.typ, nullInt(f.rootID), nullString(f.key), nullInt(f.parentID), nullInt(f.seriesID),
 			seasonOf(f), episodeOf(f), nullInt(int64(f.end)), nullInt(int64(f.absolute)), nullString(f.numbering),
-			f.title, f.sort, nullInt(int64(f.year)), f.addedAt, seq); err != nil {
+			f.title, f.sort, nullInt(int64(f.year)), f.addedAt, seq, orderOf(f)); err != nil {
 			return 0, err
 		}
 		if err := b.index(f.typ, id, f.title, false); err != nil {
@@ -555,6 +595,7 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 
 	same := e.typ == f.typ && e.rootID == f.rootID && e.key == f.key && e.parentID == f.parentID && e.seriesID == f.seriesID &&
 		e.season == f.season && e.episode == f.episode && e.end == f.end && e.absolute == f.absolute &&
+		e.unnumbered == f.unnumbered && e.order == f.order &&
 		e.numbering == f.numbering && e.title == f.title && e.sort == f.sort && e.year == f.year &&
 		e.addedAt == f.addedAt && maps.Equal(e.links, f.links)
 	if same {
@@ -567,10 +608,10 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 	if _, err := b.tx.tx.ExecContext(b.ctx,
 		`UPDATE items SET root_id = ?, path_key = ?, parent_id = ?, series_id = ?, season_number = ?, episode_number = ?,
 		   episode_number_end = ?, absolute_number = ?, numbering = ?, title = ?, sort_title = ?, year = ?,
-		   added_at = ?, updated_seq = ? WHERE id = ?`,
+		   added_at = ?, updated_seq = ?, episode_order = ? WHERE id = ?`,
 		nullInt(f.rootID), nullString(f.key), nullInt(f.parentID), nullInt(f.seriesID), seasonOf(f), episodeOf(f),
 		nullInt(int64(f.end)), nullInt(int64(f.absolute)), nullString(f.numbering), f.title, f.sort,
-		nullInt(int64(f.year)), f.addedAt, seq, e.id); err != nil {
+		nullInt(int64(f.year)), f.addedAt, seq, orderOf(f), e.id); err != nil {
 		return 0, err
 	}
 	if e.title != f.title {
@@ -596,10 +637,19 @@ func seasonOf(f fields) any {
 }
 
 func episodeOf(f fields) any {
-	if f.typ != "episode" {
+	if f.typ != "episode" || f.unnumbered {
 		return nil
 	}
 	return f.episode
+}
+
+// orderOf is an episode without a number's episode_order: its decimal, or
+// NULL (D51).
+func orderOf(f fields) any {
+	if !f.unnumbered || f.order == 0 {
+		return nil
+	}
+	return f.order
 }
 
 // index keeps the search table in step with an item's title

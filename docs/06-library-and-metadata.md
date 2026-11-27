@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering (section 4.3).
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1.
 
 ## 1. The pipeline
 
@@ -145,13 +145,17 @@ The rule, in order:
    - Where a number follows ` - ` after the title and differs from that first number, the first one is not trusted. If it is the season folder's own number, as `2` in `[Group] Series 2 - 05` inside `Season 02`, the number after the dash is the episode, still **anchored**. Otherwise the number after the dash is taken, class **guess**, and the report says that the two differ.
 4. Otherwise accept a number that follows ` - ` (or `_-_`, the dash between underscores), perhaps after `E` or `EP`. Class **dash**.
 5. Otherwise take the last number that stands alone. Class **guess**. The file goes to the review list.
-6. Otherwise there is no number: class **none**. The file makes no item, and is listed in the report.
+6. Otherwise there is no number: class **unnumbered**. The file is an episode without a number (D51, below), and is listed in the report.
+
+A file makes no item, class **none**, only where it has no series: at the top of a shows library, or in a series folder whose name leaves no title.
 
 An episode number has 1 to 4 digits.
 
 **A folder's own numbering.** The steps above read one name at a time. A folder's videos are then read together: where every video in a folder begins its name, once bracketed groups are gone, with a number before a dash between spaces or underscores (`017 - The Kite`, `017_-_The Kite`), perhaps after `E` or `EP` and with a version suffix as in step 3, and no two of those numbers are the same, that number is the episode's, class **anchored**, for each name the steps above would only guess. Alone, `017 - Paper Comets - The Kite.mkv` is a guess at 17, and `003 - Help Find Their 2 Lost Bears.mkv` a wrong guess at 2. A name that gives a token, the series' title and a number, or a number after a dash keeps what it gives. A name that begins with a decimal, `08.5 - Recap.mkv`, follows the folder's numbering, takes no part in the comparison, and keeps what its name gives (below). The series' year at the start of a name, `2005 - Paper Comets.mkv` in `Paper Comets (2005)`, is not such a number. Each folder is read by itself, and the folder's notes stay.
 
-**Decimals are not read.** Where the number a step takes is part of a decimal, such as `12.5`, the file is in the none class with a note. Read as 12, in any class, it would join episode 12 as a second file. A dot between two numbers in a name whose words are joined by dots is not a decimal point: `quiet.station.12.5` gives 12.
+**Decimals are not read as numbers.** Where the number a step takes is part of a decimal, such as `12.5`, the file is in the unnumbered class with a note, and the decimal places it right after episode 12 (D51). Read as 12, in any class, it would join episode 12 as a second file. A dot between two numbers in a name whose words are joined by dots is not a decimal point: `quiet.station.12.5` gives 12.
+
+**Episodes without a number** (D51). A file of the unnumbered class is an episode by itself: its file is its key, so it has no versions or parts, and it follows its file through a rename as any episode does (section 5). It sits in the season its folder names. Without a season folder, a decimal stays in season 1 with the numbered episodes it falls between, and any other goes among the specials. It is titled from its name, with bracketed groups dropped and underscores read as spaces: `[Grp]Copper Tower_-_08.5_(1080p).mkv` is `Copper Tower - 08.5`, and `[Grp] Quiet Station S1 - S02.mkv` in `Season 00` is a special titled `Quiet Station S1 - S02`. Which files are extras stays section 4.6's lists, so an opening without credits in a season folder is such an episode.
 
 Comparison is on a normalised form: lower case, every run of other characters turned into one space. So `Unit No. 8` in a folder name matches `Unit No 8` in a file name.
 
@@ -167,7 +171,7 @@ All six errors were in the **guess** class, the one that goes to review. The nam
 
 The test table, `internal/parse/testdata/names.tsv`, holds every form here and every shape found to parse wrongly. It grows from real names, each added with its title replaced by an invented one of the same shape. A folder's own numbering reads several names together, and has a test of its own beside the table.
 
-Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brackets, and decimals, which are in the none class (above).
+Not handled in version 1: `1x02`, dates as episode numbers and numbers inside brackets, which give no number, and decimals: such files are episodes without a number (above).
 
 ### 4.4 Versions and parts
 
@@ -224,7 +228,8 @@ Run after every scan. It must be idempotent: a second run changes nothing and bu
 
 - **Films.** One movie item per key. Its files are attached as versions or parts.
 - **Series.** One series item per series folder. Season items are created for the season numbers that occur, and a season goes when its last episode does. Episode items are created per episode key: `(series, season, episode)`, or `(series, absolute_number)` in a series numbered in one running count (below).
-- **Titles before metadata.** A film or series takes its title and year from the folder name. An episode is titled `Episode N` until metadata arrives, and `Episodes N–M` when its file holds several. A season is titled `Season N`, and season 0 `Specials`.
+- **Titles before metadata.** A film or series takes its title and year from the folder name. An episode is titled `Episode N` until metadata arrives, and `Episodes N–M` when its file holds several. An episode without a number keeps the title from its file's name (section 4.3). A season is titled `Season N`, and season 0 `Specials`.
+- **Episodes without a number** (D51) have no `episode_number`. In their season they come after the episode their decimal follows, `episode_order` holding the decimal, or else after the numbered episodes, by title. They are never matched to a provider's episode by number, and they are on the review list. Next up and a series' resume step over them, as they step over specials, and the season's list and `prev` and `next` take them in their place (`04-api.md`, sections 2.2 and 4.2). A running count does not count them.
 - **A renamed folder keeps its item.** When none of an item's files parse to its own key any more, and they now parse to a key that no item has, the item takes the new key and keeps its id: a folder renamed to fix a year keeps its watch state. This needs the files to have kept their ids, which takes a fingerprint (section 2.1).
 - **An episode follows its files.** An episode keeps its id while its key is wanted. When its key is not wanted any more, it goes with its files to the key they make now, if no episode has that key: a file renamed to correct its number, or to another series' folder, keeps its episode and the watch state on it, and so does a series that changes its numbering. When an episode's files now make several episodes, it goes with the one that holds its oldest file, the one with the lowest id. A series follows its episodes' files in the same way, and a film its files. Where the new key already has an episode, the files join it as versions, and the episode they left goes when no file makes it. Like a renamed folder, this needs the files to have kept their ids.
 - **Provisional numbers.** Until a running count is mapped to the provider's seasons (6.5), its episodes are shown in season 1, or in their season folder's season, numbered by their running number. The mapping changes their season and episode numbers and not their key, so they keep their ids. A file with an `SxxEyy` token, or in the specials' folder, keeps its season and number in a running count, and does not decide whether the series has one.
@@ -243,7 +248,7 @@ For a film or a series, stop at the first step that gives an answer:
 
 1. **A manual match** in `overrides` for this folder. A row that names the provider `none` means the folder was left unmatched on purpose: stop here, and the item is `ignored`.
 2. **The one-time import** from Jellyfin (section 7), which seeds provider ids by path.
-3. **Ids in the name** (4.5), or in an `.nfo` file in the folder if there is one.
+3. **Ids in the name** (4.5). `.nfo` files are not read: the scanner does not see them, and no stage builds it.
 4. **Search and score** (6.2).
 
 Episodes are never searched for. They are looked up by number inside their series' match.

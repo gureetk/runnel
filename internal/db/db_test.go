@@ -121,9 +121,10 @@ func TestMigrationsMatchTheDocument(t *testing.T) {
 // to the schema is a new migration, whose hash is added here in the pull
 // request that adds it (docs/03-data-model.md, section 7).
 var frozen = map[string]string{
-	"0001_init.sql":       "5010988cbfe70f4bc90dfdb9a0ad6fb61a804a1be5112e2f815251fa62211399",
-	"0002_images_key.sql": "30619ab3332855b014e2b53a973894525eb1067db27df05c71dab7b137ac545b",
-	"0003_kinds.sql":      "1a95e78d74b6632c9dc2ed4df474f52a1c66d12cc2e52a71da4f3866f0496340",
+	"0001_init.sql":          "5010988cbfe70f4bc90dfdb9a0ad6fb61a804a1be5112e2f815251fa62211399",
+	"0002_images_key.sql":    "30619ab3332855b014e2b53a973894525eb1067db27df05c71dab7b137ac545b",
+	"0003_kinds.sql":         "1a95e78d74b6632c9dc2ed4df474f52a1c66d12cc2e52a71da4f3866f0496340",
+	"0004_episode_order.sql": "fabac24f706b4f58f656aa4231570d6fb8c1314dae0852bce0743d0eba654602",
 }
 
 func TestMigrationsAreFrozen(t *testing.T) {
@@ -150,7 +151,7 @@ func TestSchema(t *testing.T) {
 	ctx := context.Background()
 
 	v, err := d.schemaVersion(ctx)
-	if err != nil || v != 3 || SchemaVersion() != 3 {
+	if err != nil || v != 4 || SchemaVersion() != 4 {
 		t.Fatalf("schema version %d (%v), embedded %d", v, err, SchemaVersion())
 	}
 
@@ -170,7 +171,7 @@ func TestSchema(t *testing.T) {
 		t.Fatalf("tables:\n got %s\nwant %s", got, want)
 	}
 
-	for key, want := range map[string]string{"schema_version": "3", "seq": "0", "tombstone_floor": "0"} {
+	for key, want := range map[string]string{"schema_version": "4", "seq": "0", "tombstone_floor": "0"} {
 		var got string
 		if err := d.r.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&got); err != nil || got != want {
 			t.Errorf("meta %s = %q (%v), want %q", key, got, err, want)
@@ -546,7 +547,7 @@ func TestAnOlderDatabaseIsMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d2.Close()
-	if v, err := d2.schemaVersion(ctx); err != nil || v != 3 {
+	if v, err := d2.schemaVersion(ctx); err != nil || v != 4 {
 		t.Fatalf("schema version %d (%v)", v, err)
 	}
 	var plan string

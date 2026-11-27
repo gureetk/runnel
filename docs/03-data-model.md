@@ -453,6 +453,12 @@ CREATE INDEX items_seq    ON items(updated_seq);
 CREATE INDEX items_collection ON items(collection_id) WHERE collection_id IS NOT NULL;
 ```
 
+Migration `0004_episode_order.sql`, for D51's episodes without a number. Such an episode has no `episode_number`; `episode_order` places it in its season: a name that gives a decimal, such as `08.5`, stores the decimal and comes after episode 8; any other is NULL and comes after the season's numbered episodes, by title (section 4). A column without a constraint is added in place, so the migration rebuilds nothing:
+
+```sql
+ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: a decimal's value, such as 8.5; NULL otherwise
+```
+
 ## 4. Rules that keep it consistent
 
 **Files**
@@ -483,6 +489,7 @@ CREATE INDEX items_collection ON items(collection_id) WHERE collection_id IS NOT
 - `numbering = 'absolute'` on a series means its files carry one running count. `absolute_number` is that count, and the episode's key. `season_number` and `episode_number` then hold the provider's numbers once they are mapped, and until then the season the file is in, or 1, and the running number (`06-library-and-metadata.md`, section 5).
 - An episode's key is `(series, season_number, episode_number)`, or `(series, absolute_number)` where that is set. Building keeps an episode's id while its key is wanted, and otherwise lets it follow its files (`06-library-and-metadata.md`, section 5).
 - A file that holds episodes 1 and 2 is one episode item with `episode_number = 1` and `episode_number_end = 2`.
+- An episode without a number (D51) has `episode_number` NULL, and its key is its one file. Its `episode_order` is the decimal its name gives, such as 8.5, or NULL. An episode's place in its season, which lists, cursors and `prev` and `next` order by, is `COALESCE(episode_number, episode_order, 1e9)`, then `sort_title`: after the number its decimal follows, or after every number by title. Next up and a series' resume (section 6) take only episodes with a number.
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
 - An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
@@ -637,14 +644,14 @@ WITH last_played AS (
          ROW_NUMBER() OVER (PARTITION BY e.series_id
                             ORDER BY us.last_played_at DESC, e.season_number DESC, e.episode_number DESC) AS r
   FROM user_state us JOIN items e ON e.id = us.item_id
-  WHERE us.user_id = :user AND us.played = 1 AND e.type = 'episode'
+  WHERE us.user_id = :user AND us.played = 1 AND e.type = 'episode' AND e.episode_number IS NOT NULL
 )
 SELECT nx.id, nx.series_id, nx.season_number, nx.episode_number, nx.title, lp.t AS series_last_played_at
 FROM last_played lp
 JOIN items nx ON nx.id = (
   SELECT c.id FROM items c
   WHERE c.series_id = lp.series_id AND c.type = 'episode' AND c.season_number > 0
-    AND (c.season_number, c.episode_number) > (lp.s, lp.n)
+    AND c.episode_number IS NOT NULL AND (c.season_number, c.episode_number) > (lp.s, lp.n)
     AND NOT EXISTS (SELECT 1 FROM user_state u
                     WHERE u.user_id = :user AND u.item_id = c.id AND (u.played = 1 OR u.position_ms > 0))
   ORDER BY c.season_number, c.episode_number
@@ -654,7 +661,7 @@ ORDER BY lp.t DESC
 LIMIT :limit;
 ```
 
-An episode that is already started is left out here because Continue watching shows it. Episodes marked played together share one `last_played_at`, so the latest of them in order counts as the one played most recently. A series' `resume` (`04-api.md`, section 2.2) asks the same question for one series.
+An episode that is already started is left out here because Continue watching shows it. An episode without a number (D51) is neither where it counts from nor what it offers. Episodes marked played together share one `last_played_at`, so the latest of them in order counts as the one played most recently. A series' `resume` (`04-api.md`, section 2.2) asks the same question for one series.
 
 **Recently added**: films as they are, episodes folded into their series. `:since` is the start of the day 30 days back (P7), so that Home's `ETag` can carry it.
 

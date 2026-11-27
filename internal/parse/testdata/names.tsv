@@ -67,8 +67,8 @@ episode	Winter Kitchen (2019)/Season 02/[Grp] Winter Kitchen 2 - 16 [1080p].mkv	
 episode	Winter Kitchen (2019)/Season 01/[Grp] Winter Kitchen 3 - 05.mkv	guess	Winter Kitchen	2019	1	5	0
 episode	Winter Kitchen (2019)/[Grp] Winter Kitchen 2 - 05.mkv	guess	Winter Kitchen	2019	1	5	0
 # A decimal is not read, and does not join the episode of its whole part.
-episode	Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv	none	Quiet Station	2018	1	0	0
-episode	Quiet Station (2018)/Season 01/Other Name - 12.5.mkv	none	Quiet Station	2018	1	0	0
+episode	Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv	unnumbered	Quiet Station	2018	1	0	0
+episode	Quiet Station (2018)/Season 01/Other Name - 12.5.mkv	unnumbered	Quiet Station	2018	1	0	0
 episode	Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12 [1080p].mkv	anchored	Quiet Station	2018	1	12	0
 # Dots between the words are not decimal points.
 episode	Quiet Station (2018)/Season 01/quiet.station.12.5.mkv	anchored	Quiet Station	2018	1	12	0
@@ -98,10 +98,16 @@ episode	Glass Harbor (2020)/Season 01/Lantern Story - EP05.mkv	dash	Glass Harbor
 episode	Glass Harbor (2020)/Season 01/E07.mkv	guess	Glass Harbor	2020	1	7	0
 # Nothing to place, or no number: the none class.
 episode	Harbor Lantern - S01E05.mkv	none		0	-	-	-
-episode	Harbor Lantern (2021)/Season 01/Harbor Lantern.mkv	none	Harbor Lantern	2021	1	0	0
-episode	Harbor Lantern (2021)/Season 01/Pilot.mkv	none	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern.mkv	unnumbered	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Pilot.mkv	unnumbered	Harbor Lantern	2021	1	0	0
 episode	[Group]/Season 01/Something - S01E01.mkv	none		0	-	-	-
 # Not handled in version 1 (docs/06-library-and-metadata.md, section 4.3):
 # 1x02, dates, numbers inside brackets. They fall to a lower class.
-episode	Harbor Lantern (2021)/Season 01/Harbor Lantern 1x02.mkv	none	Harbor Lantern	2021	1	0	0
-episode	Harbor Lantern (2021)/Season 01/Other Title [05].mkv	none	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Harbor Lantern 1x02.mkv	unnumbered	Harbor Lantern	2021	1	0	0
+episode	Harbor Lantern (2021)/Season 01/Other Title [05].mkv	unnumbered	Harbor Lantern	2021	1	0	0
+# Episodes without a number (D51): in a series' folder, a name with no number or only a decimal.
+episode	Quiet Station (2012)/Season 00/[Grp] Quiet Station S1 - S02.mkv	unnumbered	Quiet Station	2012	0	0	0
+episode	Copper Tower (2007)/Season 01/[Grp]Copper Tower_-_08.5_(1080p).mkv	unnumbered	Copper Tower	2007	1	0	0
+episode	Copper Tower (2007)/Copper Tower - Behind the Lighthouse.mkv	unnumbered	Copper Tower	2007	0	0	0
+episode	Copper Tower (2007)/Copper Tower - 08.5.mkv	unnumbered	Copper Tower	2007	1	0	0
+episode	Lone File.mkv	none		0	-	-	-

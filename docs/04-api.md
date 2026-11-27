@@ -101,7 +101,7 @@ A film's card, to show the fields an episode does not have:
 | `type` | `movie`, `series`, `season`, `episode` or `collection` (2.3). |
 | `overview`, `rating`, `content_rating` | The same values as on the detail. Absent until metadata has arrived. |
 | `genres` | Films and series only. |
-| `series_id`, `series_title`, `season`, `episode`, `episode_end`, `absolute` | Seasons and episodes only. `episode_end` is set when one file holds several episodes. `absolute` is set for series numbered in one running count. |
+| `series_id`, `series_title`, `season`, `episode`, `episode_end`, `absolute` | Seasons and episodes only. `episode_end` is set when one file holds several episodes. `absolute` is set for series numbered in one running count. `episode` is null for an episode without a number (D51): a file whose name gives none, or only a decimal such as `08.5`, titled from its name. |
 | `root_id` | Films and series only: the library folder the item was built from. Seasons and episodes are in their series' folder. |
 | `available` | False when none of the item's own files is there. For a series or a season: none of its episodes' files. A folder that is away does not change it: that is said once, for the folder, in `GET /libraries` and `/changes`. A client shows an item as unavailable when either says so. |
 | `collection_id` | Films only: the collection the film belongs to, when the library shows one (2.3). |
@@ -194,7 +194,7 @@ Everything on the card, and what a detail screen and the player need besides: th
 | `files[].attachments` | Fonts and other files attached to the video. A page fetches the fonts it needs for styled subtitles (7.9). |
 | `files[].subtitles[].external_id`, `files[].audio[].external_id` | Set when the track is a file next to the video. It is fetched from `/files/{id}/external/{external_id}`. Such a track has `idx` null. It is not probed: its `codec` comes from its extension, and is null where that does not say, and an audio file's `channels` and `layout` are null (`06-library-and-metadata.md`, section 4.7). The file's own streams come first. |
 | `files[].sidecar` | Whether the audio-and-subtitles file exists yet (section 7.4). |
-| `prev`, `next` | Episodes only, in season and episode order, specials last. |
+| `prev`, `next` | Episodes only, in season and episode order, specials last. An episode without a number is in its place there: after the number its decimal follows, or after the season's numbered episodes, by title. `next.episode` is null for one. |
 | `match.state` | `unmatched`, `matched`, `manual`, `review`, or `ignored` for an item left unmatched on purpose (8.4). |
 | `credits` | Films and series only (2.4). |
 | `collection` | Films only, when the card has a `collection_id`: `{"id": 5120, "title": "Paper Comets Collection"}`. |
@@ -225,7 +225,7 @@ A series detail has `counts`, `seasons` and `credits` in place of `files`, `prev
 }
 ```
 
-`resume` is what a Play button on the series should start: the episode in progress, the one played last if several are; else the next unplayed one, as Next up finds it (`03-data-model.md`, section 6): the first episode after the one played most recently that is neither played nor started, specials skipped; else the first episode. Its `position_ms` is 0 unless it is in progress. The counts of the series and of each season carry the user's `unplayed`.
+`resume` is what a Play button on the series should start: the episode in progress, the one played last if several are; else the next unplayed one, as Next up finds it (`03-data-model.md`, section 6): the first episode after the one played most recently that is neither played nor started, specials skipped; else the first episode. Its `position_ms` is 0 unless it is in progress. The counts of the series and of each season carry the user's `unplayed`. An episode without a number is stepped over here, as by Next up, unless it is the one in progress (D51); `resume.episode` is null for one.
 
 A series is one page in every client (D30). Its seasons are in this response, and the episodes of a season are `GET /items?parent={season id}`.
 
@@ -449,7 +449,7 @@ The first screen in one response. Parameters: `limit` (each row, default 20, at 
 ```
 
 - `continue`: started and not finished, most recent first.
-- `next_up`: for each series, the first unplayed and unstarted episode after the one played most recently, as `03-data-model.md`, section 6, finds it. The series played most recently comes first.
+- `next_up`: for each series, the first unplayed and unstarted episode after the one played most recently, as `03-data-model.md`, section 6, finds it. The series played most recently comes first. Episodes without a number (D51) are neither where it counts from nor what it offers.
 - `recent`: what was added in the 30 days before the start of today (P7), newest first. Films are as they are. Episodes are folded into their series, which is placed at the time of its newest episode, and `new_episodes` counts the episodes added in those days. Nothing in that time leaves the row empty.
 - `list`: My list, newest first (4.7).
 - `library` keeps every row to one library. `404` for a library that does not exist.
@@ -819,7 +819,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
-| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there). Left out, the files listed are those in `guess` and `none`, and the noted ones. The names are parsed again for each request: nothing about it is stored. |
+| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there). Left out, the files listed are those in `guess`, `unnumbered` and `none`, and the noted ones. `unnumbered` is an episode without a number (D51): it makes an item, and its `episode` is null; its reason is its note, which does not count it as noted. The names are parsed again for each request: nothing about it is stored. |
 
 `GET /admin/libraries`:
 
@@ -846,7 +846,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 
 ```json
 {"libraries": [{"id": 2, "name": "Anime", "kind": "shows", "files": 1790,
-                "counts": {"explicit": 1650, "anchored": 112, "dash": 20, "guess": 7, "none": 1}, "noted": 2, "unreadable": 1}],
+                "counts": {"explicit": 1650, "anchored": 112, "dash": 20, "guess": 7, "unnumbered": 2, "none": 1}, "noted": 2, "unreadable": 1}],
  "files": [{"file_id": 4410, "library_id": 2, "path": "Salt Road (2010)/Season 01/Low Water 07.mkv", "class": "guess",
             "title": "Salt Road", "year": 2010, "season": 1, "episode": 7},
            {"file_id": 4502, "library_id": 2, "path": "Salt Road (2010)/S02/Salt Road - 03.mkv", "class": "anchored",

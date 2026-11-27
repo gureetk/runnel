@@ -91,6 +91,10 @@ var keptTables = []string{"chapters", "credits", "external_ids", "external_track
 	"item_genres", "items", "libraries", "meta", "overrides", "pairings", "people", "play_log", "provider_cache",
 	"roots", "series_prefs", "streams", "tasks", "tokens", "tombstones", "user_list", "user_state", "users"}
 
+// addedColumns are the columns that migrations after 0002 add, empty, to
+// a table: a row compares the same without them.
+var addedColumns = []string{"episode_order"}
+
 // dump reads every row of the kept tables, as text, in order.
 func dump(t *testing.T, db *sql.DB, skipMeta ...string) map[string][]string {
 	t.Helper()
@@ -114,6 +118,9 @@ func dump(t *testing.T, db *sql.DB, skipMeta ...string) map[string][]string {
 			for i, v := range vals {
 				if bs, ok := v.([]byte); ok {
 					v = fmt.Sprintf("%x", bs)
+				}
+				if v == nil && slices.Contains(addedColumns, cols[i]) {
+					continue
 				}
 				fmt.Fprintf(&b, "%s=%v ", cols[i], v)
 			}
@@ -153,7 +160,7 @@ func TestRebuildKeepsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, _ := d.schemaVersion(ctx); v != 3 {
+	if v, _ := d.schemaVersion(ctx); v != 4 {
 		t.Fatalf("schema version %d", v)
 	}
 	after := dump(t, d.r, "schema_version")
@@ -327,7 +334,7 @@ ALTER TABLE new_users RENAME TO users;`}
 	if n := rowCount(t, d.w, `SELECT count(*) FROM users`); n != 2 {
 		t.Fatalf("%d users after a rebuild that was rolled back", n)
 	}
-	if v, _ := d.schemaVersion(ctx); v != 3 {
+	if v, _ := d.schemaVersion(ctx); v != 4 {
 		t.Fatalf("schema version %d", v)
 	}
 	var on int

@@ -344,7 +344,7 @@ func TestLibraryAddAndScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, none 0. With a note 0. ffprobe could not read 0.",
+		"Library 1, Films (movies): 2 files. explicit 2, anchored 0, dash 0, guess 0, unnumbered 0, none 0. With a note 0. ffprobe could not read 0.",
 		"explicit\t1\tInvented Film (2001)\tInvented Film (2001)/Invented Film (2001).mkv",
 		"explicit\t2\tLone Film (1999)\tLone Film (1999).mp4",
 	} {

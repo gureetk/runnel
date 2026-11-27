@@ -32,14 +32,20 @@ type Card struct {
 	SeriesTitle string
 	Season      int
 	Episode     int
-	EpisodeEnd  int // a file that holds several episodes
-	Absolute    int // the running number, in a series numbered in one
-	Available   bool
-	Episodes    int // a series: its episodes outside the specials; a season: its episodes
-	Seasons     int // a series: its seasons outside the specials
-	Images      map[string]CardImage
-	AddedAt     int64
-	Seq         int64
+	// Unnumbered is an episode without a number (D51), whose Episode is 0.
+	Unnumbered bool
+	// Place is where an episode stands in its season: its number, the
+	// decimal of one without a number whose name gives one, or after every
+	// number (episodePlace).
+	Place      float64
+	EpisodeEnd int // a file that holds several episodes
+	Absolute   int // the running number, in a series numbered in one
+	Available  bool
+	Episodes   int // a series: its episodes outside the specials; a season: its episodes
+	Seasons    int // a series: its seasons outside the specials
+	Images     map[string]CardImage
+	AddedAt    int64
+	Seq        int64
 }
 
 // CardImage is an image as a card shows it: its key, the widths stored,
@@ -57,7 +63,7 @@ type CardImage struct {
 // folder (docs/04-api.md, section 2.1).
 const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_title, i.year, i.parent_id, i.series_id,
   (SELECT s.title FROM items s WHERE s.id = i.series_id), i.season_number, i.episode_number,
-  i.episode_number_end, i.absolute_number,
+  i.episode_number_end, i.absolute_number, COALESCE(i.episode_number, i.episode_order, 1e9),
   CASE i.type
     WHEN 'series' THEN EXISTS (SELECT 1 FROM items e JOIN item_files l ON l.item_id = e.id JOIN files f ON f.id = l.file_id
                                WHERE e.series_id = i.id AND e.type = 'episode' AND f.missing_since IS NULL)
@@ -105,7 +111,7 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 	var root, year, parent, series, season, episode, end, absolute sql.NullInt64
 	var seriesTitle, images sql.NullString
 	dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
-		&seriesTitle, &season, &episode, &end, &absolute, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
+		&seriesTitle, &season, &episode, &end, &absolute, &c.Place, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
 	if extra != nil {
 		dest = append(dest, extra)
 	}
@@ -119,7 +125,22 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 	}
 	c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
 	c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
+	c.Unnumbered = c.Type == "episode" && !episode.Valid
 	return c, nil
+}
+
+// afterEveryNumber is the place of an episode without a number whose name
+// gives no decimal: after the season's numbered episodes, which then go by
+// title (D51).
+const afterEveryNumber = 1e9
+
+// episodePlace is, as SQL, where the episode a stands in its season: its
+// number; for one without a number, the decimal its name gives, which puts
+// 8.5 after 8; else after every number. It is never NULL for an episode,
+// so that it can stand in a cursor's row value. cardColumns spells it out
+// for the alias i.
+func episodePlace(a string) string {
+	return "COALESCE(" + a + ".episode_number, " + a + ".episode_order, 1e9)"
 }
 
 // ItemCounts counts the films and series of each library.
@@ -165,18 +186,20 @@ func (d *DB) CountByType(ctx context.Context, libraryID int64, typ string) (int,
 // EpisodeKey is where a page of episodes continues: in season and
 // episode order, specials last.
 type EpisodeKey struct {
-	Specials        bool
-	Season, Episode int
-	ID              int64
+	Specials bool
+	Season   int
+	Place    float64
+	Sort     string
+	ID       int64
 }
 
 // EpisodesOfSeries is a page of a series' episodes after key.
 func (d *DB) EpisodesOfSeries(ctx context.Context, seriesID int64, after EpisodeKey, limit int) ([]Card, error) {
 	rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
 		WHERE i.series_id = ? AND i.type = 'episode'
-		  AND (i.season_number = 0, i.season_number, i.episode_number, i.id) > (?, ?, ?, ?)
-		ORDER BY i.season_number = 0, i.season_number, i.episode_number, i.id LIMIT ?`,
-		seriesID, after.Specials, after.Season, after.Episode, after.ID, limit)
+		  AND (i.season_number = 0, i.season_number, `+episodePlace("i")+`, i.sort_title, i.id) > (?, ?, ?, ?, ?)
+		ORDER BY i.season_number = 0, i.season_number, `+episodePlace("i")+`, i.sort_title, i.id LIMIT ?`,
+		seriesID, after.Specials, after.Season, after.Place, after.Sort, after.ID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("db: read episodes: %w", err)
 	}
@@ -211,16 +234,19 @@ func (d *DB) SeasonsOf(ctx context.Context, seriesID int64, after SeasonKey, lim
 
 // NumberKey is where a page of a season's episodes continues.
 type NumberKey struct {
-	Episode, Absolute int
-	ID                int64
+	Place    float64
+	Absolute int
+	Sort     string
+	ID       int64
 }
 
 // EpisodesOfSeason is a page of a season's episodes after key, in order.
 func (d *DB) EpisodesOfSeason(ctx context.Context, seasonID int64, after NumberKey, limit int) ([]Card, error) {
 	rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
 		WHERE i.parent_id = ? AND i.type = 'episode'
-		  AND (i.episode_number, COALESCE(i.absolute_number, 0), i.id) > (?, ?, ?)
-		ORDER BY i.episode_number, COALESCE(i.absolute_number, 0), i.id LIMIT ?`, seasonID, after.Episode, after.Absolute, after.ID, limit)
+		  AND (`+episodePlace("i")+`, COALESCE(i.absolute_number, 0), i.sort_title, i.id) > (?, ?, ?, ?)
+		ORDER BY `+episodePlace("i")+`, COALESCE(i.absolute_number, 0), i.sort_title, i.id LIMIT ?`,
+		seasonID, after.Place, after.Absolute, after.Sort, after.ID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("db: read episodes: %w", err)
 	}
@@ -235,18 +261,19 @@ func (d *DB) CountChildren(ctx context.Context, parentID int64, typ string) (int
 }
 
 // Neighbours are the episodes before and after one in its series' order:
-// season and episode, specials last. An empty card stands for none.
+// season and place, specials last; an episode without a number is among
+// them (D51). An empty card stands for none.
 func (d *DB) Neighbours(ctx context.Context, c Card) (prev, next Card, err error) {
-	here := []any{c.SeriesID, c.Season == 0, c.Season, c.Episode, c.Absolute, c.ID}
+	here := []any{c.SeriesID, c.Season == 0, c.Season, c.Place, c.Absolute, c.SortTitle, c.ID}
 	for _, q := range []struct {
 		cmp, dir string
 		out      *Card
 	}{{"<", " DESC", &prev}, {">", "", &next}} {
 		rows, err := d.r.QueryContext(ctx, `SELECT `+cardColumns+` FROM items i
 			WHERE i.series_id = ? AND i.type = 'episode'
-			  AND (i.season_number = 0, i.season_number, i.episode_number, COALESCE(i.absolute_number, 0), i.id) `+q.cmp+` (?, ?, ?, ?, ?)
-			ORDER BY i.season_number = 0`+q.dir+`, i.season_number`+q.dir+`, i.episode_number`+q.dir+`,
-			  COALESCE(i.absolute_number, 0)`+q.dir+`, i.id`+q.dir+` LIMIT 1`, here...)
+			  AND (i.season_number = 0, i.season_number, `+episodePlace("i")+`, COALESCE(i.absolute_number, 0), i.sort_title, i.id) `+q.cmp+` (?, ?, ?, ?, ?, ?)
+			ORDER BY i.season_number = 0`+q.dir+`, i.season_number`+q.dir+`, `+episodePlace("i")+q.dir+`,
+			  COALESCE(i.absolute_number, 0)`+q.dir+`, i.sort_title`+q.dir+`, i.id`+q.dir+` LIMIT 1`, here...)
 		if err != nil {
 			return Card{}, Card{}, fmt.Errorf("db: read neighbours: %w", err)
 		}
