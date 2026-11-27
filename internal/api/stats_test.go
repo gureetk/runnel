@@ -61,14 +61,17 @@ func TestPlaylogAndStats(t *testing.T) {
 		Memory    map[string]int64 `json:"memory"`
 		Database  map[string]int64 `json:"database"`
 		Counts    map[string]int   `json:"counts"`
-		Limits    map[string]any   `json:"limits"`
+		Limits    map[string]int64 `json:"limits"`
+		InUse     map[string]int   `json:"in_use"`
 	}
 	if rec := b.call(t, "GET", "/api/v1/admin/stats", b.token, "", nil, &stats); rec.Code != 200 {
 		t.Fatalf("stats %d", rec.Code)
 	}
 	if stats.Version != "0.0.0-test" || stats.StartedAt != 1_800_000_000_000 || stats.Memory["rss"] <= 0 || stats.Database["size"] <= 0 ||
 		stats.Database["seq"] <= 0 || stats.Counts["libraries"] != 2 || stats.Counts["movies"] != 4 || stats.Counts["series"] != 1 ||
-		stats.Counts["episodes"] != 4 || stats.Counts["files"] != 8 || stats.Counts["users"] != 1 || stats.Limits != nil {
+		stats.Counts["episodes"] != 4 || stats.Counts["files"] != 8 || stats.Counts["users"] != 1 ||
+		stats.Limits["slots"] != 1 || stats.Limits["warmups"] != 1 || stats.Limits["child_memory"] != 1<<30 ||
+		stats.InUse == nil || stats.InUse["slots"] != 0 || stats.InUse["warmups"] != 0 {
 		t.Fatalf("stats %+v", stats)
 	}
 

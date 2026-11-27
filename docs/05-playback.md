@@ -138,7 +138,7 @@ A session is one playback as the client sees it. The client makes its id and sen
 - The server holds no session state on disk. A restart ends every stream; clients ask again.
 - A browser's video stream and audio stream are two requests in one session (section 13).
 - For each stream the server records the time from request to first byte sent, the encoder used and whether a warm-up was claimed. They go to `play_log` with the client's own timings, when the session's first report with timings arrives (`04-api.md`, section 7.6). The last stream of each session is kept for that until 30 minutes after it ends.
-- ffmpeg's output is relayed as it comes, 64 KiB at a time at most, and flushed after every write. ffmpeg is killed with SIGKILL when the stream ends for any reason: the file's end or the client gone.
+- ffmpeg's output is relayed as it comes, 64 KiB at a time at most, and flushed after every write. ffmpeg is killed with SIGKILL when the stream ends for any reason: the file's end, the client gone, or an admin's stop (`DELETE /admin/sessions/{session}`, `04-api.md`, section 8.7).
 - On shutdown the server kills every child before it stops taking requests, which ends the streams they fed.
 
 ## 6. Warm-up

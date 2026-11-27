@@ -980,6 +980,25 @@ The import itself is in `06-library-and-metadata.md`, section 7.
 | `GET /admin/stats` | Memory, the database, counts and limits. |
 | `GET /admin/playlog` | The start-time log, newest first. Parameters: `limit` (1 to 1000, default 100), `cursor`. The server keeps its last 1,000 rows (P7). |
 
+`GET /admin/sessions`:
+
+```json
+{"sessions": [
+  {"session": "c7a1e0f2", "user": {"id": 1, "name": "ada"}, "device": {"name": "Living room TV", "client": "runnel-androidtv/1.0.0"},
+   "item": {"id": 4812, "title": "Harbor Lantern · S1 E5"}, "file_id": 9001, "state": "playing", "position_ms": 512000,
+   "mode": "transcode", "reported_at": 1795200010000, "started_in_ms": 640,
+   "transcode": {"state": "streaming", "v": "hevc", "depth": 10, "encoder": "hevc_vaapi", "memory": 117440512,
+                 "warmed": true, "first_byte_ms": 140, "since": 1795199990000}}
+]}
+```
+
+- A row is a session that reports progress (7.6), a transcode that runs, or a transcode's warm-up that waits for its ticket. A transcode and the reports of its session are one row. A session whose last report said `stopped` is not listed, nor one that has not reported for 30 minutes.
+- `session` is the client's id. A transcode asked for without one has an id of the server's, `s_` and a number, and a warm-up has its ticket.
+- `state`, `position_ms`, `reported_at` and `started_in_ms` come from the session's reports, and are null for a transcode or a warm-up that has none. `started_in_ms` is the report's time from Play to the first frame.
+- `transcode` is null for a direct play. Its `state` is `warming`, `held` or `streaming` (`05-playback.md`, section 5), `memory` is the ffmpeg child's resident memory, read every 2 seconds, and `first_byte_ms` is the time from the request to its first byte sent, null until then.
+- Rows come oldest first, so that a page that refreshes keeps them in place.
+- `DELETE /admin/sessions/{session}` stops a transcode or a warm-up: its ffmpeg child is killed and the stream ends. It answers `204`. A player may ask again. A session that only plays a file as it is is `409` with code `conflict`: the player reads the file by itself, and the server cannot stop it. An unknown id is `404`.
+
 `GET /admin/encoders`:
 
 ```json
@@ -1012,7 +1031,7 @@ A target that has no row, such as AV1, is one this version of the server does no
 }
 ```
 
-`limits` are set when the server starts (P2) and can only be read here. `memory.rss` is the server's resident memory, read from `/proc` (0 where there is none). `database.size` is the database file without its write-ahead log.
+`limits` are set when the server starts (P2) and can only be read here. `in_use` counts the transcode slots taken, warm-ups among them, and the transcodes' warm-ups held. `memory.rss` is the server's resident memory, read from `/proc` (0 where there is none). `database.size` is the database file without its write-ahead log.
 
 A row of `GET /admin/playlog`:
 

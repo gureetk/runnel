@@ -103,13 +103,26 @@ type sessionKey struct {
 type session struct {
 	written int64 // when its position was last written; 0 never
 	seen    int64 // its last report
+	since   int64 // its first report
 	logged  bool  // its start is in play_log
+	// What its last report said, for GET /admin/sessions.
+	last sessionReport
+}
+
+// sessionReport is what a progress report says about its playback.
+type sessionReport struct {
+	tokenID        int64
+	itemID, fileID int64
+	positionMS     int64
+	state, mode    string
+	playingMS      *int64 // Play pressed to the first frame, from the report that had timings
 }
 
 // report decides what to do with one report of a session at now: whether
 // to write its position, and whether to log its start, which happens once
 // for the first report that carries timings or stats.
-func (ss *sessions) report(key sessionKey, playing, timed bool, now int64) (write, log bool) {
+func (ss *sessions) report(key sessionKey, rep sessionReport, timed bool, now int64) (write, log bool) {
+	playing := rep.state == "playing"
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if now-ss.lastSweep > 60_000 {
@@ -122,10 +135,14 @@ func (ss *sessions) report(key sessionKey, playing, timed bool, now int64) (writ
 	}
 	se := ss.by[key]
 	if se == nil {
-		se = &session{}
+		se = &session{since: now}
 		ss.by[key] = se
 	}
 	se.seen = now
+	if rep.playingMS == nil {
+		rep.playingMS = se.last.playingMS
+	}
+	se.last = rep
 	write = !playing || se.written == 0 || now-se.written >= writeEvery
 	if write {
 		se.written = now
@@ -135,6 +152,17 @@ func (ss *sessions) report(key sessionKey, playing, timed bool, now int64) (writ
 		se.logged = true
 	}
 	return write, log
+}
+
+// snapshot copies the sessions that report progress, as of now.
+func (ss *sessions) snapshot() map[sessionKey]session {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	out := make(map[sessionKey]session, len(ss.by))
+	for k, v := range ss.by {
+		out[k] = *v
+	}
+	return out
 }
 
 // end forgets a session that has stopped.
@@ -206,7 +234,11 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r.Context())
 	now := s.now().UnixMilli()
 	key := sessionKey{user: c.user.ID, id: b.Session}
-	write, logStart := s.sessions.report(key, b.State == "playing", b.Timings != nil || b.Stats != nil, now)
+	rep := sessionReport{tokenID: c.tokenID, itemID: *b.ItemID, fileID: *b.FileID, positionMS: *b.PositionMS, state: b.State, mode: b.Mode}
+	if b.Timings != nil {
+		rep.playingMS = b.Timings.Playing
+	}
+	write, logStart := s.sessions.report(key, rep, b.Timings != nil || b.Stats != nil, now)
 	if b.State == "stopped" {
 		defer s.sessions.end(key)
 	}
