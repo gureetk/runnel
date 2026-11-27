@@ -120,18 +120,27 @@ func plan(lib model.Library, files []db.LibraryFile) planned {
 			// episode's running number, which is its key. A token, or the
 			// specials' folder, says where an episode is, and its number
 			// is not in the count.
-			counted := func(p parse.Episode) bool { return p.Class != parse.Explicit && p.Season != 0 }
+			counted := func(p parse.Episode) bool {
+				return p.Class != parse.Explicit && p.Class != parse.Unnumbered && p.Season != 0
+			}
 			for _, e := range eps {
 				if counted(e.p) && e.p.Episode > runningPast {
 					s.Absolute = true
 				}
 			}
-			type ekey struct{ season, episode, absolute int }
+			// An episode without a number is its file alone (D51).
+			type ekey struct {
+				season, episode, absolute int
+				file                      int64
+			}
 			byEp := map[ekey][]ep{}
 			var eorder []ekey
 			for _, e := range eps {
 				k := ekey{season: e.p.Season, episode: e.p.Episode}
-				if s.Absolute && counted(e.p) {
+				switch {
+				case e.p.Class == parse.Unnumbered:
+					k = ekey{season: e.p.Season, file: files[e.at].ID}
+				case s.Absolute && counted(e.p):
 					k = ekey{absolute: e.p.Episode}
 				}
 				if _, ok := byEp[k]; !ok {
@@ -141,7 +150,11 @@ func plan(lib model.Library, files []db.LibraryFile) planned {
 			}
 			for _, k := range eorder {
 				members := byEp[k]
-				de := db.DesiredEpisode{Season: members[0].p.Season, Episode: members[0].p.Episode, Absolute: k.absolute}
+				first := members[0].p
+				de := db.DesiredEpisode{Season: first.Season, Episode: first.Episode, Absolute: k.absolute}
+				if first.Class == parse.Unnumbered {
+					de.Unnumbered, de.Order, de.Title = true, first.Decimal, first.Title
+				}
 				at := make([]int, len(members))
 				for i, m := range members {
 					at[i] = m.at
@@ -150,7 +163,10 @@ func plan(lib model.Library, files []db.LibraryFile) planned {
 				de.Files = versions(files, at, "")
 				s.Episodes = append(s.Episodes, de)
 				what := fmt.Sprintf("S%02dE%02d", de.Season, de.Episode)
-				if de.Absolute != 0 {
+				switch {
+				case de.Unnumbered:
+					what = "an episode without a number"
+				case de.Absolute != 0:
 					what = fmt.Sprintf("episode %d", de.Absolute)
 				}
 				p.groups = append(p.groups, group{files: at, what: what})

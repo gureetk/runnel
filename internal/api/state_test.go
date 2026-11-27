@@ -345,14 +345,14 @@ func TestSeriesResume(t *testing.T) {
 		}
 		return *d.Resume
 	}
-	if r := resume(); r != (resumeBody{ID: eps[0].ID, Season: 1, Episode: 1}) {
+	if r := resume(); r != (resumeBody{ID: eps[0].ID, Season: 1, Episode: episodeNumber{N: 1}}) {
 		t.Fatalf("nothing played: %+v", r)
 	}
 	var d detailBody
 	b.call(t, "GET", "/api/v1/items/"+idStr(eps[1].ID), b.token, "", nil, &d)
 	b.call(t, "POST", "/api/v1/progress", b.token, "", map[string]any{"session": "r1", "item_id": eps[1].ID,
 		"file_id": (*d.Files)[0].ID, "position_ms": 40_000, "state": "paused", "mode": "direct"}, nil)
-	if r := resume(); r != (resumeBody{ID: eps[1].ID, Season: 1, Episode: 2, PositionMS: 40_000}) {
+	if r := resume(); r != (resumeBody{ID: eps[1].ID, Season: 1, Episode: episodeNumber{N: 2}, PositionMS: 40_000}) {
 		t.Fatalf("in progress: %+v", r)
 	}
 }

@@ -226,7 +226,7 @@ func TestSeries(t *testing.T) {
 	e.put("Harbor Lantern (2021)/Season 01/[Group] Harbor Lantern S01E02 [1080p].mkv")
 	e.put("Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E01.mkv")
 	e.put("Harbor Lantern (2021)/Specials/Harbor Lantern - S00E01.mkv")
-	e.put("Harbor Lantern (2021)/Season 01/Pilot.mkv") // none: no number, no item
+	e.put("Harbor Lantern (2021)/Season 01/Pilot.mkv") // no number: an episode without one (D51)
 	e.put("Salt Road (2010)/[Group] Salt Road - 112.mkv")
 	e.put("Stray - S01E01.mkv") // none: not in a series folder
 	e.scan()
@@ -243,11 +243,12 @@ func TestSeries(t *testing.T) {
 			eps[[2]int{it.Season, it.Episode}] = it
 		}
 	}
-	if len(eps) != 4 || eps[[2]int{1, 2}].Title != "Episode 2" || eps[[2]int{0, 1}].ID == 0 || eps[[2]int{2, 1}].ID == 0 {
+	if len(eps) != 5 || eps[[2]int{1, 2}].Title != "Episode 2" || eps[[2]int{0, 1}].ID == 0 || eps[[2]int{2, 1}].ID == 0 ||
+		eps[[2]int{1, 0}].Title != "Pilot" {
 		t.Fatalf("episodes of Harbor Lantern: %+v", eps)
 	}
-	if n := len(items); n != 11 {
-		t.Fatalf("%d items, want 2 series, 4 seasons and 5 episodes", n)
+	if n := len(items); n != 12 {
+		t.Fatalf("%d items, want 2 series, 4 seasons and 6 episodes", n)
 	}
 	var running db.ItemSummary
 	for _, it := range items {

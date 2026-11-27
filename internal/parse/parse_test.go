@@ -92,7 +92,7 @@ func TestNotes(t *testing.T) {
 		"Glass Harbor (2020)/Season 01/Disc 1/Glass Harbor - 05.mkv":            `in the folder "Disc 1", which is not a season folder`,
 		"Glass Harbor (2020)/S03/Glass Harbor - S03E05.mkv":                     `in the folder "S03", which is not a season folder`,
 		"Winter Kitchen (2019)/Season 01/[Grp] Winter Kitchen 3 - 05.mkv":       "the number after the title, 3, and the number after the dash, 5, differ",
-		"Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv": "a decimal episode number, which is not read",
+		"Quiet Station (2018)/Season 01/[Grp] Quiet Station - 12.5 [1080p].mkv": "a decimal episode number: an episode without a number, after episode 12",
 		"Harbor Lantern (2021)/Season 03/Harbor Lantern - S01E13.mkv":           "the name says season 01, its folder season 3",
 		"Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E05.mkv":           "",
 		"Harbor Lantern (2021)/Harbor Lantern - 05.mkv":                         "",
@@ -246,7 +246,7 @@ func TestLeadingNumbers(t *testing.T) {
 			"Paper Comets (2005)/Season 01/008 - The Kite.mkv",
 			"Paper Comets (2005)/Season 01/08.5 - Recap.mkv",
 			"Paper Comets (2005)/Season 01/009 - The Lost Lantern.mkv",
-		}, []want{{Anchored, 8}, {None, 0}, {Anchored, 9}}},
+		}, []want{{Anchored, 8}, {Unnumbered, 0}, {Anchored, 9}}},
 		{"the series' year is not a leading number", []string{
 			"Paper Comets (2005)/2005 - Paper Comets.mkv",
 		}, []want{{Guess, 2005}}},
@@ -275,5 +275,34 @@ func TestLeadingNumbers(t *testing.T) {
 	})
 	if got[0].Class != Anchored || got[0].Note != `in the folder "Extra Disc", which is not a season folder` {
 		t.Errorf("%+v", got[0])
+	}
+}
+
+// TestUnnumbered reads the episodes without a number of D51: where they sit,
+// their title, and a decimal's place.
+func TestUnnumbered(t *testing.T) {
+	cases := []struct {
+		rel     string
+		season  int
+		decimal float64
+		title   string
+	}{
+		{"Quiet Station (2012)/Season 00/[Grp] Quiet Station S1 - S02.mkv", 0, 0, "Quiet Station S1 - S02"},
+		{"Copper Tower (2007)/Season 01/[Grp]Copper Tower_-_08.5_(1080p).mkv", 1, 8.5, "Copper Tower - 08.5"},
+		{"Copper Tower (2007)/Season 02/Copper Tower - 12.25.mkv", 2, 12.25, "Copper Tower - 12.25"},
+		{"Copper Tower (2007)/Copper Tower - Behind the Lighthouse.mkv", 0, 0, "Copper Tower - Behind the Lighthouse"},
+		{"Copper Tower (2007)/Copper Tower - 08.5.mkv", 1, 8.5, "Copper Tower - 08.5"},
+		{"Copper Tower (2007)/Season 03/[Grp].mkv", 3, 0, "[Grp]"},
+	}
+	for _, c := range cases {
+		e := ParseEpisode(c.rel)
+		if e.Class != Unnumbered || e.Season != c.season || e.Decimal != c.decimal || e.Title != c.title || e.Episode != 0 {
+			t.Errorf("%s: %+v, want season %d, decimal %v, title %q", c.rel, e, c.season, c.decimal, c.title)
+		}
+	}
+	for _, rel := range []string{"Lone File.mkv", "(2001)/Season 01/x.mkv"} {
+		if e := ParseEpisode(rel); e.Class != None {
+			t.Errorf("%s: %s, want none: it makes no item", rel, e.Class)
+		}
 	}
 }

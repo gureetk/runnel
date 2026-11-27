@@ -20,11 +20,14 @@ const (
 	Anchored = "anchored" // the number after the series' own title
 	Dash     = "dash"     // a number after " - "
 	Guess    = "guess"    // the last number that stands alone; a film without a year
-	None     = "none"     // nothing usable: the file makes no item
+	// Unnumbered is a video in a series' folder whose name gives no
+	// episode number, or only a decimal: an episode without a number (D51).
+	Unnumbered = "unnumbered"
+	None       = "none" // nothing usable: the file makes no item
 )
 
 // Classes lists the classes in order.
-var Classes = []string{Explicit, Anchored, Dash, Guess, None}
+var Classes = []string{Explicit, Anchored, Dash, Guess, Unnumbered, None}
 
 // Film is what a film's path gives.
 type Film struct {
@@ -44,6 +47,12 @@ type Episode struct {
 	EpisodeEnd  int // set for a file that holds several episodes
 	Class       string
 	Note        string // what the report should show, such as a season that disagrees with its folder
+
+	// For an episode without a number (class unnumbered): Decimal is the
+	// decimal its name gives, such as 8.5, which places it after episode
+	// 8, or 0; Title is its name without brackets, which titles it.
+	Decimal float64
+	Title   string
 
 	// lead is the number that begins the name, before a dash, as in
 	// "017 - The Kite", when hasLead is set. ParseEpisodes trusts it when
@@ -187,12 +196,13 @@ func numberOf(w word) (int, bool) {
 	return n, true
 }
 
-// decimals lists where the parts of every decimal in s start: 12 and 5 of
-// 12.5.
-func decimals(s string) map[int]bool {
-	out := map[int]bool{}
+// decimals gives, where the parts of every decimal in s start, the
+// decimal's value: 12.5 at the start of 12 and at the start of 5.
+func decimals(s string) map[int]float64 {
+	out := map[int]float64{}
 	for _, m := range decimal.FindAllStringSubmatchIndex(s, -1) {
-		out[m[2]], out[m[4]] = true, true
+		v, _ := strconv.ParseFloat(s[m[2]:m[3]]+"."+s[m[4]:m[5]], 64)
+		out[m[2]], out[m[4]] = v, v
 	}
 	return out
 }
@@ -291,9 +301,26 @@ func ParseEpisode(rel string) Episode {
 	dec := decimals(clean)
 	// pick takes the number at word w, unless it is part of a decimal, which
 	// is not read: it would join the episode of its whole part.
+	// An episode without a number sits in the season its folder names.
+	// Without a season folder, a decimal stays in season 1 with the
+	// numbered episodes it falls between, and any other goes among the
+	// specials (D51).
+	unnumbered := func(decimal float64, note string) Episode {
+		e.Class, e.Episode, e.EpisodeEnd, e.Decimal = Unnumbered, 0, 0, decimal
+		e.Title = strings.Trim(spaces.ReplaceAllString(strings.ReplaceAll(clean, "_", " "), " "), " -.")
+		if e.Title == "" {
+			e.Title = Base(rel)
+		}
+		if folderSeason < 0 && decimal == 0 {
+			e.Season = 0
+		}
+		e.dirNotes = notes
+		e.Note = strings.Join(append(slices.Clip(notes), note), "; ")
+		return e
+	}
 	pick := func(w word, n int, class string, note ...string) Episode {
-		if dec[w.start] {
-			return done(None, append(note, "a decimal episode number, which is not read")...)
+		if d, ok := dec[w.start]; ok {
+			return unnumbered(d, "a decimal episode number: an episode without a number, after episode "+strconv.Itoa(int(d)))
 		}
 		e.Episode = n
 		return done(class, note...)
@@ -344,7 +371,7 @@ func ParseEpisode(rel string) Episode {
 			return pick(ws[i], n, Guess)
 		}
 	}
-	return done(None, "no episode number in the name")
+	return unnumbered(0, "no episode number in the name: an episode without a number, after the season's numbered ones")
 }
 
 // ParseEpisodes reads the episodes of one root, as ParseEpisode does, and

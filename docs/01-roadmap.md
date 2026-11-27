@@ -85,7 +85,7 @@ Build:
 3. The server's resident memory is under 30 MB after the scan, idle.
 4. A desktop plays a file with `mpv "http://<server>:8610/api/v1/files/<id>/raw?t=<token>"`, and seeking works.
 5. A renamed file keeps its id. Unmounting a root marks nothing missing.
-6. The parse report has no file in the `none` class, and every file in the `guess` class has been looked at.
+6. The parse report has no file in the `none` class, and every file in the `guess` and `unnumbered` classes has been looked at (D51).
 
 State on 21 November 2026: built (D48). Everything on the list is merged, and the six criteria pass in a development sandbox on generated files. None has been run on real hardware yet. That check is an open issue of the stage's milestone, and the milestone stays open until it is met.
 

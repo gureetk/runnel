@@ -12,12 +12,12 @@ import (
 	"strings"
 )
 
-const reportUsage = `Usage: runnel report [--library <id>] [--class explicit|anchored|dash|guess|none|all] [--noted]
+const reportUsage = `Usage: runnel report [--library <id>] [--class explicit|anchored|dash|guess|unnumbered|none|all] [--noted]
 
 Prints how the running server parsed every file's name: the count in each
 class for each library, then one line for each file asked for, then the
 files ffprobe could not read. Left out, the files asked for are those in
-guess and none, and the files of the other classes that have a note: one
+guess, unnumbered and none, and the files of the other classes that have a note: one
 that several files make whose names do not tell them apart, or one in a
 folder that is not a season folder. --noted lists only those with a note.
 Lines are separated by tabs: class, file id, what the name gave, path,
@@ -86,9 +86,9 @@ func report(ctx context.Context, c *adminClient, library int64, class string, no
 		return err
 	}
 	for _, l := range b.Libraries {
-		fmt.Fprintf(stdout, "Library %d, %s (%s): %d files. explicit %d, anchored %d, dash %d, guess %d, none %d. With a note %d. ffprobe could not read %d.\n",
+		fmt.Fprintf(stdout, "Library %d, %s (%s): %d files. explicit %d, anchored %d, dash %d, guess %d, unnumbered %d, none %d. With a note %d. ffprobe could not read %d.\n",
 			l.ID, l.Name, l.Kind, l.Files, l.Counts["explicit"], l.Counts["anchored"], l.Counts["dash"],
-			l.Counts["guess"], l.Counts["none"], l.Noted, l.Unreadable)
+			l.Counts["guess"], l.Counts["unnumbered"], l.Counts["none"], l.Noted, l.Unreadable)
 	}
 	if len(b.Files) > 0 {
 		fmt.Fprintln(stdout)
@@ -102,6 +102,9 @@ func report(ctx context.Context, c *adminClient, library int64, class string, no
 			gave.WriteString(f.Title)
 			if f.Year != nil {
 				fmt.Fprintf(&gave, " (%d)", *f.Year)
+			}
+			if f.Class == "unnumbered" && f.Season != nil {
+				fmt.Fprintf(&gave, " S%02d, no episode number", *f.Season)
 			}
 			if f.Season != nil && f.Episode != nil {
 				fmt.Fprintf(&gave, " S%02dE%02d", *f.Season, *f.Episode)

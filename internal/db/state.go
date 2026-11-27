@@ -276,7 +276,7 @@ func (t *Tx) reach(ctx context.Context, ids []int64) ([]int64, error) {
 		  SELECT a.ord, i.id FROM asked a JOIN items c ON c.id = a.id AND c.type = 'collection'
 		    JOIN items i ON i.collection_id = c.id AND i.type = 'movie')
 		SELECT r.id FROM reached r JOIN items i ON i.id = r.id
-		ORDER BY r.ord, i.season_number = 0, i.season_number, i.episode_number, COALESCE(i.absolute_number, 0),
+		ORDER BY r.ord, i.season_number = 0, i.season_number, `+episodePlace("i")+`, COALESCE(i.absolute_number, 0),
 		  i.release_date, i.sort_title, i.id`, string(list))
 	if err != nil {
 		return nil, err
@@ -444,6 +444,7 @@ func (d *DB) countInto(ctx context.Context, out map[int64]int, query string, arg
 type Resume struct {
 	ID              int64
 	Season, Episode int
+	Unnumbered      bool  // an episode without a number (D51): Episode is 0
 	PositionMS      int64 // 0 unless the episode is in progress
 }
 
@@ -458,28 +459,28 @@ func (d *DB) ResumeOf(ctx context.Context, userID, seriesID int64) (Resume, bool
 		query    string
 		position bool
 	}{
-		{`SELECT e.id, e.season_number, e.episode_number, s.position_ms FROM user_state s JOIN items e ON e.id = s.item_id
+		{`SELECT e.id, e.season_number, COALESCE(e.episode_number, 0), e.episode_number IS NULL, s.position_ms FROM user_state s JOIN items e ON e.id = s.item_id
 			WHERE s.user_id = ?1 AND e.series_id = ?2 AND e.type = 'episode' AND s.played = 0 AND s.position_ms > 0
-			ORDER BY s.last_played_at DESC, e.season_number DESC, e.episode_number DESC LIMIT 1`, true},
+			ORDER BY s.last_played_at DESC, e.season_number DESC, ` + episodePlace("e") + ` DESC LIMIT 1`, true},
 		{`WITH last(s, n) AS (
 			  SELECT e.season_number, e.episode_number FROM user_state us JOIN items e ON e.id = us.item_id
-			  WHERE us.user_id = ?1 AND e.series_id = ?2 AND e.type = 'episode' AND us.played = 1
+			  WHERE us.user_id = ?1 AND e.series_id = ?2 AND e.type = 'episode' AND us.played = 1 AND e.episode_number IS NOT NULL
 			  ORDER BY us.last_played_at DESC, e.season_number DESC, e.episode_number DESC LIMIT 1)
-			SELECT c.id, c.season_number, c.episode_number FROM items c
-			WHERE c.series_id = ?2 AND c.type = 'episode' AND c.season_number > 0
+			SELECT c.id, c.season_number, c.episode_number, 0 FROM items c
+			WHERE c.series_id = ?2 AND c.type = 'episode' AND c.season_number > 0 AND c.episode_number IS NOT NULL
 			  AND (c.season_number, c.episode_number) > (SELECT COALESCE((SELECT s FROM last), 0), COALESCE((SELECT n FROM last), 0))
 			  AND NOT EXISTS (SELECT 1 FROM user_state u WHERE u.user_id = ?1 AND u.item_id = c.id AND (u.played = 1 OR u.position_ms > 0))
 			ORDER BY c.season_number, c.episode_number, COALESCE(c.absolute_number, 0), c.id LIMIT 1`, false},
-		{`SELECT e.id, e.season_number, e.episode_number FROM items e
+		{`SELECT e.id, e.season_number, COALESCE(e.episode_number, 0), e.episode_number IS NULL FROM items e
 			WHERE e.series_id = ?2 AND e.type = 'episode'
-			ORDER BY e.season_number = 0, e.season_number, e.episode_number, COALESCE(e.absolute_number, 0), e.id LIMIT 1`, false},
+			ORDER BY e.season_number = 0, e.season_number, ` + episodePlace("e") + `, COALESCE(e.absolute_number, 0), e.sort_title, e.id LIMIT 1`, false},
 	} {
 		row := d.r.QueryRowContext(ctx, q.query, userID, seriesID)
 		var err error
 		if q.position {
-			err = row.Scan(&r.ID, &r.Season, &r.Episode, &r.PositionMS)
+			err = row.Scan(&r.ID, &r.Season, &r.Episode, &r.Unnumbered, &r.PositionMS)
 		} else {
-			err = row.Scan(&r.ID, &r.Season, &r.Episode)
+			err = row.Scan(&r.ID, &r.Season, &r.Episode, &r.Unnumbered)
 		}
 		if err == nil {
 			return r, true, nil

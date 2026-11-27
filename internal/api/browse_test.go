@@ -37,6 +37,16 @@ type browse struct {
 // probed and built, and signs a user in.
 func newBrowse(t *testing.T) *browse {
 	t.Helper()
+	return newBrowseWith(t,
+		"Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E02.mkv",
+		"Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv",
+		"Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E01.mkv",
+		"Harbor Lantern (2021)/Specials/Harbor Lantern - S00E01.mkv")
+}
+
+// newBrowseWith is newBrowse with the shows library's files given.
+func newBrowseWith(t *testing.T, shows ...string) *browse {
+	t.Helper()
 	_, ffprobe := tm.Tools(t)
 	ts := newTestServer(t)
 	b := &browse{testServer: ts, films: filepath.Join(t.TempDir(), "films"), shows: filepath.Join(t.TempDir(), "shows")}
@@ -50,10 +60,9 @@ func newBrowse(t *testing.T) *browse {
 	mk(b.films, "The Salt Road (2005)/The Salt Road (2005).mkv")
 	mk(b.films, "An Echo Garden (2011).mp4")
 	os.WriteFile(filepath.Join(b.films, "Broken Lantern (2001).mkv"), []byte("not a video at all"), 0o644)
-	mk(b.shows, "Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E02.mkv")
-	mk(b.shows, "Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv")
-	mk(b.shows, "Harbor Lantern (2021)/Season 02/Harbor Lantern - S02E01.mkv")
-	mk(b.shows, "Harbor Lantern (2021)/Specials/Harbor Lantern - S00E01.mkv")
+	for _, rel := range shows {
+		mk(b.shows, rel)
+	}
 	tm.Settle(t, b.films)
 	tm.Settle(t, b.shows)
 
@@ -123,8 +132,8 @@ func TestLibrariesAndItems(t *testing.T) {
 	b.call(t, "GET", "/api/v1/items?series="+strconv.FormatInt(series.Items[0].ID, 10)+"&type=episode", b.token, "", nil, &eps)
 	var order []string
 	for _, e := range eps.Items {
-		order = append(order, strconv.Itoa(*e.Season)+"x"+strconv.Itoa(*e.Episode))
-		if e.SeriesTitle != "Harbor Lantern" || e.Title != "Episode "+strconv.Itoa(*e.Episode) {
+		order = append(order, strconv.Itoa(*e.Season)+"x"+strconv.Itoa(e.Episode.N))
+		if e.SeriesTitle != "Harbor Lantern" || e.Title != "Episode "+strconv.Itoa(e.Episode.N) {
 			t.Fatalf("episode %+v", e)
 		}
 	}

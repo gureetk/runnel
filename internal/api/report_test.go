@@ -48,19 +48,19 @@ func TestParseReport(t *testing.T) {
 		t.Fatalf("%d %+v", rec.Code, r)
 	}
 	s := r.Libraries[0]
-	if s.Files != 4 || s.Counts["explicit"] != 1 || s.Counts["anchored"] != 1 || s.Counts["guess"] != 1 || s.Counts["none"] != 1 || s.Counts["dash"] != 0 {
+	if s.Files != 4 || s.Counts["explicit"] != 1 || s.Counts["anchored"] != 1 || s.Counts["guess"] != 1 || s.Counts["unnumbered"] != 1 || s.Counts["none"] != 0 || s.Counts["dash"] != 0 {
 		t.Fatalf("shows: %+v", s)
 	}
 	f := r.Libraries[1]
 	if f.Files != 2 || f.Counts["explicit"] != 1 || f.Counts["guess"] != 1 || f.Unreadable != 1 {
 		t.Fatalf("films: %+v", f)
 	}
-	// Listed by default: the guess and none classes.
+	// Listed by default: the guess, unnumbered and none classes.
 	if len(r.Files) != 3 {
 		t.Fatalf("%d files listed, want 3: %+v", len(r.Files), r.Files)
 	}
 	for _, row := range r.Files {
-		if row.Class != "guess" && row.Class != "none" {
+		if row.Class != "guess" && row.Class != "unnumbered" && row.Class != "none" {
 			t.Fatalf("listed: %+v", row)
 		}
 		if row.Path == "Harbor Lantern (2021)/Season 01/Other Title 03.mkv" && (row.Episode == nil || *row.Episode != 3 || *row.Season != 1) {
@@ -117,7 +117,7 @@ func TestParseReportNotes(t *testing.T) {
 		"Harbor Lantern (2021)/Season 01/Harbor Lantern S01E01 - 720p.mkv",
 		// A folder that is not a season folder: noted on its own.
 		"Harbor Lantern (2021)/S02/Harbor Lantern S02E01.mkv",
-		// In none, with the reason as its note: not counted as noted.
+		// Without a number, with the reason as its note: not counted as noted.
 		"Harbor Lantern (2021)/Season 01/Pilot.mkv")
 	add(films.Roots[0].ID,
 		"Paper Comets (2019)/Paper Comets (2019).mkv",
@@ -155,8 +155,8 @@ func TestParseReportNotes(t *testing.T) {
 			t.Errorf("versions and parts with good names are listed: %+v", f)
 		}
 	}
-	if f, ok := listed["Harbor Lantern (2021)/Season 01/Pilot.mkv"]; !ok || f.Class != "none" {
-		t.Errorf("none is still listed: %+v", f)
+	if f, ok := listed["Harbor Lantern (2021)/Season 01/Pilot.mkv"]; !ok || f.Class != "unnumbered" || f.Episode != nil || f.Season == nil || *f.Season != 1 {
+		t.Errorf("an episode without a number is still listed, with no number: %+v", f)
 	}
 	if len(r.Files) != 6 {
 		t.Errorf("%d files listed, want the 5 noted and the one in none: %+v", len(r.Files), r.Files)

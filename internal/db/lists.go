@@ -331,11 +331,12 @@ func (d *DB) HomeOf(ctx context.Context, userID, libraryID int64, recentSince in
 		         ROW_NUMBER() OVER (PARTITION BY e.series_id
 		                            ORDER BY us.last_played_at DESC, e.season_number DESC, e.episode_number DESC) AS r
 		  FROM user_state us JOIN items e ON e.id = us.item_id
-		  WHERE us.user_id = ?1 AND us.played = 1 AND e.type = 'episode' AND (?2 = 0 OR e.library_id = ?2))
+		  WHERE us.user_id = ?1 AND us.played = 1 AND e.type = 'episode' AND e.episode_number IS NOT NULL
+		    AND (?2 = 0 OR e.library_id = ?2))
 		, nx(id, t) AS (
 		  SELECT (SELECT c.id FROM items c
 		          WHERE c.series_id = lp.series_id AND c.type = 'episode' AND c.season_number > 0
-		            AND (c.season_number, c.episode_number) > (lp.s, lp.n)
+		            AND c.episode_number IS NOT NULL AND (c.season_number, c.episode_number) > (lp.s, lp.n)
 		            AND NOT EXISTS (SELECT 1 FROM user_state u
 		                            WHERE u.user_id = ?1 AND u.item_id = c.id AND (u.played = 1 OR u.position_ms > 0))
 		          ORDER BY c.season_number, c.episode_number, COALESCE(c.absolute_number, 0), c.id

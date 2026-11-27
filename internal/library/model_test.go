@@ -335,3 +335,54 @@ func TestLeadingNumbersInAFolder(t *testing.T) {
 		}
 	}
 }
+
+// TestEpisodesWithoutANumberKeepTheirIDs builds D51's episodes without a
+// number: each is its file, and keeps its id as the file is renamed to a
+// name that gives a number, as any episode follows its files. A build that
+// finds nothing changed changes nothing.
+func TestEpisodesWithoutANumberKeepTheirIDs(t *testing.T) {
+	e := newEnv(t, "shows")
+	e.put("Copper Tower (2007)/Season 01/Copper Tower - S01E08.mkv")
+	e.put("Copper Tower (2007)/Season 01/[Grp]Copper Tower_-_08.5_(1080p).mkv")
+	e.put("Copper Tower (2007)/Season 01/Copper Tower - Behind the Lighthouse.mkv")
+	e.put("Copper Tower (2007)/Copper Tower - A Walk on the Pier.mkv")
+	e.scan()
+	e.fingerprint()
+	series := byTitle(e.items(), "series", "Copper Tower")
+	if series == nil {
+		t.Fatal("no series")
+	}
+	_, eps := children(e.items(), series.ID)
+	if len(eps) != 4 {
+		t.Fatalf("episodes %+v", eps)
+	}
+	var decimal, behind, pier *db.ItemSummary
+	for i := range eps {
+		switch eps[i].Title {
+		case "Copper Tower - 08.5":
+			decimal = &eps[i]
+		case "Copper Tower - Behind the Lighthouse":
+			behind = &eps[i]
+		case "Copper Tower - A Walk on the Pier":
+			pier = &eps[i]
+		}
+	}
+	if decimal == nil || behind == nil || pier == nil || decimal.Season != 1 || behind.Season != 1 || pier.Season != 0 ||
+		decimal.Episode != 0 || behind.Episode != 0 {
+		t.Fatalf("episodes without a number: %+v", eps)
+	}
+	before := e.seq()
+	e.scan()
+	if e.seq() != before {
+		t.Fatal("a build that found nothing changed took a sequence value")
+	}
+
+	// Renamed to give a number, the 8.5 keeps its id and becomes episode 10.
+	e.move("Copper Tower (2007)/Season 01/[Grp]Copper Tower_-_08.5_(1080p).mkv", "Copper Tower (2007)/Season 01/Copper Tower - S01E10.mkv")
+	e.scan()
+	_, eps = children(e.items(), series.ID)
+	ten := episodeAt(eps, 1, 10)
+	if ten == nil || ten.ID != decimal.ID || ten.Title != "Episode 10" {
+		t.Fatalf("the renamed file's episode: %+v, want id %d", ten, decimal.ID)
+	}
+}

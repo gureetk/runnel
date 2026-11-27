@@ -65,7 +65,7 @@ func TestSeriesSeasonsAndEpisodes(t *testing.T) {
 	// A season's episodes.
 	var eps itemsPage
 	b.call(t, "GET", "/api/v1/items?parent="+idStr(season1.ID)+"&type=episode", b.token, "", nil, &eps)
-	if len(eps.Items) != 2 || *eps.Total != 2 || *eps.Items[0].Episode != 1 || *eps.Items[1].Episode != 2 || !eps.Items[0].Available {
+	if len(eps.Items) != 2 || *eps.Total != 2 || eps.Items[0].Episode.N != 1 || eps.Items[1].Episode.N != 2 || !eps.Items[0].Available {
 		t.Fatalf("episodes of season 1 %+v", eps)
 	}
 
