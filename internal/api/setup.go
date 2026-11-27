@@ -120,22 +120,31 @@ type settingBody struct {
 	Locked bool   `json:"locked"`
 }
 
-// settings answers what GET and PATCH /admin/settings return. The
-// metadata key is stage 4's, so it is left out.
+// settings answers what GET and PATCH /admin/settings return.
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 	name, err := s.serverName(r.Context())
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"server_name": settingBody{Value: name, Locked: s.info.NameFromEnv}})
+	key, err := s.keySetting(r.Context())
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"server_name": settingBody{Value: name, Locked: s.info.NameFromEnv},
+		"tmdb_key":    key,
+	})
 }
 
 // handleSettings is GET /admin/settings (docs/04-api.md, section 8.1).
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) { s.settings(w, r) }
 
 // handlePatchSettings is PATCH /admin/settings: the server's name, or
-// with null the host name again.
+// with null the host name again; the metadata key, checked with the
+// provider before it is kept, or with null none. Everything asked is
+// checked before anything is written.
 func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	var req map[string]*string
 	if !s.decode(w, r, &req) {
@@ -143,27 +152,51 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for k := range req {
 		switch k {
-		case "server_name":
-		case "tmdb_key":
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "the metadata key arrives with metadata, in a later version of the server")
-			return
+		case "server_name", "tmdb_key":
 		default:
 			s.fail(w, r, http.StatusBadRequest, "bad_request", "the settings are server_name and tmdb_key")
 			return
 		}
 	}
-	if v, ok := req["server_name"]; ok {
+	name, setName := req["server_name"]
+	if setName {
 		if s.info.NameFromEnv {
 			s.fail(w, r, http.StatusConflict, "locked", "RUNNEL_NAME sets the server's name")
 			return
 		}
-		if v != nil && !validName(*v) {
+		if name != nil && !validName(*name) {
 			s.fail(w, r, http.StatusBadRequest, "bad_request", "a server name has 1 to 40 characters, no control characters, and no space at either end")
 			return
 		}
-		if err := s.db.SetSetting(r.Context(), "server_name", v); err != nil {
+	}
+	key, setKey := req["tmdb_key"]
+	if setKey {
+		if s.envKey != "" {
+			s.fail(w, r, http.StatusConflict, "locked", "RUNNEL_TMDB_KEY sets the metadata key")
+			return
+		}
+		if key != nil && !s.checkKey(w, r, *key) {
+			return
+		}
+	}
+	if setName {
+		if err := s.db.SetSetting(r.Context(), "server_name", name); err != nil {
 			s.internal(w, r, err)
 			return
+		}
+	}
+	if setKey {
+		if err := s.db.SetMetadataKey(r.Context(), key, s.now().UnixMilli()); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if s.metadata != nil {
+			s.metadata.Forget()
+		}
+		if key != nil {
+			s.log.Info("the metadata key was changed")
+		} else {
+			s.log.Info("the metadata key was removed")
 		}
 	}
 	s.settings(w, r)

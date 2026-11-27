@@ -34,6 +34,7 @@ func TestValues(t *testing.T) {
 		"RUNNEL_VAAPI_DEVICE":      "/dev/dri/renderD129/",
 		"RUNNEL_TRANSCODE_SLOTS":   "2",
 		"RUNNEL_FFMPEG_MAX_RSS_MB": "512",
+		"RUNNEL_TMDB_KEY":          " an-invented-key-0123 ",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,9 @@ func TestValues(t *testing.T) {
 	}
 	if c.Name != "Upstairs" {
 		t.Errorf("Name = %q", c.Name)
+	}
+	if c.TMDBKey != "an-invented-key-0123" {
+		t.Errorf("TMDBKey = %q", c.TMDBKey)
 	}
 	if c.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v", c.LogLevel)
@@ -65,9 +69,13 @@ func TestRejects(t *testing.T) {
 		{"RUNNEL_TRANSCODE_SLOTS": "0"},
 		{"RUNNEL_TRANSCODE_SLOTS": "two"},
 		{"RUNNEL_FFMPEG_MAX_RSS_MB": "10"},
+		{"RUNNEL_TMDB_KEY": "an invented key"},
 	} {
-		if _, err := FromEnv(env(m)); err == nil {
+		_, err := FromEnv(env(m))
+		if err == nil {
 			t.Errorf("%v: no error", m)
+		} else if strings.Contains(err.Error(), "invented") {
+			t.Errorf("the error holds the key: %v", err)
 		}
 	}
 }

@@ -804,9 +804,10 @@ Two settings can be changed while the server runs, and are kept in the database.
 `PATCH /admin/settings` takes one or both, `{"server_name": "Upstairs", "tmdb_key": "…"}`, and returns the same body as the `GET`.
 
 - `locked` is true when the server's environment sets the value. The environment wins, and changing a locked value here is `409` with code `locked`.
-- The key is never sent back. `hint` is its last four characters.
-- A new key is checked against TMDB before it is stored. `400` with code `bad_key` when TMDB refuses it. `502` with code `upstream` when TMDB cannot be reached. Neither stores it. `"tmdb_key": null` removes the key.
-- `ok` and `checked_at` come from the last request the server made with the key.
+- The key is never sent back. `hint` is its last four characters, and null for a key shorter than 12 characters, of which four would give away too much.
+- The key is TMDB's API read access token or its API key, either of them as TMDB's account settings show it: 1 to 1000 characters, printable, without spaces (`06-library-and-metadata.md`, section 6.4).
+- A new key is checked against TMDB before it is stored, with one request. `400` with code `bad_key` when TMDB refuses it, or when it is not of that form. `502` with code `upstream` when TMDB cannot be reached, answers with something else, or has asked the server to wait. Neither stores it. `"tmdb_key": null` removes the key. A key is sent nowhere but to TMDB, and never back.
+- `ok` and `checked_at` come from the last request the server made with the key: of the key stored here, or of the environment's. `ok` is null, and `checked_at` too, before any request. Without a key, `set` is false and `hint`, `ok` and `checked_at` are null.
 - A server name has 1 to 40 characters, no control characters and no space at either end. `"server_name": null` removes it, and the host name is shown again. Any other field is `400`.
 
 ### 8.2 Libraries, folders and scans

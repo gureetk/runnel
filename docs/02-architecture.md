@@ -128,7 +128,7 @@ Two settings can also be changed while the server runs, by an admin in the web i
 | `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once, 1 to 16. |
 | `RUNNEL_FFMPEG_MAX_RSS_MB` | `1024` | A child above this is killed, 64 to 65536. |
 | `RUNNEL_SIDECAR_CACHE_MB` | `4096` | Size cap of the sidecar cache. |
-| `RUNNEL_TMDB_KEY` | none | The metadata key. It can be set in the web interface instead. Without a key nothing is fetched and items keep the titles from their names. |
+| `RUNNEL_TMDB_KEY` | none | The metadata key: TMDB's API read access token or its API key (`06-library-and-metadata.md`, section 6.4). It can be set in the web interface instead. Of the wrong form, the server does not start; the error does not repeat it. Without a key nothing is fetched and items keep the titles from their names. |
 | `RUNNEL_NAME` | none | The server's name, shown by clients. It can be set in the web interface instead. Without one it is the machine's host name. |
 | `RUNNEL_DISCOVERY` | `on` | `off` stops the server from announcing itself on the local network. |
 | `RUNNEL_UPDATE_CHECK` | `on` | `off` stops the daily check for a newer release (D47, from stage 5). |

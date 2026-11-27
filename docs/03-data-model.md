@@ -513,6 +513,13 @@ ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: 
 - A photo is not downloaded when an item is matched. `image_key` is derived from the provider's path at that time, so the photo's URL exists at once. The photo is fetched when a client first asks for it, and `image_fetched_at` and `image_color` are set then. After a try that failed, `image_tried_at` keeps the server from asking again for a day (`04-api.md`, section 6).
 - A person with no credits left is deleted by the nightly cleanup.
 
+**The provider cache**
+
+- A row is one answer of a provider: its status and its body, gzip-compressed. `key` is the request's path with its query, the parameters sorted by name, and without the key it was sent with: `/movie/603?append_to_response=credits%2Cimages`. The same request asked again finds the row.
+- Answers `200` and `404` are kept: a `404` says that the provider has no such thing, which is as worth not asking again. Others are not kept.
+- A row is read again only while it is younger than what its reader allows (`06-library-and-metadata.md`, section 6.3); an older one is fetched again and replaced.
+- A row not fetched again for 180 days is deleted, at start and each night (D53).
+
 **Manual matches**
 
 - A manual match writes `overrides`, keyed by folder. Matching reads `overrides` before anything else. A rescan that drops and rebuilds an item therefore finds the same match again.
@@ -534,7 +541,7 @@ ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: 
 **Settings and sign-in**
 
 - What the server needs in order to start is a flag or an environment variable, and is not in the database (D17).
-- `meta` holds, besides its counters: `instance_id` (made at the first start), `setup_code` (only while no user exists), `server_name`, `tmdb_key`, `tmdb_key_ok` and `tmdb_key_checked_at` (D34, D35).
+- `meta` holds, besides its counters: `instance_id` (made at the first start), `setup_code` (only while no user exists), `server_name`, `tmdb_key`, `tmdb_key_ok` and `tmdb_key_checked_at` (D34, D35). `tmdb_key_ok` is `1` or `0`, from the last request made with the key, of the key in `meta` or of the environment's; it is written when it changes, and `tmdb_key_checked_at` with it, or at most every ten minutes otherwise. Removing the key deletes all three.
 - A value that the environment sets is used as it is and is never written to `meta`.
 - `tmdb_key` is stored in plain text. Whoever can read the database file can read it. The API never returns it.
 - `setup_code` is made at a start without users and kept by later ones, and is deleted in the transaction that makes the first user, whichever call makes them.

@@ -62,6 +62,12 @@ type Config struct {
 	// Transcodes runs the ffmpeg children of transcodes. Nil transcodes
 	// nothing.
 	Transcodes Transcodes
+	// Metadata checks a new metadata key with the provider. Nil can check
+	// none, and a key cannot be set.
+	Metadata Metadata
+	// TMDBKey is the environment's metadata key (RUNNEL_TMDB_KEY), which
+	// locks the setting.
+	TMDBKey string
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -81,6 +87,8 @@ type Server struct {
 	encoders   Encoders
 	slots      int
 	transcodes Transcodes
+	metadata   Metadata
+	envKey     string
 	startedAt  time.Time
 	mux        *http.ServeMux
 	patterns   []string      // the routes, as added
@@ -130,6 +138,8 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		encoders:      c.Encoders,
 		slots:         max(c.Slots, 1),
 		transcodes:    c.Transcodes,
+		metadata:      c.Metadata,
+		envKey:        c.TMDBKey,
 		streams:       transcodeStreams{running: map[*transcodeStream]bool{}, last: map[sessionKey]*transcodeStream{}},
 		startedAt:     c.StartedAt,
 		mux:           http.NewServeMux(),
