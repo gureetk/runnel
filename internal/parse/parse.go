@@ -8,6 +8,7 @@ package parse
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -43,6 +44,19 @@ type Episode struct {
 	EpisodeEnd  int // set for a file that holds several episodes
 	Class       string
 	Note        string // what the report should show, such as a season that disagrees with its folder
+
+	// lead is the number that begins the name, before a dash, as in
+	// "017 - The Kite", when hasLead is set. ParseEpisodes trusts it when
+	// every video in the folder has one and no two are the same.
+	lead    int
+	hasLead bool
+	// leadDecimal is set when the name begins with a decimal before a
+	// dash, as in "08.5 - Recap": the name follows the folder's numbering,
+	// but its number is not read.
+	leadDecimal bool
+	// dirNotes are the notes about the file's folders, which hold whatever
+	// number the name gives.
+	dirNotes []string
 }
 
 var (
@@ -70,6 +84,11 @@ var (
 	// A word that is a number standing alone: 1 to 4 digits, perhaps after E
 	// or EP, perhaps with a version suffix such as 05v2.
 	number = regexp.MustCompile(`(?i)^(?:ep?)?(\d{1,4})(?:v\d+)?$`)
+	// A number that begins a name, before a dash between spaces or
+	// underscores: "017 - The Kite", "017_-_The Kite". E and EP before it,
+	// and a version suffix after it, are allowed, as in step 3. A decimal
+	// part is caught so that "08.5 - Recap" is known to follow the numbering.
+	leading = regexp.MustCompile(`(?i)^(?:ep?)?(\d{1,4})(\.\d{1,2})?(?:v\d+)?[\s_]*-[\s_]`)
 	// A decimal such as 12.5: a number, a dot and one or two digits, where
 	// the number does not follow a dot, so that dots between words are not
 	// taken for decimal points.
@@ -238,12 +257,22 @@ func ParseEpisode(rel string) Episode {
 	}
 	done := func(class string, note ...string) Episode {
 		e.Class = class
-		e.Note = strings.Join(append(notes, note...), "; ")
+		e.dirNotes = notes
+		e.Note = strings.Join(append(slices.Clip(notes), note...), "; ")
 		return e
 	}
 
 	// 1. Bracketed groups go: [Group], [1080p], (…).
 	clean := strings.TrimSpace(spaces.ReplaceAllString(parens.ReplaceAllString(brackets.ReplaceAllString(Base(rel), " "), " "), " "))
+
+	// A number that begins the name, for ParseEpisodes, which reads it
+	// against the folder's other videos. The series' year there is not
+	// one: "Paper Comets (2005)/2005 - Paper Comets.mkv".
+	if m := leading.FindStringSubmatch(clean); m != nil {
+		if n, _ := strconv.Atoi(m[1]); e.SeriesYear == 0 || n != e.SeriesYear {
+			e.lead, e.hasLead, e.leadDecimal = n, true, m[2] != ""
+		}
+	}
 
 	// 2. An SxxEyy token, with the end of a range after it for a file that
 	// holds several episodes.
@@ -316,6 +345,59 @@ func ParseEpisode(rel string) Episode {
 		}
 	}
 	return done(None, "no episode number in the name")
+}
+
+// ParseEpisodes reads the episodes of one root, as ParseEpisode does, and
+// then reads each folder's videos together: where every video in a folder
+// begins its name with a number before a dash, and no two of those numbers
+// are the same, that number is the episode's, class anchored, in place of
+// a guess (docs/06-library-and-metadata.md, section 4.3). A name that begins
+// with a decimal follows the folder's numbering, takes no part in the
+// comparison, and keeps what its name gives.
+func ParseEpisodes(rels []string) []Episode {
+	out := make([]Episode, len(rels))
+	byDir := map[string][]int{}
+	var dirs []string
+	for i, rel := range rels {
+		out[i] = ParseEpisode(rel)
+		d := path.Dir(rel)
+		if _, ok := byDir[d]; !ok {
+			dirs = append(dirs, d)
+		}
+		byDir[d] = append(byDir[d], i)
+	}
+	for _, d := range dirs {
+		at := byDir[d]
+		seen := map[int]bool{}
+		trusted := true
+		for _, i := range at {
+			e := out[i]
+			if !e.hasLead {
+				trusted = false
+				break
+			}
+			if e.leadDecimal {
+				continue
+			}
+			if seen[e.lead] {
+				trusted = false
+				break
+			}
+			seen[e.lead] = true
+		}
+		if !trusted {
+			continue
+		}
+		for _, i := range at {
+			e := &out[i]
+			if e.leadDecimal || e.Class != Guess {
+				continue
+			}
+			e.Episode, e.EpisodeEnd, e.Class = e.lead, 0, Anchored
+			e.Note = strings.Join(e.dirNotes, "; ")
+		}
+	}
+	return out
 }
 
 func sameWords(ws []word, title []string) bool {

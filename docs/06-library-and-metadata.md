@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering (section 4.3).
 
 ## 1. The pipeline
 
@@ -149,6 +149,8 @@ The rule, in order:
 
 An episode number has 1 to 4 digits.
 
+**A folder's own numbering.** The steps above read one name at a time. A folder's videos are then read together: where every video in a folder begins its name, once bracketed groups are gone, with a number before a dash between spaces or underscores (`017 - The Kite`, `017_-_The Kite`), perhaps after `E` or `EP` and with a version suffix as in step 3, and no two of those numbers are the same, that number is the episode's, class **anchored**, for each name the steps above would only guess. Alone, `017 - Paper Comets - The Kite.mkv` is a guess at 17, and `003 - Help Find Their 2 Lost Bears.mkv` a wrong guess at 2. A name that gives a token, the series' title and a number, or a number after a dash keeps what it gives. A name that begins with a decimal, `08.5 - Recap.mkv`, follows the folder's numbering, takes no part in the comparison, and keeps what its name gives (below). The series' year at the start of a name, `2005 - Paper Comets.mkv` in `Paper Comets (2005)`, is not such a number. Each folder is read by itself, and the folder's notes stay.
+
 **Decimals are not read.** Where the number a step takes is part of a decimal, such as `12.5`, the file is in the none class with a note. Read as 12, in any class, it would join episode 12 as a second file. A dot between two numbers in a name whose words are joined by dots is not a decimal point: `quiet.station.12.5` gives 12.
 
 Comparison is on a normalised form: lower case, every run of other characters turned into one space. So `Unit No. 8` in a folder name matches `Unit No 8` in a file name.
@@ -163,7 +165,7 @@ A Go prototype of this rule was run on 11,423 synthetic names in eight forms, in
 
 All six errors were in the **guess** class, the one that goes to review. The names and the parser came from the same author, so this shows the rule is sound, not that it is complete. The prototype ran the rule before the additions of 21 November 2026: underscores, the forms of a file that holds several episodes, `E` and `EP`, the second number of step 3 and decimals.
 
-The test table, `internal/parse/testdata/names.tsv`, holds every form here and every shape found to parse wrongly. It grows from real names, each added with its title replaced by an invented one of the same shape.
+The test table, `internal/parse/testdata/names.tsv`, holds every form here and every shape found to parse wrongly. It grows from real names, each added with its title replaced by an invented one of the same shape. A folder's own numbering reads several names together, and has a test of its own beside the table.
 
 Not handled in version 1: `1x02`, dates as episode numbers, numbers inside brackets, and decimals, which are in the none class (above).
 
