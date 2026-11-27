@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/play"
 	"github.com/gureetk/runnel/internal/probe"
@@ -56,7 +57,10 @@ func newTranscodes(t *testing.T, slots int) (*browse, *play.Transcoder) {
 	s := scan.New(b.db, logger)
 	q := tasks.New(b.db, tasks.NewGate(), logger)
 	q.Register(scan.NewProbes(b.db, probe.New(ffprobe, 2), logger).Kind())
-	s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, b.db, id, 1); return err }
+	s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		_, err := library.BuildIn(ctx, b.db, id, scope, 1)
+		return err
+	}
 	lib, _ := b.db.Library(ctx, 1)
 	if _, err := s.ScanLibrary(ctx, lib); err != nil {
 		t.Fatal(err)

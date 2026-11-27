@@ -139,14 +139,19 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	watcher := scan.NewWatcher(scanner, log)
 	scanner.Checked = watcher.Watch
 	scanner.Forgotten = watcher.Forget
-	scanner.Built = func(ctx context.Context, libraryID int64) error {
+	scanner.Built = func(ctx context.Context, libraryID int64, scope db.Scope) error {
 		start := time.Now()
-		res, err := library.Build(ctx, database, libraryID, time.Now().UnixMilli())
+		res, err := library.BuildIn(ctx, database, libraryID, scope, time.Now().UnixMilli())
 		if err != nil {
 			return err
 		}
-		log.Info("items built", "library", libraryID, "ms", time.Since(start).Milliseconds(),
-			"added", res.Added, "changed", res.Changed, "removed", res.Removed)
+		attrs := []any{"library", libraryID, "ms", time.Since(start).Milliseconds(),
+			"added", res.Added, "changed", res.Changed, "removed", res.Removed}
+		// A build of some folders says how many it was asked to read.
+		if folders, whole := scopeSize(scope); scope != nil && !whole {
+			attrs = append(attrs, "folders", folders)
+		}
+		log.Info("items built", attrs...)
 		return nil
 	}
 	// At start and each night: the delete markers older than 90 days go,
@@ -283,4 +288,16 @@ func logEncoders(log *slog.Logger, cfg config.Config, res play.Result, took time
 	case cfg.HWAccel == play.HWVAAPI && res.HW() != "vaapi":
 		log.Warn("RUNNEL_HWACCEL is vaapi, and the GPU encodes nothing: transcodes are in software; run runnel doctor to see why")
 	}
+}
+
+// scopeSize counts the top folders a build's scope names, and reports
+// whether it reads a root whole.
+func scopeSize(scope db.Scope) (folders int, whole bool) {
+	for _, tops := range scope {
+		if tops == nil {
+			whole = true
+		}
+		folders += len(tops)
+	}
+	return folders, whole
 }

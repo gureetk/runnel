@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gureetk/runnel/internal/db"
 	"github.com/gureetk/runnel/internal/library"
 	"github.com/gureetk/runnel/internal/scan"
 )
@@ -23,7 +24,10 @@ func TestExternalTracks(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Paper Comets (2019).Commentary.fr.mka"), []byte("not really audio"), 0o644)
 	ctx := context.Background()
 	s := scan.New(b.db, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	s.Built = func(ctx context.Context, id int64) error { _, err := library.Build(ctx, b.db, id, 2); return err }
+	s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		_, err := library.BuildIn(ctx, b.db, id, scope, 2)
+		return err
+	}
 	lib, _ := b.db.Library(ctx, 1)
 	if _, err := s.ScanLibrary(ctx, lib); err != nil {
 		t.Fatal(err)

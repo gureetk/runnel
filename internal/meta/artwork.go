@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path"
@@ -154,12 +155,25 @@ func (a *Artwork) Sync(ctx context.Context, libraryID, rootID int64, inScope fun
 // its poster; beside an episode, the episode's base name and "-thumb".
 // Where a folder holds several of one kind, the most preferred name is
 // taken.
+//
+// Only the items of the top folders that hold the images found are read:
+// an image belongs to an item of its own top folder, whose key begins
+// with it. An image at the top of the root, beside a lone film, reads the
+// whole root; a scan finds one only when it walks the whole root.
 func (a *Artwork) match(ctx context.Context, libraryID, rootID int64, found []db.LocalSource) (map[slot]db.LocalSource, error) {
-	items, err := a.db.LibraryItems(ctx, libraryID)
+	scope := db.Scope{rootID: {}}
+	for _, src := range found {
+		if !strings.Contains(src.Path, "/") {
+			scope.Whole(rootID)
+			break
+		}
+		scope.Add(rootID, db.Top(src.Path))
+	}
+	items, err := a.db.LibraryItemsIn(ctx, libraryID, scope)
 	if err != nil {
 		return nil, err
 	}
-	files, err := a.db.LibraryFiles(ctx, libraryID)
+	files, err := a.db.LibraryFilesIn(ctx, libraryID, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +371,9 @@ func (a *Artwork) scale(ctx context.Context, file, key, kind string) (db.ImageSe
 	}
 	for _, width := range set.Widths {
 		out := a.Path(key, kind, width)
-		tmp := out + ".tmp" + extension(kind)
+		// Two items may show one picture, whose image tasks then write the
+		// same key at once: each writes a file of its own and renames it.
+		tmp := fmt.Sprintf("%s.tmp%x%s", out, rand.Uint64(), extension(kind))
 		args := []string{"-v", "error", "-nostdin", "-y", "-i", file, "-vf", "scale=" + strconv.Itoa(width) + ":-1", "-frames:v", "1"}
 		if kind != "logo" {
 			args = append(args, "-q:v", "3")

@@ -38,7 +38,7 @@ func (e *env) seqOf(rel string) int64 {
 
 func TestTracksBesideVideos(t *testing.T) {
 	e := newEnv(t, "movies")
-	e.s.Built = func(ctx context.Context, id int64) error { return buildFilms(ctx, e.db, id) }
+	e.s.Built = func(ctx context.Context, id int64, _ db.Scope) error { return buildFilms(ctx, e.db, id) }
 	main := "Paper Comets (2019)/Paper Comets (2019).mkv"
 	other := "Paper Comets (2019)/Paper Comets (2019) - 720p.mkv"
 	e.put(main, 4000)

@@ -42,7 +42,18 @@ func newEnv(t *testing.T, kind string) *env {
 	}
 	e := &env{t: t, db: d, root: root, lib: lib}
 	e.s = scan.New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	e.s.Built = func(ctx context.Context, id int64) error { _, err := Build(ctx, d, id, 1); return err }
+	// Each scan builds what it looked at, and then a build of the whole
+	// library must find nothing left to change: a build of some folders
+	// does what a full build would do there.
+	e.s.Built = func(ctx context.Context, id int64, scope db.Scope) error {
+		if _, err := BuildIn(ctx, d, id, scope, 1); err != nil {
+			return err
+		}
+		if res, err := Build(ctx, d, id, 1); err != nil || res != (db.BuildResult{}) {
+			t.Errorf("a full build after the build of %v changed %+v (%v)", scope, res, err)
+		}
+		return nil
+	}
 	return e
 }
 

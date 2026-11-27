@@ -462,7 +462,7 @@ func TestWalkingAndForget(t *testing.T) {
 	e.put("A Film (2001)/A Film (2001).mkv", 4000)
 	var mu sync.Mutex
 	var during, other []bool
-	e.s.Built = func(ctx context.Context, id int64) error {
+	e.s.Built = func(ctx context.Context, id int64, _ db.Scope) error {
 		mu.Lock()
 		during, other = append(during, e.s.Walking(id)), append(other, e.s.Walking(id+1))
 		mu.Unlock()
