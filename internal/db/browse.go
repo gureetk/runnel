@@ -46,6 +46,14 @@ type Card struct {
 	Images     map[string]CardImage
 	AddedAt    int64
 	Seq        int64
+
+	// What metadata brings (docs/06-library-and-metadata.md, section 6.3):
+	// empty, or zero, until it has arrived. Genres are a film's or a
+	// series'. OriginalTitle is shown on a detail only.
+	Overview, Date, ContentRating, OriginalTitle string
+	RuntimeMS                                    int64
+	Rating                                       float64
+	Genres                                       []string
 }
 
 // CardImage is an image as a card shows it: its key, the widths stored,
@@ -80,7 +88,10 @@ const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_titl
     ELSE 0 END,
   (SELECT json_group_object(im.kind, json_object('key', im.key, 'w', json(im.widths), 'ar', im.aspect, 'color', im.color))
      FROM images im WHERE im.item_id = i.id AND im.rank = 0),
-  i.added_at, i.updated_seq`
+  i.added_at, i.updated_seq,
+  i.overview, i.release_date, i.content_rating, i.original_title, i.runtime_ms, i.rating,
+  CASE WHEN i.type IN ('movie', 'series') THEN (SELECT json_group_array(g.genre) FROM
+    (SELECT genre FROM item_genres WHERE item_id = i.id ORDER BY genre) g) END`
 
 func scanCards(rows *sql.Rows) ([]Card, error) { return scanCardsWith(rows, nil) }
 
@@ -110,8 +121,12 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 	var c Card
 	var root, year, parent, series, season, episode, end, absolute sql.NullInt64
 	var seriesTitle, images sql.NullString
+	var overview, date, contentRating, original, genres sql.NullString
+	var runtime sql.NullInt64
+	var rating sql.NullFloat64
 	dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
-		&seriesTitle, &season, &episode, &end, &absolute, &c.Place, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq}
+		&seriesTitle, &season, &episode, &end, &absolute, &c.Place, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq,
+		&overview, &date, &contentRating, &original, &runtime, &rating, &genres}
 	if extra != nil {
 		dest = append(dest, extra)
 	}
@@ -123,6 +138,13 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 			return Card{}, fmt.Errorf("db: read a card's images: %w", err)
 		}
 	}
+	if genres.String != "" && genres.String != "[]" {
+		if err := json.Unmarshal([]byte(genres.String), &c.Genres); err != nil {
+			return Card{}, fmt.Errorf("db: read a card's genres: %w", err)
+		}
+	}
+	c.Overview, c.Date, c.ContentRating, c.OriginalTitle = overview.String, date.String, contentRating.String, original.String
+	c.RuntimeMS, c.Rating = runtime.Int64, rating.Float64
 	c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
 	c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
 	c.Unnumbered = c.Type == "episode" && !episode.Valid

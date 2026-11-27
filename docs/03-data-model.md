@@ -459,6 +459,12 @@ Migration `0004_episode_order.sql`, for D51's episodes without a number. Such an
 ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: a decimal's value, such as 8.5; NULL otherwise
 ```
 
+Migration `0005_airing.sql`, for whether a series still airs, which its provider's details say, so that it is fetched again weekly, and everything else every 30 days (`06-library-and-metadata.md`, section 6.3). A column without a constraint is added in place, so the migration rebuilds nothing:
+
+```sql
+ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider says it still airs; NULL otherwise
+```
+
 ## 4. Rules that keep it consistent
 
 **Files**
@@ -496,6 +502,13 @@ ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: 
 - An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
 - An item's id is never given again once the item is gone, and neither is the id of a library, a library folder, a user or a token. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `last_library_id`, `last_root_id`, `last_user_id` and `last_token_id` hold the highest ids given.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
+
+**Metadata on items**
+
+- `refreshed_at` is when a provider's metadata was last written onto an item: a film's or a series' details, or a season's, which write the season and its numbered episodes. An episode that the provider's season does not have is marked too, and keeps its own title until the season is read again.
+- What is written: `title`, `sort_title`, `original_title` (NULL when it is the title), `overview`, `release_date` and the `year` read from it, `runtime_ms`, `rating`, `content_rating`, the genres in `item_genres`, the other providers' ids the details give (`imdb`, `tvdb`), and a series' `airing`. Writing what is already there stamps nothing; a change stamps the item (section 5). The search table's row is written again with the title, the original title and the alternative titles.
+- **Once `refreshed_at` is set, building leaves the item's `title`, `sort_title` and `year` as they are**: they are the provider's. An episode whose files now give it another number is the exception: its `overview`, `release_date`, `runtime_ms`, `rating` and `refreshed_at` are cleared, and its name titles it until its season is read again.
+- **After 180 days without a refresh** (D53), what was written is cleared: every column above but the title, the sort title and the year, the genres, `airing` and `refreshed_at`. The build that follows, the nightly walk's, titles the item from its name again. The providers' ids in `external_ids` stay.
 
 **Collections**
 
