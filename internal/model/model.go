@@ -83,7 +83,7 @@ type Chapter struct {
 type Library struct {
 	ID         int64
 	Name       string
-	Kind       string // "movies" or "shows"
+	Kind       string // "movies", "shows" or "mixed"
 	Profile    string // "default" or "anime"
 	Roots      []Root
 	UpdatedSeq int64

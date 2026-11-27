@@ -431,7 +431,8 @@ Proposed (P6). Not researched yet, and not final.
 ]}
 ```
 
-- `items` counts movies or series, not episodes.
+- `kind` is `movies`, `shows` or `mixed` (`06-library-and-metadata.md`, section 4.10).
+- `items` counts films and series, not episodes.
 - `unplayed` is the signed-in user's: films not played, or series with an episode not played outside the specials.
 - `roots` are the library's folders. `available` is false while a folder is away, for example a disk that is not mounted. Every item built from that folder (`root_id` on its card) is then unavailable, whatever its own `available` says. Paths are not shown here: they are for admins (8.2).
 
@@ -462,7 +463,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | Parameter | Meaning |
 |---|---|
 | `library` | Library id. Required unless `parent`, `series`, `ids`, `genre`, `list`, `collection` or `person` is given. |
-| `type` | `movie` or `series` at the top of a library; left out, the library's own kind. `season` or `episode` below a parent. With `genre`, `list` or `person` and no `library`: `movie` or `series` to narrow it, both when left out. |
+| `type` | `movie` or `series` at the top of a library; left out, the library's own kind: films in a films library, series in a shows library, both in a mixed one. `season` or `episode` below a parent. With `genre`, `list` or `person` and no `library`: `movie` or `series` to narrow it, both when left out. |
 | `parent` | Children of an item: the seasons of a series, the specials last, or the episodes of a season, in order. |
 | `series` | With `type=episode`: every episode of a series in one list. |
 | `ids` | Comma-separated ids, at most 200. For refreshing a few cards. It goes alone. The cards come in the order asked for, once each, and an id that no item has is left out. |
@@ -814,12 +815,12 @@ Two settings can be changed while the server runs, and are kept in the database.
 |---|---|
 | `GET /admin/libraries` | Libraries with their folders, what a scan is doing now, and each folder's last scan. |
 | `POST /admin/libraries` | Create: `{"name": "Anime", "kind": "shows", "profile": "anime", "roots": ["/media/anime"]}`. Returns `201` with `{"id": 2, "name": "Anime", "kind": "shows", "profile": "anime", "roots": [{"id": 2, "path": "/media/anime", "available": true}]}`, and the library's first scan starts. |
-| `PATCH /admin/libraries/{id}` | Change: `{"name": "Anime", "profile": "anime", "add_roots": ["/media/anime-3"], "remove_roots": [3]}`, any of them. Returns the library as `POST` does. |
+| `PATCH /admin/libraries/{id}` | Change: `{"name": "Anime", "profile": "anime", "kind": "mixed", "add_roots": ["/media/anime-3"], "remove_roots": [3]}`, any of them. Returns the library as `POST` does. |
 | `DELETE /admin/libraries/{id}` | Remove the library, with its items and everyone's watch state for them. Returns `204`. |
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
 | `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
-| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there). Left out, the files listed are those in `guess`, `unnumbered` and `none`, and the noted ones. `unnumbered` is an episode without a number (D51): it makes an item, and its `episode` is null; its reason is its note, which does not count it as noted. The names are parsed again for each request: nothing about it is stored. |
+| `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there), or, in a mixed library, it is a film's whose files, read as episodes, give different numbers (section 4.10 there). A file read as an episode's has `season` and `episode`, a film's has neither. Left out, the files listed are those in `guess`, `unnumbered` and `none`, and the noted ones. `unnumbered` is an episode without a number (D51): it makes an item, and its `episode` is null; its reason is its note, which does not count it as noted. The names are parsed again for each request: nothing about it is stored. |
 
 `GET /admin/libraries`:
 
@@ -835,8 +836,8 @@ Two settings can be changed while the server runs, and are kept in the database.
 ]}
 ```
 
-- Creating a library: `kind` is `movies` or `shows`, `profile` is `default` (when left out) or `anime`. A library has 1 to 32 folders, each an absolute path to a folder the server can open, stored without a trailing slash. A folder that is, contains or lies inside one that a library already scans is `409` with code `conflict`, and so is a name that is taken. Library names are compared with their case.
-- Changing a library: `PATCH` changes everything it is given or nothing. `add_roots` are folders as when creating, and `remove_roots` the ids of the library's own folders. The library keeps 1 to 32 folders. `kind` cannot change, and any other field is `400`. Folders added are scanned at once. A folder removed takes what was built from it: its items go, with everyone's watch state for them, and reach clients in `deleted` (section 5).
+- Creating a library: `kind` is `movies`, `shows` or `mixed`, `profile` is `default` (when left out) or `anime`. A library has 1 to 32 folders, each an absolute path to a folder the server can open, stored without a trailing slash. A folder that is, contains or lies inside one that a library already scans is `409` with code `conflict`, and so is a name that is taken. Library names are compared with their case.
+- Changing a library: `PATCH` changes everything it is given or nothing. `add_roots` are folders as when creating, and `remove_roots` the ids of the library's own folders. The library keeps 1 to 32 folders. `kind` is `mixed`, for a films or a shows library, or the library's own kind, which changes nothing: no other change of kind is allowed (D49), and a mixed library stays mixed. Any other kind is `400` with code `bad_request`, and so is any other field. Folders added are scanned at once, and so is a library made mixed: its folders are read again as a mixed library's, every folder that reads as it did keeps its items, their ids and everyone's watch state, and a folder that reads as the other kind now is a new item, its old one going to clients in `deleted` with the watch state on it (`06-library-and-metadata.md`, section 5). It cannot be undone. A folder removed takes what was built from it: its items go, with everyone's watch state for them, and reach clients in `deleted` (section 5).
 - Removing a library: clients learn of it from `library_ids` (section 5). A removed library's id is never given to another, nor a removed item's (`03-data-model.md`, section 4).
 - `items` counts the library's films and series.
 - `scan.state` is `idle`, `walking` (going through the folders and building items from them, with no numbers yet), `probing` (reading what was found: `done` of `total` files) or `failed`: nothing is running, and the last scan of one of the folders ended with an error, which that folder's `last_scan.error` holds. A folder that is away is such an error. `done` and `total` are there while probing only.

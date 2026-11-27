@@ -73,6 +73,7 @@ func TestCreateLibrary(t *testing.T) {
 		{map[string]any{"name": "Inside", "kind": "movies", "roots": []string{filepath.Join(more, "inner")}}, 409, "conflict"},
 		{map[string]any{"name": "Around", "kind": "movies", "roots": []string{filepath.Dir(films)}}, 409, "conflict"},
 		{map[string]any{"name": "Shows", "kind": "music", "roots": []string{t.TempDir()}}, 400, "bad_request"},
+		{map[string]any{"name": "Shows", "kind": "videos", "roots": []string{t.TempDir()}}, 400, "bad_request"},
 		{map[string]any{"name": "Shows", "kind": "shows", "profile": "kids", "roots": []string{t.TempDir()}}, 400, "bad_request"},
 		{map[string]any{"name": "Shows", "kind": "shows", "roots": []string{}}, 400, "bad_request"},
 		{map[string]any{"name": "Shows", "kind": "shows", "roots": []string{"relative/path"}}, 400, "bad_request"},

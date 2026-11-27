@@ -25,9 +25,11 @@ Commands:
   setup-code                   Print the setup code the first run asks for.
   pair approve <code> --user <name>
                                Sign in the device that shows the code.
-  library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
+  library add --name <name> --kind movies|shows|mixed [--profile anime] --root <folder>...
                                Add a library to the running server.
   library list                 Print the libraries and their folders' last scans.
+  library change <id> [--name <name>] [--profile default|anime] [--kind mixed] [--yes]
+                               Rename a library, set its profile, or make it mixed.
   library remove <id> [--yes]  Remove a library, with its items and watch state.
   scan [--library <id>]        Ask the running server to scan.
   report [--library <id>] [--class <class>|all]

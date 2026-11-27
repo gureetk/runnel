@@ -121,6 +121,10 @@ func TestChangeLibraryAPI(t *testing.T) {
 		code   string
 	}{
 		{map[string]any{"kind": "shows"}, 400, "bad_request"},
+		{map[string]any{"kind": "videos"}, 400, "bad_request"},
+		{map[string]any{"kind": nil}, 400, "bad_request"},
+		{map[string]any{"kind": 3}, 400, "bad_request"},
+		{map[string]any{"kind": "mixed", "name": "Shows"}, 409, "conflict"},
 		{map[string]any{"colour": "blue"}, 400, "bad_request"},
 		{map[string]any{"name": nil}, 400, "bad_request"},
 		{map[string]any{"name": " Films"}, 400, "bad_request"},
@@ -167,6 +171,28 @@ func TestChangeLibraryAPI(t *testing.T) {
 	}
 	if got := scans.got(); len(got) != 1 {
 		t.Fatalf("a rename asked for a scan: %v", got)
+	}
+
+	// Its own kind changes nothing, and asks for no scan.
+	if rec := ts.call(t, "PATCH", path, ts.adminToken, local, map[string]any{"kind": "movies"}, &lib); rec.Code != 200 || lib.Kind != "movies" {
+		t.Fatalf("%d %+v", rec.Code, lib)
+	}
+	if got := scans.got(); len(got) != 1 {
+		t.Fatalf("the same kind asked for a scan: %v", got)
+	}
+	// Mixed: the library is read again by it, with a scan.
+	before, _ := ts.db.Seq(ctx)
+	if rec := ts.call(t, "PATCH", path, ts.adminToken, local, map[string]any{"kind": "mixed"}, &lib); rec.Code != 200 || lib.Kind != "mixed" {
+		t.Fatalf("%d %+v", rec.Code, lib)
+	}
+	if got := scans.got(); !slices.Equal(got, []int64{films.ID, films.ID}) {
+		t.Fatalf("scans asked for: %v, want one more of the library", got)
+	}
+	if l, _ := ts.db.Library(ctx, films.ID); l.Kind != "mixed" || l.UpdatedSeq <= before {
+		t.Fatalf("the library: %+v, want mixed at a new sequence value", l)
+	}
+	if rec := ts.call(t, "PATCH", path, ts.adminToken, local, map[string]any{"kind": "movies"}, &e); rec.Code != 400 || e.Error.Code != "bad_request" {
+		t.Fatalf("back from mixed: %d %+v", rec.Code, e)
 	}
 
 	if rec := ts.call(t, "DELETE", path, ts.adminToken, local, nil, nil); rec.Code != 204 {
@@ -322,5 +348,77 @@ func TestFolderBrowser(t *testing.T) {
 	if rec := ts.call(t, "GET", "/api/v1/admin/fs?path="+many, ts.adminToken, local, nil, &body); rec.Code != 200 ||
 		!body.Truncated || len(body.Folders) != fsMaxFolders || body.Folders[0].Name != "f0000" {
 		t.Fatalf("a folder of %d folders: %d, %d listed, truncated %v", fsMaxFolders+1, rec.Code, len(body.Folders), body.Truncated)
+	}
+}
+
+// TestMixedLibraryAPI: a mixed library is made by POST /admin/libraries,
+// lists its films and series together, and its parse report reads each
+// file as its folder's kind (docs/04-api.md, sections 4.3 and 8.2).
+func TestMixedLibraryAPI(t *testing.T) {
+	ts := newTestServer(t)
+	ts.scans = &scansAsked{}
+	ctx := context.Background()
+	var lib adminLibraryBody
+	if rec := ts.call(t, "POST", "/api/v1/admin/libraries", ts.adminToken, local,
+		map[string]any{"name": "Everything", "kind": "mixed", "roots": []string{t.TempDir()}}, &lib); rec.Code != 201 || lib.Kind != "mixed" {
+		t.Fatalf("%d %+v", rec.Code, lib)
+	}
+	var c db.ScanChanges
+	for i, p := range []string{
+		"films/Paper Comets (2019)/Paper Comets (2019).mkv",
+		"series/Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv",
+		"Stray Cove - S01E01.mkv",
+	} {
+		c.New = append(c.New, db.SeenFile{RelPath: p, Kind: "video", Size: int64(10 + i), MtimeNS: 1})
+	}
+	if err := ts.db.ApplyScan(ctx, lib.Roots[0].ID, c, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := library.Build(ctx, ts.db, lib.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	ts.addUser(t, "ada", "correct horse", true)
+	var a loginAnswer
+	ts.call(t, "POST", "/api/v1/auth/login", "", "", login("ada", "correct horse", "d"), &a)
+	tok := a.Token
+	var page struct {
+		Items []cardBody `json:"items"`
+	}
+	ts.call(t, "GET", "/api/v1/items?library="+idStr(lib.ID), tok, "", nil, &page)
+	var types []string
+	for _, it := range page.Items {
+		types = append(types, it.Type+" "+it.Title)
+	}
+	if !slices.Equal(types, []string{"series Harbor Lantern", "movie Paper Comets"}) {
+		t.Fatalf("a mixed library's list: %q", types)
+	}
+	ts.call(t, "GET", "/api/v1/items?type=movie&library="+idStr(lib.ID), tok, "", nil, &page)
+	if len(page.Items) != 1 || page.Items[0].Type != "movie" {
+		t.Fatalf("its films: %+v", page.Items)
+	}
+	var libs struct {
+		Libraries []libraryBody `json:"libraries"`
+	}
+	ts.call(t, "GET", "/api/v1/libraries", tok, "", nil, &libs)
+	if len(libs.Libraries) != 1 || libs.Libraries[0].Kind != "mixed" || libs.Libraries[0].Items != 2 || libs.Libraries[0].Unplayed != 2 {
+		t.Fatalf("GET /libraries: %+v", libs)
+	}
+
+	var r struct {
+		Files []reportFile `json:"files"`
+	}
+	ts.call(t, "GET", "/api/v1/admin/parse-report?class=all", ts.adminToken, local, nil, &r)
+	got := map[string]reportFile{}
+	for _, f := range r.Files {
+		got[f.Path] = f
+	}
+	if f := got["films/Paper Comets (2019)/Paper Comets (2019).mkv"]; f.Class != "explicit" || f.Season != nil || f.Episode != nil || f.Title != "Paper Comets" {
+		t.Errorf("a film's file: %+v", f)
+	}
+	if f := got["series/Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01.mkv"]; f.Class != "explicit" || f.Season == nil || *f.Episode != 1 {
+		t.Errorf("an episode's file: %+v", f)
+	}
+	if f := got["Stray Cove - S01E01.mkv"]; f.Class != "none" || f.Season != nil || f.Note == "" {
+		t.Errorf("a lone episode at the top: %+v", f)
 	}
 }

@@ -273,7 +273,7 @@ func ParseEpisode(rel string) Episode {
 	}
 
 	// 1. Bracketed groups go: [Group], [1080p], (…).
-	clean := strings.TrimSpace(spaces.ReplaceAllString(parens.ReplaceAllString(brackets.ReplaceAllString(Base(rel), " "), " "), " "))
+	clean := cleaned(Base(rel))
 
 	// A number that begins the name, for ParseEpisodes, which reads it
 	// against the folder's other videos. The series' year there is not
@@ -372,6 +372,18 @@ func ParseEpisode(rel string) Episode {
 		}
 	}
 	return unnumbered(0, "no episode number in the name: an episode without a number, after the season's numbered ones")
+}
+
+// cleaned is a file's base name without its bracketed groups: [Group],
+// [1080p], (…).
+func cleaned(base string) string {
+	return strings.TrimSpace(spaces.ReplaceAllString(parens.ReplaceAllString(brackets.ReplaceAllString(base, " "), " "), " "))
+}
+
+// HasToken reports whether a file's name holds an SxxEyy token, as step 2
+// reads it.
+func HasToken(rel string) bool {
+	return token.MatchString(cleaned(Base(rel)))
 }
 
 // ParseEpisodes reads the episodes of one root, as ParseEpisode does, and
