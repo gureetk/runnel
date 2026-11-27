@@ -17,7 +17,6 @@ import (
 var laterStages = map[string]string{
 	"GET /admin/sessions":                        "3: sessions",
 	"DELETE /admin/sessions/{session}":           "3: sessions",
-	"GET /files/{id}/transcode.mkv":              "3: transcoding",
 	"GET /admin/review":                          "4: review",
 	"GET /admin/items/{id}/candidates":           "4: matching",
 	"PUT /admin/items/{id}/match":                "4: matching",

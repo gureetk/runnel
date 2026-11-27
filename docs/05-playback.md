@@ -97,13 +97,13 @@ Choices behind these:
 
 ### 4.3 The fallback ladder
 
-For each request the server tries, in order, and moves down when ffmpeg exits before its first output:
+For each request the server tries, in order, and moves down when ffmpeg exits before its first output. Nothing has been sent to the client by then:
 
 1. Hardware decode and hardware encode.
 2. Software decode and hardware encode (`-vf format=nv12,hwupload`, or `format=p010,hwupload` for 10-bit output, in place of `scale_vaapi`). Ran on real hardware for HEVC 10-bit (section 12).
 3. Software decode and software H.264, if the client asked for `h264`. A request names one codec (`04-api.md`, section 7.3), so a request for HEVC never gets H.264.
 
-A failure is remembered for the process's life by the source's codec, profile and bit depth and the target asked for, so the next request starts on the rung that works.
+A failure is remembered for the process's life by the source's codec, profile and bit depth and the target asked for, so the next request starts on the rung that works. When no rung is left, the request is refused with `500 encode_failed` and what ffmpeg said last, and the server logs each rung that failed. A child killed for its memory before its first output fails the request without blaming its rung, since the next would hold as much.
 
 ### 4.4 Memory and limits
 
@@ -111,7 +111,7 @@ A failure is remembered for the process's life by the source's codec, profile an
 |---|---|---|
 | Transcode slots | 1 | Streams running at once. A request beyond that is `503 busy`. |
 | Warm-ups held | 1 | A real request without a ticket evicts a held warm-up. |
-| ffmpeg resident memory | 1024 MB | Read from `/proc/<pid>/statm` every 2 s. Above the limit the child is killed and the stream ends. This does not see GPU memory. |
+| ffmpeg resident memory | 1024 MB | Read from `/proc/<pid>/statm` every 2 s, from the child's start. Above the limit the child is killed, the stream ends, and the server logs it. This does not see GPU memory. |
 
 What one ffmpeg held in the tests, same 1080p 10-bit input, software codecs:
 
@@ -137,8 +137,9 @@ A session is one playback as the client sees it. The client makes its id and sen
 
 - The server holds no session state on disk. A restart ends every stream; clients ask again.
 - A browser's video stream and audio stream are two requests in one session (section 13).
-- For each stream the server records the time from request to first byte sent, the encoder used and whether a warm-up was claimed. They go to `play_log` with the client's own timings.
-- On shutdown the server kills every child before it exits.
+- For each stream the server records the time from request to first byte sent, the encoder used and whether a warm-up was claimed. They go to `play_log` with the client's own timings, when the session's first report with timings arrives (`04-api.md`, section 7.6). The last stream of each session is kept for that until 30 minutes after it ends.
+- ffmpeg's output is relayed as it comes, 64 KiB at a time at most, and flushed after every write. ffmpeg is killed with SIGKILL when the stream ends for any reason: the file's end or the client gone.
+- On shutdown the server kills every child before it stops taking requests, which ends the streams they fed.
 
 ## 6. Warm-up
 

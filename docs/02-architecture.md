@@ -107,10 +107,10 @@ Rules for the code:
 
 **The playback gate.** A counter of sessions that are starting. While it is above zero, task workers finish what they hold and take nothing new. A session counts as starting from its request, or its `prepare`, until 10 seconds after its first byte.
 
-- For direct play the request is `GET /files/{id}/raw`. Each one holds the gate from its arrival until 10 seconds after its first byte. One that is refused, or sends no body, lets it go when it ends.
+- For direct play the request is `GET /files/{id}/raw`, and for a transcode `GET /files/{id}/transcode.mkv`. Each one holds the gate from its arrival until 10 seconds after its first byte. One that is refused, or sends no body, lets it go when it ends.
 - A `prepare` holds the gate from its arrival until the raw request for its file comes from the same token, which then holds it itself; until the token's next `prepare` replaces it; or for 30 seconds, when no playback follows.
 
-**Shutdown.** On SIGTERM or an interrupt: stop accepting requests, kill every child, let the writer finish its transaction, close the database. Within 5 seconds. A request still open after 3 seconds, such as a player's stream, is cut.
+**Shutdown.** On SIGTERM or an interrupt: kill every ffmpeg child, which ends the streams it fed; stop accepting requests; stop the other children; let the writer finish its transaction; close the database. Within 5 seconds. A request still open after 3 seconds, such as a player's stream, is cut.
 
 ## 6. Configuration
 
@@ -126,7 +126,7 @@ Two settings can also be changed while the server runs, by an admin in the web i
 | `RUNNEL_HWACCEL` | `auto` | `auto`, `vaapi` or `none` (D50). |
 | `RUNNEL_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device, an absolute path. |
 | `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once, 1 to 16. |
-| `RUNNEL_FFMPEG_MAX_RSS_MB` | `1024` | A child above this is killed. |
+| `RUNNEL_FFMPEG_MAX_RSS_MB` | `1024` | A child above this is killed, 64 to 65536. |
 | `RUNNEL_SIDECAR_CACHE_MB` | `4096` | Size cap of the sidecar cache. |
 | `RUNNEL_TMDB_KEY` | none | The metadata key. It can be set in the web interface instead. Without a key nothing is fetched and items keep the titles from their names. |
 | `RUNNEL_NAME` | none | The server's name, shown by clients. It can be set in the web interface instead. Without one it is the machine's host name. |

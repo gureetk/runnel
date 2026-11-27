@@ -187,6 +187,10 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	checkStart := time.Now()
 	checked, _ := encoders.Check(ctx)
 	logEncoders(log, cfg, checked, time.Since(checkStart))
+	transcoder := play.NewTranscoder(play.TranscoderConfig{FFmpeg: ffmpeg, Slots: cfg.TranscodeSlots,
+		MaxRSS: int64(cfg.FFmpegMaxRSSMB) << 20, Log: log}, encoders)
+	// A check on request waits for no transcode: it would take the GPU.
+	encoders.Busy = func() bool { return transcoder.Running() > 0 }
 
 	handler := api.New(database, log, api.Config{
 		Info:           api.Info{Name: name, NameFromEnv: cfg.Name != "", Version: version, InstanceID: instanceID},
@@ -198,6 +202,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Imports:        importer,
 		Encoders:       encoders,
 		Slots:          cfg.TranscodeSlots,
+		Transcodes:     transcoder,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{
@@ -225,6 +230,8 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 
 	log.Info("stopping")
 	start := time.Now()
+	// Every ffmpeg child goes first, which ends the streams it fed.
+	transcoder.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTP)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

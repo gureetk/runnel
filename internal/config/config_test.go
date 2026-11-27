@@ -19,20 +19,21 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Listen != ":8610" || c.DataDir != "/var/lib/runnel" || c.Name != "" || c.LogLevel != slog.LevelInfo ||
-		c.HWAccel != "auto" || c.VAAPIDevice != "/dev/dri/renderD128" || c.TranscodeSlots != 1 {
+		c.HWAccel != "auto" || c.VAAPIDevice != "/dev/dri/renderD128" || c.TranscodeSlots != 1 || c.FFmpegMaxRSSMB != 1024 {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
 
 func TestValues(t *testing.T) {
 	c, err := FromEnv(env(map[string]string{
-		"RUNNEL_LISTEN":          "127.0.0.1:9000",
-		"RUNNEL_DATA":            "relative/data",
-		"RUNNEL_NAME":            "  Upstairs ",
-		"RUNNEL_LOG":             "DEBUG",
-		"RUNNEL_HWACCEL":         "None",
-		"RUNNEL_VAAPI_DEVICE":    "/dev/dri/renderD129/",
-		"RUNNEL_TRANSCODE_SLOTS": "2",
+		"RUNNEL_LISTEN":            "127.0.0.1:9000",
+		"RUNNEL_DATA":              "relative/data",
+		"RUNNEL_NAME":              "  Upstairs ",
+		"RUNNEL_LOG":               "DEBUG",
+		"RUNNEL_HWACCEL":           "None",
+		"RUNNEL_VAAPI_DEVICE":      "/dev/dri/renderD129/",
+		"RUNNEL_TRANSCODE_SLOTS":   "2",
+		"RUNNEL_FFMPEG_MAX_RSS_MB": "512",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +50,7 @@ func TestValues(t *testing.T) {
 	if c.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v", c.LogLevel)
 	}
-	if c.HWAccel != "none" || c.VAAPIDevice != "/dev/dri/renderD129" || c.TranscodeSlots != 2 {
+	if c.HWAccel != "none" || c.VAAPIDevice != "/dev/dri/renderD129" || c.TranscodeSlots != 2 || c.FFmpegMaxRSSMB != 512 {
 		t.Errorf("HWAccel = %q, VAAPIDevice = %q", c.HWAccel, c.VAAPIDevice)
 	}
 }
@@ -63,6 +64,7 @@ func TestRejects(t *testing.T) {
 		{"RUNNEL_VAAPI_DEVICE": "renderD128"},
 		{"RUNNEL_TRANSCODE_SLOTS": "0"},
 		{"RUNNEL_TRANSCODE_SLOTS": "two"},
+		{"RUNNEL_FFMPEG_MAX_RSS_MB": "10"},
 	} {
 		if _, err := FromEnv(env(m)); err == nil {
 			t.Errorf("%v: no error", m)

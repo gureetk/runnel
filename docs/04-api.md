@@ -602,14 +602,14 @@ A Matroska stream produced as it is requested. The video is re-encoded. Everythi
 |---|---|---|---|
 | `v` | `hevc`, `h264` | required | Target video codec. Must be listed in `GET /server`. |
 | `depth` | `8`, `10` | 10 for a 10-bit source with `v=hevc`, else 8 | Bit depth of the output. |
-| `max_h` | pixels | source height | Scale down if the source is taller. |
+| `max_h` | pixels, 2 to 8640 | source height | Scale down if the source is taller. An odd height is taken one lower: the encoders need an even one. |
 | `start_ms` | milliseconds | 0 | Where to start. |
 | `seek` | `key`, `exact` | `key` | `key` starts at the keyframe at or before `start_ms`, which is fast. `exact` decodes forward to `start_ms`, which costs time in proportion to the distance from the keyframe. |
-| `audio` | `all`, `none`, a stream index | `all` | Which audio streams to copy in. `none` is for use with the sidecar. |
+| `audio` | `all`, `none`, a stream index | `all` | Which audio streams to copy in. `none` is for use with the sidecar. An index is one of the file's own audio streams. |
 | `subs` | `all`, `none` | `all` | Whether to copy subtitle streams in. |
 | `fonts` | `1`, `0` | `1` | Whether to copy attachments in. |
 | `ticket` | from `prepare` | none | Claims a warm-up (7.5). |
-| `session` | client's playback id | none | Ties the stream to its progress reports. |
+| `session` | client's playback id, at most 64 characters | none | Ties the stream to its progress reports: the session's first report with timings logs the stream's first byte and encoder (7.6). |
 
 Behaviour:
 
@@ -618,9 +618,10 @@ Behaviour:
 - The stream has no duration in it. The client takes the duration from `files[].duration_ms`.
 - A seek outside what the player has buffered is a new request with a new `start_ms`. So is an audio switch when the sidecar is not in use.
 - The stream ends when the file ends or the client disconnects. On disconnect the server kills ffmpeg at once.
-- Response headers: `X-Runnel-Encoder` (such as `hevc_vaapi`) and `X-Runnel-Warmed` (`1` when a warm-up was claimed).
+- Response headers: `X-Runnel-Encoder` (such as `hevc_vaapi`) and `X-Runnel-Warmed` (`1` when a warm-up was claimed, `0` otherwise).
+- The answer starts with ffmpeg's first output. Until then nothing is sent, so an error is still an ordinary answer.
 
-Errors: `400` for a bad parameter. `409` with code `unsupported` for a codec or depth the server cannot encode, with `"supported"` in the body. `503` with code `busy` and a `Retry-After` header when every transcode slot is in use. `503` with code `unavailable` when the file is.
+Errors: `400` for a bad parameter. `404` for a file that is unknown or not offered for playback (7.2). `409` with code `unsupported` for a codec or depth the server cannot encode, and for a file without video, with what it can encode in the body: `{"error": {…}, "supported": {"video": ["h264"], "depth10": []}}`. `503` with code `busy` and `Retry-After: 5` when every transcode slot is in use. `503` with code `unavailable` when the file is, or while the server stops. `500` with code `encode_failed` when ffmpeg stopped before its first output on every rung of the ladder left to try (`05-playback.md`, section 4.3), with what ffmpeg said last.
 
 ### 7.4 `GET /files/{id}/sidecar.mkv`
 
@@ -686,7 +687,7 @@ Sent every 10 seconds while playing, and at once on pause, resume, seek and stop
 | `state` | `playing`, `paused` or `stopped`. |
 | `mode` | `direct`, `transcode`, `sidecar` (a transcode with audio from the sidecar) or `remux` (a browser playing copied video, 7.9). |
 | `audio_idx`, `sub_idx` | Optional. The tracks playing. Not stored. |
-| `timings`, `stats` | Optional. Sent once, with the first report after playback starts. The server keeps them in `play_log`: the first report of a session that carries them makes the row. |
+| `timings`, `stats` | Optional. Sent once, with the first report after playback starts. The server keeps them in `play_log`: the first report of a session that carries them makes the row. For a transcode the row also gets the server's side, from the session's last stream: its first byte, its encoder and whether it claimed a warm-up (7.3). |
 
 Returns `204`. `400` when a field is missing or malformed, the item is not a film or an episode, or the file is not one of its files. `404` when there is no such item. What the server does with it:
 
@@ -1057,6 +1058,7 @@ From stage 5 (D47). `GET /admin/update`:
 | 404 | `not_found` | No such item, file, image, person or pairing code. |
 | 404 | `not_ready` | The sidecar is not built yet. |
 | 409 | `unsupported` | The server cannot encode what was asked. |
+| 500 | `encode_failed` | ffmpeg stopped before its first output, on every way the server has to encode the file (7.3). |
 | 409 | `setup_done` | The first person already exists. |
 | 409 | `locked` | The setting is fixed by the server's environment. |
 | 409 | `last_admin` | The change would leave the server without an admin. |
@@ -1065,7 +1067,7 @@ From stage 5 (D47). `GET /admin/update`:
 | 429 | `too_many` | Too many wrong sign-ins, setup codes or code lookups, or too many pairings started. |
 | 502 | `upstream` | TMDB or Jellyfin could not be reached, or answered with something unexpected. |
 | 503 | `unavailable` | The file is missing or its disk is away. |
-| 503 | `busy` | Every transcode slot is in use. |
+| 503 | `busy` | Every transcode slot is in use, or the encoders' check is asked for while a transcode runs. |
 | 500 | `internal` | A bug. The message carries an id that is also in the server's log. |
 
 ## 10. Worked examples

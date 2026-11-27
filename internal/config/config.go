@@ -38,6 +38,9 @@ type Config struct {
 	VAAPIDevice string
 	// TranscodeSlots is how many transcodes run at once: 1 to 16.
 	TranscodeSlots int
+	// FFmpegMaxRSSMB is the resident memory above which an ffmpeg child is
+	// killed, in megabytes.
+	FFmpegMaxRSSMB int
 	// LogLevel is the lowest level that is logged.
 	LogLevel slog.Level
 }
@@ -59,6 +62,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		HWAccel:        DefaultHWAccel,
 		VAAPIDevice:    DefaultVAAPIDevice,
 		TranscodeSlots: 1,
+		FFmpegMaxRSSMB: 1024,
 		LogLevel:       slog.LevelInfo,
 	}
 
@@ -107,6 +111,13 @@ func FromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("RUNNEL_TRANSCODE_SLOTS=%q: want a number from 1 to 16", v)
 		}
 		c.TranscodeSlots = n
+	}
+	if v := getenv("RUNNEL_FFMPEG_MAX_RSS_MB"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 64 || n > 65536 {
+			return Config{}, fmt.Errorf("RUNNEL_FFMPEG_MAX_RSS_MB=%q: want a number of megabytes from 64 to 65536", v)
+		}
+		c.FFmpegMaxRSSMB = n
 	}
 
 	if v := getenv("RUNNEL_LOG"); v != "" {

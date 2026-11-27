@@ -240,6 +240,15 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 			start.Hardware, start.DroppedFrames = st.Hardware, st.DroppedFrames
 			start.Warmed = st.Warmed != nil && *st.Warmed
 		}
+		// The server's side of a transcode's start: its first byte, its
+		// encoder, and whether it claimed a warm-up.
+		if t := s.streams.of(key); t != nil {
+			if ms := t.firstByteMS.Load(); ms >= 0 {
+				start.ServerFirstByteMS = &ms
+			}
+			start.Encoder = t.encoder
+			start.Warmed = start.Warmed || t.warmed
+		}
 		if err := s.db.LogPlay(r.Context(), start); err != nil {
 			s.internal(w, r, err)
 			return
