@@ -100,6 +100,20 @@ func (q *Queue) Paused(name string) bool {
 	return false
 }
 
+// Resume ends a kind's pause before its time, as a new metadata key does
+// for work that the provider's refusal of the old one paused, and wakes
+// the queue.
+func (q *Queue) Resume(name string) {
+	q.mu.Lock()
+	for _, k := range q.kinds {
+		if k.Name == name {
+			k.until = 0
+		}
+	}
+	q.mu.Unlock()
+	q.Wake()
+}
+
 // Wake tells the queue that tasks were queued.
 func (q *Queue) Wake() {
 	select {

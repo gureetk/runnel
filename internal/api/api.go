@@ -68,6 +68,9 @@ type Config struct {
 	// TMDBKey is the environment's metadata key (RUNNEL_TMDB_KEY), which
 	// locks the setting.
 	TMDBKey string
+	// Fetches queues the fetching of metadata. Nil fetches nothing, and
+	// a refresh answers 409.
+	Fetches Fetches
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -88,6 +91,7 @@ type Server struct {
 	slots      int
 	transcodes Transcodes
 	metadata   Metadata
+	fetches    Fetches
 	envKey     string
 	startedAt  time.Time
 	mux        *http.ServeMux
@@ -139,6 +143,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		slots:         max(c.Slots, 1),
 		transcodes:    c.Transcodes,
 		metadata:      c.Metadata,
+		fetches:       c.Fetches,
 		envKey:        c.TMDBKey,
 		streams:       transcodeStreams{running: map[*transcodeStream]bool{}, last: map[sessionKey]*transcodeStream{}},
 		startedAt:     c.StartedAt,
@@ -221,7 +226,9 @@ func (s *Server) routes() {
 	s.handle("POST "+Prefix+"/admin/tasks/cancel", s.json(s.admin(s.handleWork(false))))
 	s.handle("POST "+Prefix+"/admin/tasks/retry", s.json(s.admin(s.handleWork(true))))
 	s.handle("POST "+Prefix+"/admin/scan", s.json(s.admin(s.handleScan)))
+	s.handle("POST "+Prefix+"/admin/libraries/{id}/refresh", s.json(s.admin(s.handleRefreshLibrary)))
 	s.handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
+	s.handle("POST "+Prefix+"/admin/items/{id}/refresh", s.json(s.admin(s.handleRefreshItem)))
 	s.handle("POST "+Prefix+"/admin/import/jellyfin/users", s.json(s.admin(s.handleJellyfinUsers)))
 	s.handle("POST "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleStartImport)))
 	s.handle("GET "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleImportReport)))

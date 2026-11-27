@@ -98,6 +98,9 @@ type Importer struct {
 	HTTP *http.Client
 	// Queued, when set, is called after an import was queued.
 	Queued func()
+	// Matched, when set, is called after an import that wrote provider
+	// ids, so that their metadata is fetched.
+	Matched func(ctx context.Context)
 
 	mu      sync.Mutex
 	current *Report // the queued or running import's, or nil
@@ -264,7 +267,13 @@ func (im *Importer) runTask(ctx context.Context, t db.Task) error {
 		im.mu.Unlock()
 		return ctx.Err()
 	}
+	im.mu.Lock()
+	matched := err == nil && !req.DryRun && rep.Matches > 0
+	im.mu.Unlock()
 	im.finish(rep, err, time.Since(start))
+	if matched && im.Matched != nil {
+		im.Matched(ctx)
+	}
 	return nil
 }
 

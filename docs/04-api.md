@@ -820,7 +820,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 | `DELETE /admin/libraries/{id}` | Remove the library, with its items and everyone's watch state for them. Returns `204`. |
 | `GET /admin/fs` | The folders inside a folder on the server, for choosing a library's folders. Parameter: `path`. |
 | `POST /admin/scan` | `{"library_id": 2}` or `{}` for all; an empty body is all too. Returns `202` with `{}`, and `404` for a library that does not exist. A scan asked for while one runs is gathered into the next. |
-| `POST /admin/libraries/{id}/refresh` | Fetch details again for every film and series of the library. Returns `202`. |
+| `POST /admin/libraries/{id}/refresh` | Fetch details again for every matched film and series of the library whose metadata is past its age, 30 days, or 7 for a series that airs, and for what failed (`06-library-and-metadata.md`, section 6.3). What is younger is read from the provider's cache, so a second refresh asks the provider for nothing. Returns `202` with `{}`, `404` for a library that does not exist, and `409` with code `no_key` when no metadata key is set. |
 | `GET /admin/parse-report` | How every file's name parsed (`06-library-and-metadata.md`, section 4), counted by class for each library, with the files asked for, and the files ffprobe could not read. Parameters: `library`; `class`, a class or `all`; and `noted=1` for the noted files only. A noted file makes an item and has a note: it is one of several files that make an item and whose names do not tell them apart, or it sits in a folder that is not a season folder (sections 4.2 to 4.4 there), or, in a mixed library, it is a film's whose files, read as episodes, give different numbers (section 4.10 there). A file read as an episode's has `season` and `episode`, a film's has neither. Left out, the files listed are those in `guess`, `unnumbered` and `none`, and the noted ones. `unnumbered` is an episode without a number (D51): it makes an item, and its `episode` is null; its reason is its note, which does not count it as noted. The names are parsed again for each request: nothing about it is stored. |
 
 `GET /admin/libraries`:
@@ -899,7 +899,7 @@ Two settings can be changed while the server runs, and are kept in the database.
 | `GET /admin/items/{id}/candidates` | Search a provider for matches. Parameters: `q`, `year`, `provider`. |
 | `PUT /admin/items/{id}/match` | Fix a match: `{"provider": "tmdb", "value": "123456", "season_offset": 0, "episode_offset": 0, "numbering": "seasons"}`. Stored by folder, so it survives rescans. |
 | `DELETE /admin/items/{id}/match` | Forget the match. The item becomes unmatched. |
-| `POST /admin/items/{id}/refresh` | Fetch metadata again. |
+| `POST /admin/items/{id}/refresh` | Fetch metadata again, asking the provider whatever the age of what it has: a film's or a series' details, and every season the series holds. A season or an episode refreshes its series. Returns `202` with `{}`; the fetch runs in the background (`GET /admin/tasks`, kind `fetch`). An item without a match has nothing to fetch, and the call changes nothing. `404` for an item that does not exist, `400` for another type, `409` with code `no_key` when no metadata key is set. |
 
 - **Leaving an item unmatched.** `PUT /admin/items/{id}/match` with `{"provider": "none"}`. The item keeps the title from its file name, leaves the review list and is not matched again. Its `match.state` is `ignored`. It is stored by folder like a match, and the `DELETE` undoes it.
 - **A preview.** `PUT /admin/items/{id}/match?dry_run=1` writes nothing and returns how the files would map:
@@ -1084,6 +1084,7 @@ From stage 5 (D47). `GET /admin/update`:
 | 500 | `encode_failed` | ffmpeg stopped before its first output, on every way the server has to encode the file (7.3). |
 | 409 | `setup_done` | The first person already exists. |
 | 409 | `locked` | The setting is fixed by the server's environment. |
+| 409 | `no_key` | No metadata key is set, so nothing can be fetched. |
 | 409 | `last_admin` | The change would leave the server without an admin. |
 | 409 | `conflict` | It is already running, as a second import while one runs, or it exists already, as a name that is taken. |
 | 410 | `expired` | A pairing code that ran out or was spent. |

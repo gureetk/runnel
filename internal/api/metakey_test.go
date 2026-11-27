@@ -30,6 +30,8 @@ func TestMetadataKeySetting(t *testing.T) {
 	client := tmdb.New(ts.db, tmdb.Stored(ts.db, ""), "test", slog.New(slog.NewTextHandler(ts.log, nil)))
 	client.SetBase(srv.URL + "/3")
 	ts.metadata = client
+	fetches := &fakeFetches{}
+	ts.fetches = fetches
 
 	type key struct {
 		Set       bool    `json:"set"`
@@ -90,6 +92,9 @@ func TestMetadataKeySetting(t *testing.T) {
 
 	// A key TMDB takes is kept, as working, and only its hint is shown.
 	patch(map[string]any{"tmdb_key": inventedToken}, 200, "")
+	if fetches.keys != 1 {
+		t.Errorf("a new key told the fetches %d times, want once", fetches.keys)
+	}
 	if k := got.TMDBKey; !k.Set || k.Hint == nil || *k.Hint != inventedToken[len(inventedToken)-4:] || k.OK == nil || !*k.OK ||
 		k.CheckedAt == nil || *k.CheckedAt != ts.now().UnixMilli() || k.Locked {
 		t.Fatalf("after a good key: %+v", k)
