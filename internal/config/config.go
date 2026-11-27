@@ -27,6 +27,9 @@ type Config struct {
 	// Name is the server's name as clients show it. Empty means the
 	// machine's host name.
 	Name string
+	// TMDBKey is the metadata key, which replaces the one an admin sets.
+	// Empty means the one an admin sets, if any. It is never logged.
+	TMDBKey string
 	// FFprobe and FFmpeg are the paths of ffprobe and ffmpeg. Empty means
 	// the ones found on PATH.
 	FFprobe string
@@ -88,6 +91,11 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.DataDir = abs
 
 	c.Name = strings.TrimSpace(getenv("RUNNEL_NAME"))
+	c.TMDBKey = strings.TrimSpace(getenv("RUNNEL_TMDB_KEY"))
+	if !printable(c.TMDBKey) {
+		// The error never holds the key.
+		return Config{}, fmt.Errorf("RUNNEL_TMDB_KEY: want TMDB's API read access token or API key: up to 1000 printable characters, without spaces")
+	}
 	c.FFprobe = getenv("RUNNEL_FFPROBE")
 	c.FFmpeg = getenv("RUNNEL_FFMPEG")
 
@@ -136,4 +144,18 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	}
 
 	return c, nil
+}
+
+// printable reports whether a key, if set, has the form of TMDB's
+// credentials (docs/04-api.md, section 8.1).
+func printable(key string) bool {
+	if len(key) > 1000 {
+		return false
+	}
+	for _, r := range key {
+		if r <= ' ' || r > '~' {
+			return false
+		}
+	}
+	return true
 }

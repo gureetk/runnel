@@ -136,7 +136,7 @@ func TestServerName(t *testing.T) {
 		{bo, map[string]any{"server_name": "Mine"}, 403},
 		{ada, map[string]any{"server_name": ""}, 400},
 		{ada, map[string]any{"server_name": strings.Repeat("x", 41)}, 400},
-		{ada, map[string]any{"tmdb_key": "abc"}, 400},
+		{ada, map[string]any{"tmdb_key": "a key with spaces"}, 400},
 		{ada, map[string]any{"colour": "blue"}, 400},
 	} {
 		if rec := ts.call(t, "PATCH", "/api/v1/admin/settings", c.token, "", c.body, nil); rec.Code != c.want {
