@@ -649,7 +649,7 @@ For a file that will be transcoded, the body carries the transcode parameters:
 {"mode": "transcode", "v": "hevc", "depth": 10, "start_ms": 512000, "seek": "key", "audio": "all", "subs": "all", "fonts": 1}
 ```
 
-The server starts ffmpeg now and holds its first output in memory. A server that cannot encode what is asked answers `409 unsupported`, as one that encodes nothing does to any transcode. `200`:
+The parameters are those of 7.3, with the same defaults: `depth`, `max_h`, `start_ms` and `fonts` are numbers, `audio` is `"all"`, `"none"` or a stream index as a number, and `seek` and `subs` are strings. The server starts ffmpeg now, holds its first output in memory, and answers once that output has come. A server that cannot encode what is asked answers `409 unsupported`, as one that encodes nothing does to any transcode. The other errors are those of 7.3. `200`:
 
 ```json
 {"ticket": "p_7c1e4a90b2d3", "expires_in": 30, "sidecar": {"ready": false}}
@@ -657,7 +657,9 @@ The server starts ffmpeg now and holds its first output in memory. A server that
 
 - The transcode request that carries the ticket gets the held output at once and then the live stream.
 - A ticket is good for one request and for 30 seconds. A transcode request with a ticket that is gone, or with different parameters, starts fresh. It never fails because of the ticket.
-- One warm-up per token. A new `prepare` replaces the one before it.
+- One warm-up per token. A new `prepare` replaces the one before it, of either mode.
+- One transcode's warm-up is held on the server at a time, and it takes a transcode slot while it waits. A newer transcode `prepare`, from anyone, replaces it. A transcode request that finds every slot taken puts it aside and takes its slot.
+- `X-Runnel-Warmed: 1` on the transcode says that the ticket was claimed.
 - `prepare` is always optional. A client that never calls it still works.
 
 ### 7.6 `POST /progress`

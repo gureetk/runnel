@@ -209,7 +209,7 @@ func (t *Transcoder) start(ctx context.Context, src Source, tg Target, r Rung, r
 	select {
 	case got := <-first:
 		if got.n > 0 {
-			c.buf, c.first = buf, buf[:got.n]
+			c.buf, c.first = buf, [][]byte{buf[:got.n]}
 			return c, nil
 		}
 		c.kill()
@@ -255,7 +255,7 @@ type Child struct {
 	cmd     *exec.Cmd
 	out     *os.File
 	buf     []byte
-	first   []byte // ffmpeg's first output, not relayed yet
+	first   [][]byte // ffmpeg's output read ahead, not relayed yet
 	stderr  *tail
 	release func()
 	started time.Time
@@ -279,11 +279,12 @@ func (c *Child) RSS() int64 { return c.rss.Load() }
 // every write. It returns nil when ffmpeg's output ends, or the error of
 // the first write that fails: the client went.
 func (c *Child) Relay(w io.Writer, flush func()) error {
-	if len(c.first) > 0 {
-		if _, err := w.Write(c.first); err != nil {
+	for len(c.first) > 0 {
+		chunk := c.first[0]
+		c.first[0], c.first = nil, c.first[1:] // what is sent can go
+		if _, err := w.Write(chunk); err != nil {
 			return err
 		}
-		c.first = nil
 		flush()
 	}
 	for {

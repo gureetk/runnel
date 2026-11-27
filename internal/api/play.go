@@ -4,15 +4,21 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/play"
 )
 
 // Gate is the playback gate. A request that starts a playback holds it,
@@ -43,16 +49,30 @@ const (
 	warmTail = 1 << 20
 )
 
-// warmup is the one warm-up of a token.
+// warmup is the one warm-up of a token: a direct play's, which reads the
+// file's head and tail, or a transcode's, which holds ffmpeg's first
+// output for the request that brings its ticket.
 type warmup struct {
 	file    int64
 	cancel  context.CancelFunc
-	release func()
+	release func() // the gate's hold
+	// A transcode's.
+	ticket string
+	target play.Target
+	warm   *play.Warm
 }
 
+// stop ends a warm-up that nothing claimed: a transcode's ffmpeg is
+// killed.
 func (w *warmup) stop() {
 	w.cancel()
 	w.release()
+	if w.warm != nil {
+		w.warm.Stop()
+		// Its buffer was megabytes: give them back (docs/02-architecture.md,
+		// section 8).
+		go debug.FreeOSMemory()
+	}
 }
 
 type warmups struct {
@@ -60,12 +80,13 @@ type warmups struct {
 	by map[int64]*warmup // token id -> its warm-up
 }
 
-// startWarmup reads the head and the tail of a file in the background,
-// and holds the gate from now until the file's playback starts, a newer
-// prepare of the same token replaces this one, or prepareHold passes.
-func (s *Server) startWarmup(tokenID, fileID int64, path string) {
+// startWarmup holds the gate from now until the file's playback starts, a
+// newer prepare of the same token replaces this warm-up, or prepareHold
+// passes, when the warm-up ends. A direct play's reads the file's head and
+// tail in the background (path); a transcode's holds warm.
+func (s *Server) startWarmup(tokenID, fileID int64, path string, ticket string, target play.Target, warm *play.Warm) {
 	ctx, cancel := context.WithCancel(context.Background())
-	w := &warmup{file: fileID, cancel: cancel, release: s.gate.Hold()}
+	w := &warmup{file: fileID, cancel: cancel, release: s.gate.Hold(), ticket: ticket, target: target, warm: warm}
 	s.warm.mu.Lock()
 	old := s.warm.by[tokenID]
 	s.warm.by[tokenID] = w
@@ -76,22 +97,29 @@ func (s *Server) startWarmup(tokenID, fileID int64, path string) {
 	go func() {
 		t := time.NewTimer(s.prepareHold)
 		defer t.Stop()
-		readHeadAndTail(ctx, path)
+		if warm == nil {
+			readHeadAndTail(ctx, path)
+		}
 		select {
 		case <-ctx.Done():
+			return // handed over or replaced, by whoever did that
 		case <-t.C:
 		}
 		s.warm.mu.Lock()
-		if s.warm.by[tokenID] == w {
+		mine := s.warm.by[tokenID] == w
+		if mine {
 			delete(s.warm.by, tokenID)
 		}
 		s.warm.mu.Unlock()
-		w.stop()
+		if mine {
+			w.stop()
+		}
 	}()
 }
 
 // handOver ends a token's warm-up of a file whose playback has started,
-// which holds the gate itself from here.
+// which holds the gate itself from here. A transcode's warm-up that the
+// playback did not claim is of no more use, and goes too.
 func (s *Server) handOver(tokenID, fileID int64) {
 	s.warm.mu.Lock()
 	w := s.warm.by[tokenID]
@@ -102,6 +130,42 @@ func (s *Server) handOver(tokenID, fileID int64) {
 	delete(s.warm.by, tokenID)
 	s.warm.mu.Unlock()
 	w.stop()
+}
+
+// claim hands a transcode its token's warm-up when the ticket, the file
+// and the target all match, or returns nil (docs/04-api.md, section 7.5).
+// The playback holds the gate itself from here.
+func (s *Server) claim(tokenID int64, ticket string, fileID int64, target play.Target) *play.Warm {
+	s.warm.mu.Lock()
+	w := s.warm.by[tokenID]
+	if w == nil || w.warm == nil || w.ticket != ticket || w.file != fileID || w.target != target {
+		s.warm.mu.Unlock()
+		return nil
+	}
+	delete(s.warm.by, tokenID)
+	s.warm.mu.Unlock()
+	w.cancel()
+	w.release()
+	return w.warm
+}
+
+// dropTranscodeWarmups ends every transcode's warm-up: one is held at a
+// time (docs/05-playback.md, section 4.4), and a transcode that wants a
+// slot comes before it. It reports whether it ended any.
+func (s *Server) dropTranscodeWarmups() bool {
+	s.warm.mu.Lock()
+	var drop []*warmup
+	for token, w := range s.warm.by {
+		if w.warm != nil {
+			drop = append(drop, w)
+			delete(s.warm.by, token)
+		}
+	}
+	s.warm.mu.Unlock()
+	for _, w := range drop {
+		w.stop()
+	}
+	return len(drop) > 0
 }
 
 // readHeadAndTail reads the first warmHead and the last warmTail bytes of
@@ -136,12 +200,70 @@ func readHeadAndTail(ctx context.Context, path string) {
 type prepareRequest struct {
 	Mode    string `json:"mode"`
 	StartMS *int64 `json:"start_ms"`
+	// A transcode's parameters, as GET /files/{id}/transcode.mkv takes
+	// them (docs/04-api.md, section 7.3).
+	V     string          `json:"v"`
+	Depth *int            `json:"depth"`
+	MaxH  *int            `json:"max_h"`
+	Seek  string          `json:"seek"`
+	Audio json.RawMessage `json:"audio"`
+	Subs  string          `json:"subs"`
+	Fonts *int            `json:"fonts"`
+}
+
+// query is a transcode prepare's parameters as a transcode request has
+// them, so that both are read and given their defaults the same way. A
+// message means a parameter that is not of its type.
+func (p prepareRequest) query() (url.Values, string) {
+	q := url.Values{}
+	set := func(k string, n *int) {
+		if n != nil {
+			q.Set(k, strconv.Itoa(*n))
+		}
+	}
+	q.Set("v", p.V)
+	set("depth", p.Depth)
+	set("max_h", p.MaxH)
+	set("fonts", p.Fonts)
+	if p.StartMS != nil {
+		q.Set("start_ms", strconv.FormatInt(*p.StartMS, 10))
+	}
+	for k, v := range map[string]string{"seek": p.Seek, "subs": p.Subs} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	if len(p.Audio) > 0 {
+		var name string
+		var index int
+		switch {
+		case json.Unmarshal(p.Audio, &name) == nil:
+			q.Set("audio", name)
+		case json.Unmarshal(p.Audio, &index) == nil:
+			q.Set("audio", strconv.Itoa(index))
+		default:
+			return nil, `audio is "all", "none" or a stream index`
+		}
+	}
+	return q, ""
+}
+
+// ticketTTL is how long a transcode's warm-up waits for its request, in
+// the answer's expires_in (docs/04-api.md, section 7.5).
+const ticketTTL = 30
+
+// newTicket is a warm-up's ticket: p_ and 48 random bits in hex.
+func newTicket() string {
+	var b [6]byte
+	rand.Read(b[:])
+	return "p_" + hex.EncodeToString(b[:])
 }
 
 // handlePrepare is POST /files/{id}/prepare (docs/04-api.md, section 7.5).
 // For direct play it answers at once and reads the file's head and tail in
-// the background. This server encodes nothing yet, so a transcode cannot
-// be prepared.
+// the background. For a transcode it starts ffmpeg, holds its first output
+// for the request that brings the ticket, and answers once that output
+// has come.
 func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -155,7 +277,7 @@ func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
 	switch req.Mode {
 	case "direct":
 	case "transcode":
-		s.fail(w, r, http.StatusConflict, "unsupported", "this server cannot transcode yet")
+		s.prepareTranscode(w, r, id, req)
 		return
 	default:
 		s.fail(w, r, http.StatusBadRequest, "bad_request", `mode is "direct" or "transcode"`)
@@ -174,8 +296,49 @@ func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusServiceUnavailable, "unavailable", "the file is missing or its disk is away")
 		return
 	}
-	s.startWarmup(callerOf(r.Context()).tokenID, id, f.Path)
+	s.startWarmup(callerOf(r.Context()).tokenID, id, f.Path, "", play.Target{}, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// prepareTranscode warms a transcode (docs/05-playback.md, section 6). The
+// token's warm-up before it goes, and so does any other transcode's
+// warm-up: one is held at a time.
+func (s *Server) prepareTranscode(w http.ResponseWriter, r *http.Request, id int64, req prepareRequest) {
+	q, bad := req.query()
+	if bad != "" {
+		s.fail(w, r, http.StatusBadRequest, "bad_request", bad)
+		return
+	}
+	src, t, ok := s.transcodeRequest(w, r, id, q)
+	if !ok {
+		return
+	}
+	// The prepare holds the gate from its arrival; its warm-up holds it
+	// from here as a direct play's does.
+	hold := s.gate.Hold()
+	defer hold()
+	token := callerOf(r.Context()).tokenID
+	s.dropWarmup(token)
+	s.dropTranscodeWarmups()
+	// What comes before the first video packet, and 4 MiB of video.
+	warm, err := s.transcodes.Warm(r.Context(), src, t, int(src.Attachments)+play.WarmExtra)
+	if s.startFailed(w, r, id, t, err) {
+		return
+	}
+	ticket := newTicket()
+	s.startWarmup(token, id, "", ticket, t, warm)
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket, "expires_in": ticketTTL, "sidecar": map[string]bool{"ready": false}})
+}
+
+// dropWarmup ends a token's warm-up, whatever its file.
+func (s *Server) dropWarmup(token int64) {
+	s.warm.mu.Lock()
+	w := s.warm.by[token]
+	delete(s.warm.by, token)
+	s.warm.mu.Unlock()
+	if w != nil {
+		w.stop()
+	}
 }
 
 // gateWriter calls first when the response's first byte goes out. It
