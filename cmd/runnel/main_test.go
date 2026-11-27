@@ -519,7 +519,14 @@ func TestImportJellyfin(t *testing.T) {
 	}
 	body["api_key"] = "wrong-key"
 	var e *apiError
-	if err := importJellyfin(ctx, client, body, &out); !errors.As(err, &e) || e.Code != "bad_key" {
+	// The report says done before the queue marks the run's task done,
+	// and until then another import is refused as running: wait that out.
+	err = importJellyfin(ctx, client, body, &out)
+	for deadline := time.Now().Add(5 * time.Second); errors.As(err, &e) && e.Code == "conflict" && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		err = importJellyfin(ctx, client, body, &out)
+	}
+	if !errors.As(err, &e) || e.Code != "bad_key" {
 		t.Fatalf("a wrong key: %v", err)
 	}
 	srv.waitFor(t, `msg="Jellyfin import done" dry_run=false joined=1 not_joined=1`)
