@@ -152,7 +152,7 @@ func (s *Server) handleParseReport(w http.ResponseWriter, r *http.Request) {
 		}
 		f := reportFile{FileID: row.FileID, LibraryID: row.LibraryID, Path: row.Path, Class: row.Class,
 			Title: row.Title, Year: intOrNil(row.Year, row.Year != 0), Note: row.Note}
-		if lib.Kind == "shows" && row.Class != parse.None {
+		if row.IsEpisode {
 			f.Season, f.Episode = intOrNil(row.Season, true), intOrNil(row.Episode, row.Class != parse.Unnumbered)
 			f.EpisodeEnd = intOrNil(row.EpisodeEnd, row.EpisodeEnd != 0)
 		}

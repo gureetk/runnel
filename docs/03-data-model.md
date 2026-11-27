@@ -483,7 +483,8 @@ ALTER TABLE items ADD COLUMN episode_order REAL;  -- episodes without a number: 
 
 **Items**
 
-- Movies and series are keyed by `(root_id, path_key)`: the folder they were built from, or the lone file for a film that has no folder.
+- Movies and series are keyed by `(root_id, path_key)`: the folder they were built from, or the lone file for a film that has no folder. The folder is its path below the root, with any grouping folders above it: `films/Amber Atlas (1969)` (`06-library-and-metadata.md`, section 4.9).
+- In a mixed library (`kind = 'mixed'`) a folder is a film's or a series', never both. When a folder changes kind, the item it made gives up its `path_key` before the new item is written, in the same transaction, and is then deleted with its tombstone, so the unique index on `(root_id, path_key)` never holds two.
 - Seasons belong to a series by `parent_id`. Episodes belong to a season by `parent_id` and carry `series_id` as well, so episode queries need no join through seasons.
 - Season 0 holds specials. Sorting by `(season_number, episode_number)` with season 0 last is the display order.
 - `numbering = 'absolute'` on a series means its files carry one running count. `absolute_number` is that count, and the episode's key. `season_number` and `episode_number` then hold the provider's numbers once they are mapped, and until then the season the file is in, or 1, and the running number (`06-library-and-metadata.md`, section 5).

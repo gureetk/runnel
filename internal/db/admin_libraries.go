@@ -79,29 +79,39 @@ func (d *DB) AdminLibraries(ctx context.Context) ([]AdminLibrary, error) {
 	return out, rows.Err()
 }
 
+// ErrKindChange is returned for a change of kind other than a films or a
+// shows library becoming mixed (D49).
+var ErrKindChange = errors.New("db: only a films or a shows library can change its kind, and only to mixed")
+
 // LibraryChange is what a change to a library asks for. Nil fields stay
 // as they are.
 type LibraryChange struct {
 	Name, Profile *string
-	AddRoots      []string // absolute paths
-	RemoveRoots   []int64
+	// Kind is "mixed", for a films or a shows library, or the library's
+	// own kind, which changes nothing.
+	Kind        *string
+	AddRoots    []string // absolute paths
+	RemoveRoots []int64
 }
 
-// ChangeLibrary renames a library, sets its profile, and adds and removes
-// folders, all in one transaction, and returns the library as it is
-// then. A removed folder takes what was built from it: its items are
-// deleted, each with a tombstone, children before their parents, as a
-// build deletes them (docs/03-data-model.md, sections 4 and 5).
+// ChangeLibrary renames a library, sets its profile, makes a films or a
+// shows library mixed, and adds and removes folders, all in one
+// transaction, and returns the library as it is then. A removed folder
+// takes what was built from it: its items are deleted, each with a
+// tombstone, children before their parents, as a build deletes them
+// (docs/03-data-model.md, sections 4 and 5). A new kind changes no item:
+// the next build reads the library's folders by it.
 //
 // ErrNotFound: no such library. ErrNameTaken: another library has the
-// name. ErrNoSuchRoot: a folder to remove is not the library's.
+// name. ErrKindChange: a change of kind that is not to mixed, or not from
+// films or shows. ErrNoSuchRoot: a folder to remove is not the library's.
 // ErrRootCount: the library would have no folder, or too many.
 // ErrRootOverlap: a new folder is, contains or lies inside one that a
 // library scans, other than those removed.
 func (d *DB) ChangeLibrary(ctx context.Context, id int64, c LibraryChange, now int64) (model.Library, error) {
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
-		var name, profile string
-		err := tx.tx.QueryRowContext(ctx, `SELECT name, profile FROM libraries WHERE id = ?`, id).Scan(&name, &profile)
+		var name, kind, profile string
+		err := tx.tx.QueryRowContext(ctx, `SELECT name, kind, profile FROM libraries WHERE id = ?`, id).Scan(&name, &kind, &profile)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -121,6 +131,12 @@ func (d *DB) ChangeLibrary(ctx context.Context, id int64, c LibraryChange, now i
 		}
 		if c.Profile != nil {
 			profile = *c.Profile
+		}
+		if c.Kind != nil && *c.Kind != kind {
+			if *c.Kind != "mixed" || (kind != "movies" && kind != "shows") {
+				return ErrKindChange
+			}
+			kind = *c.Kind
 		}
 
 		own := map[int64]string{}
@@ -204,12 +220,12 @@ func (d *DB) ChangeLibrary(ctx context.Context, id int64, c LibraryChange, now i
 		if err != nil {
 			return err
 		}
-		_, err = tx.tx.ExecContext(ctx, `UPDATE libraries SET name = ?, profile = ?, updated_seq = ? WHERE id = ?`,
-			name, profile, seq, id)
+		_, err = tx.tx.ExecContext(ctx, `UPDATE libraries SET name = ?, kind = ?, profile = ?, updated_seq = ? WHERE id = ?`,
+			name, kind, profile, seq, id)
 		return err
 	})
 	switch {
-	case errors.Is(err, ErrNotFound), errors.Is(err, ErrNameTaken), errors.Is(err, ErrNoSuchRoot),
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrNameTaken), errors.Is(err, ErrKindChange), errors.Is(err, ErrNoSuchRoot),
 		errors.Is(err, ErrRootCount), errors.Is(err, ErrRootOverlap):
 		return model.Library{}, err
 	case err != nil:

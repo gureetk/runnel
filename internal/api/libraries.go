@@ -72,8 +72,8 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	case !validName(req.Name):
 		s.fail(w, r, http.StatusBadRequest, "bad_request", "a name has 1 to 40 characters, no control characters, and no space at either end")
 		return
-	case req.Kind != "movies" && req.Kind != "shows":
-		s.fail(w, r, http.StatusBadRequest, "bad_request", `kind is "movies" or "shows"`)
+	case req.Kind != "movies" && req.Kind != "shows" && req.Kind != "mixed":
+		s.fail(w, r, http.StatusBadRequest, "bad_request", `kind is "movies", "shows" or "mixed"`)
 		return
 	case req.Profile != "default" && req.Profile != "anime":
 		s.fail(w, r, http.StatusBadRequest, "bad_request", `profile is "default" or "anime"`)
@@ -229,8 +229,9 @@ func (s *Server) handleAdminLibraries(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleChangeLibrary is PATCH /admin/libraries/{id}: a new name or
-// profile, folders added and folders removed, all at once or none of it
-// (docs/04-api.md, section 8.2). A library added to is scanned at once.
+// profile, a films or a shows library made mixed, folders added and
+// folders removed, all at once or none of it (docs/04-api.md, section
+// 8.2). A library added to, or made mixed, is scanned at once.
 func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.pathID(w, r, "library")
 	if !ok {
@@ -275,10 +276,26 @@ func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "kind":
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "a library's kind cannot change; make a new library")
-			return
+			if !field(k, &c.Kind) {
+				return
+			}
+			if c.Kind == nil {
+				s.fail(w, r, http.StatusBadRequest, "bad_request", `kind is "mixed", for a films or a shows library`)
+				return
+			}
 		default:
-			s.fail(w, r, http.StatusBadRequest, "bad_request", "a library's changes are name, profile, add_roots and remove_roots")
+			s.fail(w, r, http.StatusBadRequest, "bad_request", "a library's changes are name, kind, profile, add_roots and remove_roots")
+			return
+		}
+	}
+	var before model.Library
+	if c.Kind != nil {
+		var err error
+		if before, err = s.db.Library(r.Context(), id); errors.Is(err, db.ErrNotFound) {
+			s.fail(w, r, http.StatusNotFound, "not_found", "no such library")
+			return
+		} else if err != nil {
+			s.internal(w, r, err)
 			return
 		}
 	}
@@ -289,6 +306,9 @@ func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, db.ErrNameTaken):
 		s.fail(w, r, http.StatusConflict, "conflict", "a library with that name exists")
+		return
+	case errors.Is(err, db.ErrKindChange):
+		s.fail(w, r, http.StatusBadRequest, "bad_request", "a films or a shows library can become mixed, and no other change of kind is allowed")
 		return
 	case errors.Is(err, db.ErrRootOverlap):
 		s.fail(w, r, http.StatusConflict, "conflict", "a folder is, contains or lies inside one that a library already scans")
@@ -306,7 +326,9 @@ func (s *Server) handleChangeLibrary(w http.ResponseWriter, r *http.Request) {
 	if s.scans != nil && len(c.RemoveRoots) > 0 {
 		s.scans.Forget(c.RemoveRoots)
 	}
-	if s.scans != nil && len(c.AddRoots) > 0 {
+	// Folders added are scanned, and a library of a new kind is read again
+	// by it: a scan builds its items.
+	if s.scans != nil && (len(c.AddRoots) > 0 || (before.Kind != "" && lib.Kind != before.Kind)) {
 		s.scans.Request(id)
 	}
 	writeJSON(w, http.StatusOK, adminLibraryJSON(lib))

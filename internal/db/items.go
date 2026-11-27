@@ -432,6 +432,21 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 		}
 	}
 
+	// In a mixed library a folder read now as the other kind makes a new
+	// item, and the item it made goes below. Its folder is cleared first,
+	// so that the two never hold one key at once.
+	for _, id := range slices.Sorted(maps.Keys(b.items)) {
+		e := b.items[id]
+		if e.matched || e.key == "" ||
+			!(e.typ == "movie" && wantedSeries[keyOf("series", e.rootID, e.key)]) &&
+				!(e.typ == "series" && wantedFilm[keyOf("movie", e.rootID, e.key)]) {
+			continue
+		}
+		if _, err := b.tx.tx.ExecContext(b.ctx, `UPDATE items SET path_key = NULL WHERE id = ?`, e.id); err != nil {
+			return err
+		}
+	}
+
 	for i, f := range films {
 		if _, err := b.put(filmItems[i], fields{typ: "movie", rootID: f.RootID, key: f.Key, title: f.Title,
 			sort: b.sortTitle(f.Title), year: f.Year, addedAt: b.addedAt(f.Files), links: linksOf(f.Files)}); err != nil {

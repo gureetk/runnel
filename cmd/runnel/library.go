@@ -20,8 +20,9 @@ import (
 	"github.com/gureetk/runnel/internal/config"
 )
 
-const libraryUsage = `Usage: runnel library add --name <name> --kind movies|shows [--profile anime] --root <folder>...
+const libraryUsage = `Usage: runnel library add --name <name> --kind movies|shows|mixed [--profile anime] --root <folder>...
        runnel library list
+       runnel library change <id> [--name <name>] [--profile default|anime] [--kind mixed] [--yes]
        runnel library remove <id> [--yes]
 
 add adds a library to the running server, with one or more folders
@@ -29,6 +30,12 @@ add adds a library to the running server, with one or more folders
 server's log says when it is done.
 
 list prints the libraries, their folders, and each folder's last scan.
+
+change renames a library, sets its profile, or makes a films or a shows
+library mixed, which cannot be undone: what reads the same keeps its
+watch state, and a film read now as a series, or a series read now as a
+film, is a new item without it. Before a change of kind it asks on a
+terminal; elsewhere it needs --yes.
 
 remove removes a library, with its items and everyone's watch state for
 them. It asks first on a terminal; elsewhere it needs --yes.
@@ -91,6 +98,26 @@ func libraryCmd(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return subcommand(stderr, func(ctx context.Context, c *adminClient) error {
 			return libraryRemove(ctx, c, id, *yes, stdin, stdout, stderr)
 		})
+	case "change":
+		fs := flag.NewFlagSet("runnel library change", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		var ch libraryChanges
+		fs.Func("name", "a new name", func(v string) error { ch.name = &v; return nil })
+		fs.Func("profile", "default, or anime for a library of anime series", func(v string) error { ch.profile = &v; return nil })
+		fs.Func("kind", "mixed, for a films or a shows library", func(v string) error { ch.kind = &v; return nil })
+		yes := fs.Bool("yes", false, "change the kind without asking")
+		rest, err := parseArgs(fs, args[1:])
+		var id int64
+		if err == nil && len(rest) == 1 {
+			id, err = strconv.ParseInt(rest[0], 10, 64)
+		}
+		if err != nil || len(rest) != 1 || id <= 0 || (ch.name == nil && ch.profile == nil && ch.kind == nil) {
+			fmt.Fprint(stderr, libraryUsage)
+			return 2
+		}
+		return subcommand(stderr, func(ctx context.Context, c *adminClient) error {
+			return libraryChange(ctx, c, id, ch, *yes, stdin, stdout, stderr)
+		})
 	default:
 		fmt.Fprint(stderr, libraryUsage)
 		return 2
@@ -98,7 +125,7 @@ func libraryCmd(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("runnel library add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	name := fs.String("name", "", "the library's name")
-	kind := fs.String("kind", "", "movies or shows")
+	kind := fs.String("kind", "", "movies, shows or mixed")
 	profile := fs.String("profile", "", "anime, for a library of anime series")
 	var roots []string
 	fs.Func("root", "a folder the library scans; give it once for each", func(v string) error {
@@ -253,6 +280,74 @@ func libraryRemove(ctx context.Context, c *adminClient, id int64, yes bool, stdi
 		return err
 	}
 	fmt.Fprintf(stdout, "Removed library %d, %s.\n", lib.ID, lib.Name)
+	return nil
+}
+
+// libraryChanges are the changes asked of a library; nil is no change.
+type libraryChanges struct {
+	name, profile, kind *string
+}
+
+// libraryChange changes a library, with PATCH /admin/libraries/{id}.
+// Before a change of kind, which cannot be undone, it asks on a terminal.
+func libraryChange(ctx context.Context, c *adminClient, id int64, ch libraryChanges, yes bool, stdin *os.File, stdout, prompt io.Writer) error {
+	libs, err := adminLibraries(ctx, c)
+	if err != nil {
+		return err
+	}
+	var lib *adminLibrary
+	for i := range libs {
+		if libs[i].ID == id {
+			lib = &libs[i]
+		}
+	}
+	if lib == nil {
+		return fmt.Errorf("there is no library %d", id)
+	}
+	body := map[string]any{}
+	if ch.name != nil {
+		body["name"] = *ch.name
+	}
+	if ch.profile != nil {
+		body["profile"] = *ch.profile
+	}
+	newKind := ch.kind != nil && *ch.kind != lib.Kind
+	if ch.kind != nil {
+		body["kind"] = *ch.kind
+	}
+	if newKind && !yes {
+		if stdin == nil || !isTerminal(stdin.Fd()) {
+			return errors.New("library change asks before a change of kind, which cannot be undone; give --yes to change it without asking")
+		}
+		fmt.Fprintf(prompt, "Make library %d, %s, %s? This cannot be undone. What reads the same keeps its watch state; "+
+			"a film read now as a series, or a series read now as a film, is a new item without it. Type yes to go on: ",
+			lib.ID, lib.Name, *ch.kind)
+		answer, err := bufio.NewReader(stdin).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if strings.TrimSpace(answer) != "yes" {
+			fmt.Fprintln(stdout, "Nothing was changed.")
+			return nil
+		}
+	}
+	var changed struct {
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		Kind    string `json:"kind"`
+		Profile string `json:"profile"`
+	}
+	if err := c.do(ctx, "PATCH", "/admin/libraries/"+strconv.FormatInt(id, 10), body, &changed); err != nil {
+		return err
+	}
+	kind := changed.Kind
+	if changed.Profile != "default" {
+		kind += ", " + changed.Profile
+	}
+	fmt.Fprintf(stdout, "Changed library %d, %s (%s).\n", changed.ID, changed.Name, kind)
+	if newKind {
+		fmt.Fprintln(stdout, "Its folders are being read again; the server's log says when its items are built.")
+	}
 	return nil
 }
 

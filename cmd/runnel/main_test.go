@@ -46,7 +46,8 @@ func TestCommands(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"library"}, {"library", "list", "extra"}, {"library", "remove"}, {"library", "remove", "x"},
-		{"library", "remove", "0"}, {"library", "rename", "1"}, {"import"}, {"import", "plex"}, {"import", "jellyfin"},
+		{"library", "remove", "0"}, {"library", "rename", "1"}, {"library", "change", "1"}, {"library", "change", "x", "--kind", "mixed"},
+		{"library", "change", "--kind", "mixed"}, {"import"}, {"import", "plex"}, {"import", "jellyfin"},
 		{"import", "jellyfin", "users", "--url", "http://jf.lan", "--write"}, {"import", "jellyfin", "--url", "http://jf.lan", "--user", "ada"}} {
 		if code := run(args, os.Stdin, &out, &errOut); code != 2 {
 			t.Errorf("%v: %d", args, code)
@@ -366,6 +367,37 @@ func TestLibraryAddAndScan(t *testing.T) {
 			t.Fatalf("the list lacks %q:\n%s", want, out.String())
 		}
 	}
+	// A change of kind asks first, and needs --yes without a terminal. A
+	// new name does not ask.
+	mixed, films, cinema := "mixed", "movies", "Cinema"
+	if err := libraryChange(ctx, client, 1, libraryChanges{kind: &mixed}, false, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("a change of kind without a terminal or --yes: %v", err)
+	}
+	out.Reset()
+	if err := libraryChange(ctx, client, 1, libraryChanges{name: &cinema, kind: &films}, false, nil, &out, io.Discard); err != nil ||
+		out.String() != "Changed library 1, Cinema (movies).\n" {
+		t.Fatalf("a new name: %q %v", out.String(), err)
+	}
+	if err := libraryChange(ctx, client, 9, libraryChanges{kind: &mixed}, true, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "no library 9") {
+		t.Fatalf("an unknown library: %v", err)
+	}
+	out.Reset()
+	if err := libraryChange(ctx, client, 1, libraryChanges{name: new(string), kind: &mixed}, true, nil, &out, io.Discard); err == nil {
+		t.Fatalf("an empty name was taken: %q", out.String())
+	}
+	out.Reset()
+	if err := libraryChange(ctx, client, 1, libraryChanges{kind: &mixed}, true, nil, &out, io.Discard); err != nil ||
+		!strings.HasPrefix(out.String(), "Changed library 1, Cinema (mixed).\nIts folders are being read again") {
+		t.Fatalf("made mixed: %q %v", out.String(), err)
+	}
+	// Its third build, after the scan the change asked for, finds every
+	// film read the same.
+	builds := regexp.MustCompile(`msg="items built" library=1 ms=\d+ added=0 changed=0 removed=0`)
+	for deadline := time.Now().Add(20 * time.Second); len(builds.FindAllString(srv.logs.String(), -1)) < 2; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no build after the change of kind:\n%s", srv.logs.String())
+		}
+	}
 	if err := libraryRemove(ctx, client, 1, false, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("without a terminal or --yes: %v", err)
 	}
@@ -373,7 +405,7 @@ func TestLibraryAddAndScan(t *testing.T) {
 		t.Fatalf("an unknown library: %v", err)
 	}
 	out.Reset()
-	if err := libraryRemove(ctx, client, 1, true, nil, &out, io.Discard); err != nil || out.String() != "Removed library 1, Films.\n" {
+	if err := libraryRemove(ctx, client, 1, true, nil, &out, io.Discard); err != nil || out.String() != "Removed library 1, Cinema.\n" {
 		t.Fatalf("remove: %q %v", out.String(), err)
 	}
 	out.Reset()

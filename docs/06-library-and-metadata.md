@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5.
 
 ## 1. The pipeline
 
@@ -110,15 +110,15 @@ The parser expects Jellyfin's documented folder layout, with episode file names 
 
 ### 4.1 Films
 
-- A folder `Name (year) [ids]` holding the film, or a lone file `Name (year).ext` in the library root.
-- The item's key is the folder, or the file when there is no folder.
+- A folder `Name (year) [ids]` holding the film, at the top of the root or below grouping folders (4.9), or a lone file `Name (year).ext` in the library root.
+- The item's key is the folder, as its path below the root with the grouping folders above it, or the file when there is no folder.
 - Title and year come from the folder name, or from a lone file's name. Brackets are read for ids (4.5) and otherwise dropped. The year is the last `(NNNN)` between 1880 and 2100; whatever follows it, such as a version label, is not part of the title.
 - A film's name has a class, as an episode's does (4.3): **explicit** with its year, **guess** without one, and **none** when no title is left once brackets are dropped. A file in the none class makes no item.
 
 ### 4.2 Series and seasons
 
 - A folder `Name (year) [ids]` per series. Its name gives the title and the year.
-- The series folder is the top folder of the root that the file is under.
+- The series folder is the top folder of the root that the file is under, or the folder below the grouping folders that the file is in (4.9). Its path below the root is the series' key.
 - Season folders inside it: `Season` and a number of 1 to 4 digits, `Season 01`, `Season 1` or `Season 2019`, as Jellyfin's documentation names them. Case does not matter, and a space, dot, dash or underscore may stand between the word and the number. `Season 00` and `Specials` are season 0.
 - Jellyfin's documentation says not to shorten `Season` to `S01` [checked: its pages on shows, 21 November 2026]. Its naming code is more lenient: version 12.4 also reads `S01`, a season folder with more after its number, and the word for season in other languages [checked: its `SeasonPathParser`]. Runnel reads the documented form only.
 - Episode files directly in the series folder belong to season 1, and so do files in a folder of it that is not a season folder. Such a folder gives the file a note in the parse report, which names it: otherwise a second season in `S02` would land on the first one's numbers with nobody seeing it.
@@ -147,7 +147,7 @@ The rule, in order:
 5. Otherwise take the last number that stands alone. Class **guess**. The file goes to the review list.
 6. Otherwise there is no number: class **unnumbered**. The file is an episode without a number (D51, below), and is listed in the report.
 
-A file makes no item, class **none**, only where it has no series: at the top of a shows library, or in a series folder whose name leaves no title.
+A file makes no item, class **none**, only where it has no series: at the top of a shows library, at the top of a mixed library with an `SxxEyy` token in its name (4.10), or in a series folder whose name leaves no title.
 
 An episode number has 1 to 4 digits.
 
@@ -191,7 +191,7 @@ Kept out of lists in version 1.
 
 Both lists are Jellyfin's, as its documentation for films gives them (checked on 20 November 2026). Names are compared without case.
 
-- Folders: `behind the scenes`, `deleted scenes`, `interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`, `other`, `extras`, `trailers`, `theme-music`, `backdrops`. Such a folder counts inside a film's or a series' folder, at any depth, and not as a top folder of the root, where it would be the folder of a title such as "Other".
+- Folders: `behind the scenes`, `deleted scenes`, `interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`, `other`, `extras`, `trailers`, `theme-music`, `backdrops`. Such a folder counts inside a film's or a series' folder, at any depth, and not as a top folder of the root, where it would be the folder of a title such as "Other". The scanner tells extras before items are built, by the path alone, so a folder of these names inside a grouping folder (4.9) holds extras too: `films/Trailers/…` holds trailers, and makes no item, and so does `anime/Shorts/…`, though the shorts there may be titles. A folder of extras alone does not count when grouping folders are read.
 - Suffixes at the end of a file's base name: `-trailer`, `-sample`, `-scene`, `-clip`, `-interview`, `-behindthescenes`, `-deleted`, `-deletedscene`, `-featurette`, `-short`, `-other`, `-extra`. For `trailer` and `sample` a `.`, a `_` or a space also works in place of the `-`.
 - A file whose base name is `trailer` is an extra. One named `sample` is ignored (section 2.3).
 
@@ -222,6 +222,32 @@ Image files in an item's folder, as Jellyfin's documentation names them [checked
 - A series' images are in its folder, a season's poster in its season folder, by a name alone. An episode's thumb is beside its file.
 - Not kept: images in an extras folder; `banner`, and the landscape `thumb` and `landscape` of films and series, for which no screen has a place; backdrops numbered for cycling, `backdrop-1.jpg`, and the `extrafanart` folder; a season's backdrop and logo.
 
+### 4.9 Grouping folders
+
+A library may be rooted a level above its titles, with a folder for each category: `films/Amber Atlas (1969)/…` beside `series/Glass Harbor (2020)/Season 03/…`. Such a folder is a grouping folder, in a films, a shows or a mixed library (D49, as D52 amends it). It makes no item, and the folders in it are read as if they were at the top of the root, and so are those of a grouping folder in it.
+
+- A **grouping folder** is a folder whose name has no year, that holds no video and no season folder of its own, and each of whose folders has a year in its name, holds a season folder, or is a grouping folder itself. A series without a year counts by its season folder: `series/Quiet Station/Season 01/…`.
+- A folder counts only when it holds a video somewhere below it, as the server knows the root's files. An empty folder, or one of extras only (4.6), does not.
+- A film or a series in it takes its title and year from its own folder, and is keyed by that folder's path below the root: `films/Amber Atlas (1969)`, `anime/films/Tide Runner (2005)`.
+- Any other folder at the top is a title's, as before D49. `Odd Lot/Ferry Signal/…` beside `Odd Lot/Salt Road (2010)/…` is one film, or one series, called Odd Lot, since `Ferry Signal` has no year and holds no season folder. So is a folder that holds a video of its own.
+- Grouping folders are read from all the files of a root each time items are built, so a folder can become one, or stop being one, as its folders and files change (section 5).
+
+### 4.10 Mixed libraries
+
+A mixed library (`mixed`) holds films and series side by side. It settles what each folder is before anything is matched, from its names, by rules the parse report shows (D49). Each folder at the top of the root, or below its grouping folders (4.9), is a series' when it holds:
+
+- a season folder (4.2);
+- a file with an `SxxEyy` token (4.3, step 2); or
+- two files that the anchored class gives different numbers (4.3, step 3, and a folder's own numbering), and that the film rules do not read as parts of one video (4.4): `Salt Road (2010) - Part 1.mkv` and `Salt Road (2010) - Part 2.mkv` are a film's parts, though the numbers after the title differ.
+
+Every other folder is a film's (4.1): one video, as `7 Lanterns (2007)/[Grp] 7 Lanterns (BD 1080p).mkv`, whose title begins with a number, or several that are versions or parts.
+
+- **The report's note.** Where a film's files, read as a series' episodes, give different numbers in any class, as `Ferry Signal (2016)/[Grp] Night Ferry - 01.mkv` and `[Grp] Night Ferry - 02.mkv` do, each of them gets a note in the parse report: such a folder is more likely a series whose files are named otherwise, and the note says what makes a folder a series'.
+- **A lone file** at the top of the root is a film, unless its name has an `SxxEyy` token: then it makes no item, as at the top of a shows library.
+- **A folder can change kind** as its files change: a second episode numbered after the series' title makes a film's folder a series'. Its old item goes, and a new one is made (section 5).
+
+Each folder's files are read as episodes, all together as section 4.3 reads a folder's videos, and then as a film's or a series', so the anchored class counts a folder's own numbering. Everything else, in a series' folder or a film's, is read as in a shows or a films library.
+
 ## 5. Building items
 
 Run after every scan. It must be idempotent: a second run changes nothing and bumps no sequence, so a scan that changed nothing changes no item, and a newer parser is applied by the next scan without a file having changed.
@@ -238,6 +264,11 @@ Run after every scan. It must be idempotent: a second run changes nothing and bu
 - **Absolute numbering.** When a series has files in the anchored, dash or guess class, outside the specials, whose numbers run past what one season holds (a number above 99, or above the provider's count for that season once known), the series is set to `numbering = 'absolute'`, the numbers are stored in `absolute_number`, and season and episode numbers wait for the mapping in section 6.5. A person can set `numbering` by hand in the match dialog.
 - **Removal.** An item whose files have all been missing for 30 days is deleted, with a tombstone. Until then it is shown as unavailable. More generally, an item that no file makes any more is deleted when items are built, with a tombstone; a series takes its episodes with it, each with its own.
 - **Collections** are items too, but they are built from metadata, not from files (section 6.6).
+- **A change of kind.** A films or a shows library can become mixed (`04-api.md`, section 8.2), and no other change of kind is allowed (D49). The change writes the library's kind and nothing else; a scan follows at once, and its build reads every folder again as section 4.10 says, by the rules of this section:
+  - A folder that reads as the kind it was keeps its item and its id, and so does everything it holds: a film with its versions and parts, a series with its seasons and episodes, and everyone's watch state on them.
+  - A folder that reads as the other kind now is a new item: a films library's folder of episodes becomes a series, and a shows library's folder that holds no season folder, no file with an `SxxEyy` token and no two anchored numbers, such as a film's in its own folder, becomes a film. The old item goes, with a tombstone, and the watch state on it and on its episodes goes with it. A lone file at the top of a films library whose name has an `SxxEyy` token makes no item in a mixed library, and its film goes too.
+  - In a mixed library a film and a series never hold one folder at once: the item that goes gives up its folder before the new one takes it.
+- **A folder read through** as a grouping folder (4.9), in any kind of library, gives its items to the titles in it as files give their items to new keys above. A folder that was one series is the series in it that holds its oldest file, with that series' id, its seasons and the episodes whose keys it still wants, and their watch state. The other series in it are new, and an episode whose key that series no longer wants follows its files into the series they are in now, with its watch state. A folder that was one film, its versions in folders of their own, is the film that holds its oldest file in the same way, and the others are new.
 - **Sequence.** Every item written takes a sequence value of its transaction, which takes one value for every 500 rows (`03-data-model.md`, section 5). An episode that comes, goes or moves also bumps its season and its series, because their counts changed.
 
 ## 6. Matching and metadata
