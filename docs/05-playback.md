@@ -1,6 +1,6 @@
 # Playback
 
-How a file gets from disk to a moving picture, and how to keep that fast. This covers the server's side in full and the player settings the client needs. The numbers come from tests in the project's research notes, which are not published. They were measured with desktop mpv 0.37 and ffmpeg 6.1 on a 2-vCPU sandbox with software codecs. Nothing here has run with a hardware encoder or on a TV yet; section 12 lists what to check first.
+How a file gets from disk to a moving picture, and how to keep that fast. This covers the server's side in full and the player settings the client needs. The numbers come from tests in the project's research notes, which are not published. They were measured with desktop mpv 0.37 and ffmpeg 6.1 on a 2-vCPU sandbox with software codecs. Since then the hardware form of section 4 has run by hand on real hardware, with VAAPI on an Intel GPU (section 12). Its figures are kept outside the repository (D28). Nothing here has run on a TV yet.
 
 **Revised, 20 November 2026.** Every Runnel app plays with mpv (D42, D43), so the player settings of section 11 are for all of them. New: how a browser is fed (section 13, D39, D40), with its own tests. The targets are now section 14.
 
@@ -9,7 +9,7 @@ How a file gets from disk to a moving picture, and how to keep that fast. This c
 | Path | When | Start, measured | Audio switch, measured | State |
 |---|---|---|---|---|
 | **Direct play** | The device can decode the file. | 30–130 ms from a keyframe | 47 ms | Designed. Mechanism tested on desktop. |
-| **Piped transcode** | The device cannot decode the video. | About 0.1 s with a fast encoder, 0.6 s with a slow one. About 0.15 s after a one-second warm-up. | 240–266 ms by restarting, 1.7 s when the encoder is slow | Designed. Software form tested. Hardware form untested. |
+| **Piped transcode** | The device cannot decode the video. | About 0.1 s with a fast encoder, 0.6 s with a slow one. About 0.15 s after a one-second warm-up. | 240–266 ms by restarting, 1.7 s when the encoder is slow | Designed. Software form tested. Hardware form run by hand on one GPU. |
 | **Piped transcode with sidecar** | Same, once the sidecar file exists. | As above | 16–113 ms | Designed. Tested on desktop. Stage 10. |
 | **In a browser** | A page plays it: two piped MP4 streams, video and audio. | 0.14–0.32 s with the video copied, about 0.6 s re-encoded, in Chrome | 88–171 ms | Designed. Tested in Chrome only. Stage 7. Section 13. |
 
@@ -57,10 +57,10 @@ Built as an argument array, never as a shell string. In order:
 | Part | Arguments | Why |
 |---|---|---|
 | Quiet | `-hide_banner -loglevel error -nostdin` | Errors only, on standard error, which the server logs. |
-| Hardware input, when used | `-hwaccel vaapi -hwaccel_output_format vaapi -noautorotate` | Decode on the GPU and keep frames there. These three are taken from a command that is known to work with VAAPI. |
+| Hardware input, when used | `-hwaccel vaapi -hwaccel_output_format vaapi -noautorotate` on the first rung of the ladder (4.3), `-vaapi_device <device>` on the second | Decode on the GPU and keep frames there. These three are taken from a command that is known to work with VAAPI, and ran on real hardware as they are: ffmpeg found the render device. A device other than `/dev/dri/renderD128` is named with `-hwaccel_device`, which is untested. |
 | Seek | `-ss <seconds>` and, for `seek=key`, `-noaccurate_seek` | Before `-i`, so ffmpeg seeks in the file. `-noaccurate_seek` starts output at the keyframe. |
 | Input | `-i <path>` | |
-| Streams | `-map 0:v:0`, then audio, then `-map 0:s?` and `-map 0:t?` as asked | Audio is `-map 0:a` for all, nothing for none, `-map 0:<idx>` for one. The `?` keeps a file without subtitles or attachments from failing. |
+| Streams | `-map 0:v:0`, then audio, then `-map 0:s?` and `-map 0:t?` as asked | Audio is `-map 0:a?` for all, nothing for none, `-map 0:<idx>` for one. The `?` keeps a file without audio, subtitles or attachments from failing: without it ffmpeg stops at once on a file with no audio [checked with ffmpeg 6.1]. |
 | Copy by default | `-c copy` | Everything is copied unless overridden. |
 | Video encoder | See 4.2 | Overrides the copy for video. |
 | Timestamps | `-copyts` | Output keeps the file's own timestamps, so the player's position is the real one. |
@@ -72,7 +72,7 @@ The software form of this command is the one that was tested:
 ```
 ffmpeg -hide_banner -loglevel error -nostdin \
   -ss 65 -noaccurate_seek -i INPUT.mkv \
-  -map 0:v:0 -map 0:a -map 0:s? -map 0:t? \
+  -map 0:v:0 -map 0:a? -map 0:s? -map 0:t? \
   -c copy -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p \
   -copyts -max_interleave_delta 500000 \
   -f matroska -flush_packets 1 pipe:1
@@ -82,11 +82,11 @@ ffmpeg -hide_banner -loglevel error -nostdin \
 
 | Request | Arguments | State |
 |---|---|---|
-| `v=hevc`, `depth=10`, VAAPI | `-vf scale_vaapi=format=p010 -c:v hevc_vaapi -profile:v main10 -rc_mode CQP -qp 24 -bf 0` | Untested. |
-| `v=hevc`, `depth=8`, VAAPI | `-vf scale_vaapi=format=nv12 -c:v hevc_vaapi -profile:v main -rc_mode CQP -qp 24 -bf 0` | Untested in this form. Jellyfin uses the same filter and encoder, with a bitrate target. |
+| `v=hevc`, `depth=10`, VAAPI | `-vf scale_vaapi=format=p010 -c:v hevc_vaapi -profile:v main10 -rc_mode CQP -qp 24 -bf 0` | Ran on real hardware (section 12). |
+| `v=hevc`, `depth=8`, VAAPI | `-vf scale_vaapi=format=nv12 -c:v hevc_vaapi -profile:v main -rc_mode CQP -qp 24 -bf 0` | Ran on real hardware (section 12). Jellyfin uses the same filter and encoder, with a bitrate target. |
 | `v=h264`, VAAPI | `-vf scale_vaapi=format=nv12 -c:v h264_vaapi -profile:v high -rc_mode CQP -qp 23 -bf 0` | Untested. |
 | `v=h264`, software | `-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p` | Tested. 220 MB of memory at 1080p. |
-| `max_h` set | Add `w=-2:h=<max_h>` to `scale_vaapi`, or `-vf scale=-2:<max_h>` in software | Untested. |
+| `max_h` set | Add `w=-2:h=<max_h>` to `scale_vaapi`, put `scale=-2:<max_h>` before `hwupload` on the second rung, or `-vf scale=-2:<max_h>` in software. Only when the source is taller. | Untested. |
 
 Choices behind these:
 
@@ -100,10 +100,10 @@ Choices behind these:
 For each request the server tries, in order, and moves down when ffmpeg exits before its first output:
 
 1. Hardware decode and hardware encode.
-2. Software decode and hardware encode (`-vf format=nv12,hwupload` in place of `scale_vaapi`).
-3. Software decode and software H.264, if the client asked for `h264` or lists it as acceptable.
+2. Software decode and hardware encode (`-vf format=nv12,hwupload`, or `format=p010,hwupload` for 10-bit output, in place of `scale_vaapi`). Ran on real hardware for HEVC 10-bit (section 12).
+3. Software decode and software H.264, if the client asked for `h264`. A request names one codec (`04-api.md`, section 7.3), so a request for HEVC never gets H.264.
 
-A failure is remembered for the process's life by codec, profile and bit depth, so the next request starts on the rung that works.
+A failure is remembered for the process's life by the source's codec, profile and bit depth and the target asked for, so the next request starts on the rung that works.
 
 ### 4.4 Memory and limits
 
@@ -122,7 +122,7 @@ What one ffmpeg held in the tests, same 1080p 10-bit input, software codecs:
 | Decode, x264 `veryfast` | 380 MB |
 | Decode, x265 `veryfast` | 496 MB |
 
-Launch style made no difference (387 MB as a stock-server-style HLS command, 382 MB piped). With hardware codecs the frames live in GPU memory, which on an integrated GPU is system RAM that `ps` does not show. That figure is not measured yet (section 12).
+Launch style made no difference (387 MB as a stock-server-style HLS command, 382 MB piped). With hardware codecs the frames live in GPU memory, which on an integrated GPU is system RAM that `ps` does not show. It was measured by hand on real hardware (section 12), and the figures are kept outside the repository (D28).
 
 ## 5. Sessions
 
@@ -193,7 +193,7 @@ At start, on `runnel doctor`, and when an admin asks (`POST /admin/encoders/chec
 
 The result is cached in memory, with the time of the check. `RUNNEL_HWACCEL=none` skips the test and offers software H.264 only. A check on request is refused while a transcode runs.
 
-On Intel GPUs both VAAPI and QSV are available. Jellyfin's guide prefers QSV on recent generations. One FFmpeg bug report measured QSV holding more than twice the GPU memory of VAAPI for the same 4K transcode. VAAPI is the starting point here; QSV is an experiment in section 12.
+On Intel GPUs both VAAPI and QSV are available. Jellyfin's guide prefers QSV on recent generations. One FFmpeg bug report measured QSV holding more than twice the GPU memory of VAAPI for the same 4K transcode. Run by hand on real hardware, QSV was the slower of the two and held more memory (section 12). The server uses VAAPI, and QSV is not built (D50).
 
 ## 9. The sidecar
 
@@ -246,6 +246,13 @@ In this order, before building on any number in this document:
 8. **Disconnect.** Stop the player mid-stream. ffmpeg must be gone within a second.
 9. **Rules 6, 7 and 12 on the ffmpeg version the server will use.** They were found on 6.1.
 10. **Browsers.** The tests of section 13.4 in Firefox, and in Safari on a Mac and on an iPhone, with real files and with the devices' hardware decoders. What Safari says about Opus in MP4.
+
+**Items 1, 2 and 9 ran on 27 November 2026**, by hand on real hardware: VAAPI on an Intel GPU, ffmpeg 8.1, an AV1 10-bit file. Their figures are kept outside the repository (D28). What they settled:
+
+- Item 1: the HEVC 10-bit form of section 4 runs as written, decoding and encoding on the GPU.
+- Item 2: without `-bf 0`, and with `-async_depth 1`, the first output came no sooner, so the form stays as it is. QSV was slower and held more memory (D50). 8-bit output runs. The second rung of the ladder (4.3) ran too.
+- Item 9: rules 6 and 12 still hold on ffmpeg 8.1. Rule 7's failure did not show there. The rule stays, since keeping it costs nothing.
+- `speed=` printed N/A for every form on that ffmpeg, so a check counts frames instead.
 
 ## 13. In a browser
 

@@ -123,7 +123,7 @@ Two settings can also be changed while the server runs, by an admin in the web i
 | `RUNNEL_LISTEN` | `:8610` | Address to listen on. |
 | `RUNNEL_DATA` | `/var/lib/runnel` | Data directory. |
 | `RUNNEL_FFMPEG`, `RUNNEL_FFPROBE` | found on `PATH` | Paths to the binaries. Jellyfin's ffmpeg build is a good choice where it is installed, since it is known to work with the GPU there. Without ffprobe the server still scans, says so in its log, and probes nothing. |
-| `RUNNEL_HWACCEL` | `auto` | `auto`, `vaapi`, `qsv` or `none`. |
+| `RUNNEL_HWACCEL` | `auto` | `auto`, `vaapi` or `none` (D50). |
 | `RUNNEL_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device. |
 | `RUNNEL_TRANSCODE_SLOTS` | `1` | Transcodes at once. |
 | `RUNNEL_FFMPEG_MAX_RSS_MB` | `1024` | A child above this is killed. |
