@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/play"
 )
 
 type playlogCursor struct {
@@ -106,14 +107,14 @@ func residentBytes() int64 {
 	return pages * int64(os.Getpagesize())
 }
 
-// handleStats is GET /admin/stats (docs/04-api.md, section 8.7). The
-// limits and slots of transcoding arrive with stage 3, and are left out.
+// handleStats is GET /admin/stats (docs/04-api.md, section 8.7).
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	st, err := s.db.StatsOf(r.Context())
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	slots, warmups, childMemory := s.transcoding()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":    s.info.Version,
 		"started_at": s.startedAt.UnixMilli(),
@@ -121,5 +122,24 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"database":   map[string]int64{"size": st.Size, "seq": st.Seq},
 		"counts": map[string]int{"libraries": st.Libraries, "movies": st.Movies, "series": st.Series, "episodes": st.Episodes,
 			"files": st.Files, "users": st.Users},
+		"limits": map[string]int64{"slots": int64(s.slots), "warmups": 1, "child_memory": childMemory},
+		"in_use": map[string]int{"slots": slots, "warmups": warmups},
 	})
+}
+
+// transcoding is the slots in use and the warm-ups held, and the child's
+// memory limit, for GET /admin/stats.
+func (s *Server) transcoding() (slots, warmups int, childMemory int64) {
+	childMemory = play.DefaultMaxRSS
+	if s.transcodes != nil {
+		slots, childMemory = s.transcodes.Running(), s.transcodes.MaxRSS()
+	}
+	s.warm.mu.Lock()
+	for _, w := range s.warm.by {
+		if w.warm != nil {
+			warmups++
+		}
+	}
+	s.warm.mu.Unlock()
+	return slots, warmups, childMemory
 }

@@ -190,3 +190,51 @@ func (d *DB) StatsOf(ctx context.Context) (Stats, error) {
 	}
 	return s, nil
 }
+
+// Playing is who plays what in a session, for GET /admin/sessions: the
+// person, the device, and the item with its title as the start-time log
+// writes it.
+type Playing struct {
+	UserID         int64
+	User           string
+	Device, Client string
+	ItemID         int64
+	Title          string
+}
+
+// PlayingOf reads who plays what: the token's person and device, and the
+// item, or the item a file plays when itemID is 0. What is gone reads as
+// empty.
+func (d *DB) PlayingOf(ctx context.Context, tokenID, itemID, fileID int64) (Playing, error) {
+	var p Playing
+	var user, device, client sql.NullString
+	var userID sql.NullInt64
+	err := d.r.QueryRowContext(ctx, `SELECT t.user_id, u.name, t.device_name, t.client
+		FROM tokens t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = ?`, tokenID).Scan(&userID, &user, &device, &client)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return p, fmt.Errorf("db: read who plays: %w", err)
+	}
+	p.UserID, p.User, p.Device, p.Client = userID.Int64, user.String, device.String, client.String
+	if itemID == 0 {
+		err := d.r.QueryRowContext(ctx, `SELECT item_id FROM item_files WHERE file_id = ? ORDER BY item_id LIMIT 1`, fileID).Scan(&itemID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return p, fmt.Errorf("db: read what plays: %w", err)
+		}
+	}
+	var typ, title string
+	var series sql.NullString
+	var season, episode, end sql.NullInt64
+	err = d.r.QueryRowContext(ctx, `SELECT i.type, i.title, s.title, i.season_number, i.episode_number, i.episode_number_end
+		FROM items i LEFT JOIN items s ON s.id = i.series_id WHERE i.id = ?`, itemID).
+		Scan(&typ, &title, &series, &season, &episode, &end)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return p, fmt.Errorf("db: read what plays: %w", err)
+	case typ == "episode":
+		p.ItemID, p.Title = itemID, loggedEpisode(series.String, season.Int64, episode.Int64, end.Int64)
+	default:
+		p.ItemID, p.Title = itemID, title
+	}
+	return p, nil
+}

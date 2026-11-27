@@ -217,6 +217,8 @@ func (s *Server) routes() {
 	s.handle("GET "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleImportReport)))
 	s.handle("GET "+Prefix+"/admin/playlog", s.json(s.admin(s.handlePlaylog)))
 	s.handle("GET "+Prefix+"/admin/stats", s.json(s.admin(s.handleStats)))
+	s.handle("GET "+Prefix+"/admin/sessions", s.json(s.admin(s.handleSessions)))
+	s.handle("DELETE "+Prefix+"/admin/sessions/{session}", s.json(s.admin(s.handleStopSession)))
 	s.handle("GET "+Prefix+"/admin/encoders", s.json(s.admin(s.handleEncoders)))
 	s.handle("POST "+Prefix+"/admin/encoders/check", s.json(s.admin(s.handleCheckEncoders)))
 

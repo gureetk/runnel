@@ -54,6 +54,7 @@ const (
 // output for the request that brings its ticket.
 type warmup struct {
 	file    int64
+	since   int64 // unix ms
 	cancel  context.CancelFunc
 	release func() // the gate's hold
 	// A transcode's.
@@ -86,7 +87,7 @@ type warmups struct {
 // tail in the background (path); a transcode's holds warm.
 func (s *Server) startWarmup(tokenID, fileID int64, path string, ticket string, target play.Target, warm *play.Warm) {
 	ctx, cancel := context.WithCancel(context.Background())
-	w := &warmup{file: fileID, cancel: cancel, release: s.gate.Hold(), ticket: ticket, target: target, warm: warm}
+	w := &warmup{file: fileID, since: s.now().UnixMilli(), cancel: cancel, release: s.gate.Hold(), ticket: ticket, target: target, warm: warm}
 	s.warm.mu.Lock()
 	old := s.warm.by[tokenID]
 	s.warm.by[tokenID] = w

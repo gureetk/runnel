@@ -27,6 +27,8 @@ type Transcodes interface {
 	Warm(ctx context.Context, src play.Source, t play.Target, limit int) (*play.Warm, error)
 	// Running is how many transcodes hold a slot now, warm-ups too.
 	Running() int
+	// MaxRSS is the memory limit of one ffmpeg child, in bytes.
+	MaxRSS() int64
 }
 
 // busyRetry is the Retry-After of a transcode refused for want of a slot.
@@ -36,6 +38,8 @@ const busyRetry = "5"
 // start-time log.
 type transcodeStream struct {
 	key     sessionKey // the user and the client's session, which may be empty
+	id      string     // the session's id in GET /admin/sessions: the client's, or one of the server's
+	child   *play.Child
 	tokenID int64
 	fileID  int64
 	target  play.Target
@@ -55,6 +59,7 @@ type transcodeStreams struct {
 	mu      sync.Mutex
 	running map[*transcodeStream]bool
 	last    map[sessionKey]*transcodeStream
+	made    int64 // ids made for streams that have no session of their own
 }
 
 func (ss *transcodeStreams) add(st *transcodeStream, now int64) {
@@ -66,9 +71,24 @@ func (ss *transcodeStreams) add(st *transcodeStream, now int64) {
 		}
 	}
 	ss.running[st] = true
-	if st.key.id != "" {
+	st.id = st.key.id
+	if st.id == "" {
+		ss.made++
+		st.id = "s_" + strconv.FormatInt(ss.made, 10)
+	} else {
 		ss.last[st.key] = st
 	}
+}
+
+// list copies the transcodes that run.
+func (ss *transcodeStreams) list() []*transcodeStream {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	out := make([]*transcodeStream, 0, len(ss.running))
+	for st := range ss.running {
+		out = append(out, st)
+	}
+	return out
 }
 
 func (ss *transcodeStreams) end(st *transcodeStream, now int64) {
@@ -232,7 +252,7 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	stopWhenGone := context.AfterFunc(r.Context(), child.Stop)
 	defer stopWhenGone()
 
-	st := &transcodeStream{key: sessionKey{user: c.user.ID, id: q.Get("session")}, tokenID: c.tokenID, fileID: id,
+	st := &transcodeStream{key: sessionKey{user: c.user.ID, id: q.Get("session")}, child: child, tokenID: c.tokenID, fileID: id,
 		target: t, encoder: child.Encoder, warmed: warmed, started: arrived}
 	st.firstByteMS.Store(-1)
 	s.streams.add(st, s.now().UnixMilli())
