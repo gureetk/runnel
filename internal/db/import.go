@@ -139,7 +139,7 @@ func (d *DB) ImportMatches(ctx context.Context, in []ImportMatch, write bool) (i
 					return err
 				}
 			}
-			if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET match_state = 'matched' WHERE id = ?`, m.ItemID); err != nil {
+			if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET match_state = 'matched', match_confidence = NULL, match_note = NULL WHERE id = ?`, m.ItemID); err != nil {
 				return err
 			}
 			ids = append(ids, m.ItemID)

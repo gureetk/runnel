@@ -141,8 +141,16 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	metadata := tmdb.New(database, keys, version, log)
 	fetcher := meta.NewFetcher(database, metadata, keys, log)
 	fetcher.Queued = queue.Wake
-	fetcher.Resume = func() { queue.Resume("fetch") }
+	fetcher.Resume = func() { queue.Resume("fetch"); queue.Resume("match") }
 	queue.Register(fetcher.Kind())
+	// What has no match is searched for by its title and year, whenever
+	// fetches are queued, and what a search matches is fetched (section
+	// 6.2 there).
+	matcher := meta.NewMatcher(database, metadata, keys, log)
+	matcher.Queued = queue.Wake
+	matcher.Matched = fetcher.Fetch
+	queue.Register(matcher.Kind())
+	fetcher.Match = matcher
 	// What is fetched asks for its images; an item whose local image went
 	// is fetched again from the cache, so that the provider's takes its
 	// place (section 8 there).

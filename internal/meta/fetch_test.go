@@ -27,16 +27,17 @@ import (
 const inventedKey = "0000invented0000key0000"
 
 type fetchEnv struct {
-	t     *testing.T
-	db    *db.DB
-	root  string
-	lib   model.Library
-	s     *scan.Scanner
-	q     *tasks.Queue
-	f     *Fetcher
-	tmdb  *standin.Server
-	key   string
-	built int
+	t      *testing.T
+	db     *db.DB
+	root   string
+	lib    model.Library
+	s      *scan.Scanner
+	q      *tasks.Queue
+	f      *Fetcher
+	tmdb   *standin.Server
+	client *tmdb.Client
+	key    string
+	built  int
 }
 
 func newFetchEnv(t *testing.T, kind string) *fetchEnv {
@@ -59,6 +60,7 @@ func newFetchEnv(t *testing.T, kind string) *fetchEnv {
 	keys := func(context.Context) (string, error) { return e.key, nil }
 	client := tmdb.New(d, keys, "test", log)
 	client.SetBase(ts.URL + "/3")
+	e.client = client
 	e.f = NewFetcher(d, client, keys, log)
 	e.q = tasks.New(d, tasks.NewGate(), log)
 	e.f.Queued = e.q.Wake
