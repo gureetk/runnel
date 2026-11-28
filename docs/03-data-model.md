@@ -526,7 +526,9 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 - Replacing an item's credits bumps its `updated_seq`, when what they show changed: a fetch that gives the same credits, names and photos stamps nothing.
 - A person's `name` and `department` are rewritten by every fetch that credits them. A photo path that changes gives a new `image_key`, and clears `image_color`, `image_fetched_at` and `image_tried_at`. A key is one person's: a person whose key another person's new path gives loses it.
 - D53's drop of an item's metadata takes its credits too.
-- A photo is not downloaded when an item is matched. `image_key` is derived from the provider's path at that time, so the photo's URL exists at once. The photo is fetched when a client first asks for it, and `image_fetched_at` and `image_color` are set then. After a try that failed, `image_tried_at` keeps the server from asking again for a day (`04-api.md`, section 6).
+- A photo is not downloaded when an item is matched. `image_key` is derived from the provider's path at that time, so the photo's URL exists at once. The photo is fetched when a client first asks for it, and `image_fetched_at` and `image_color` are set then, and `image_tried_at` cleared; nothing is stamped. After a try that failed, `image_tried_at` keeps the server from asking again for a day (`04-api.md`, section 6). Either is written only while the row still has the key and the path the download was made from.
+- A photo has no widths or aspect of its own in the database: every one is kept at 240 and 420 wide, cropped to 2:3 (`06-library-and-metadata.md`, section 8). Its files are found by `image_key`, and the sweep keeps them while a person has the key.
+- A photo fetched 180 days ago is dropped (D53): `image_fetched_at`, `image_color` and `image_tried_at` are cleared and its files deleted, at start and each night. The key and the path stay, so the next request fetches it again.
 - A person with no credits left is deleted by the nightly cleanup.
 
 **The provider cache**

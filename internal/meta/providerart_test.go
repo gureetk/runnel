@@ -24,21 +24,39 @@ import (
 // imageServer stands in for TMDB's images: it serves pictures made with
 // ffmpeg's test source by their size and path, and counts what was asked.
 type imageServer struct {
-	mu    sync.Mutex
-	files map[string]string // "/w500/p.jpg" -> file
-	asked []string
+	mu     sync.Mutex
+	files  map[string]string // "/w500/p.jpg" -> file
+	status map[string]int    // an answer other than the file's, by path
+	header http.Header       // sent with every answer
+	asked  []string
 }
 
 func (s *imageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.asked = append(s.asked, r.URL.Path)
 	f, ok := s.files[r.URL.Path]
+	status := s.status[r.URL.Path]
+	for k, v := range s.header {
+		w.Header()[k] = v
+	}
 	s.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		return
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	http.ServeFile(w, r, f)
+}
+
+// answer makes the server answer path with status, 0 for its file, and
+// send header with every answer.
+func (s *imageServer) answer(path string, status int, header http.Header) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status[path], s.header = status, header
 }
 
 func (s *imageServer) count() int {
@@ -52,7 +70,7 @@ func (s *imageServer) count() int {
 func (e *fetchEnv) withArtwork(t *testing.T) (*Artwork, *imageServer) {
 	ffmpeg, ffprobe := tm.Tools(t)
 	art := NewArtwork(e.db, t.TempDir(), ffmpeg, ffprobe, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	imgs := &imageServer{files: map[string]string{}}
+	imgs := &imageServer{files: map[string]string{}, status: map[string]int{}}
 	srv := httptest.NewServer(imgs)
 	t.Cleanup(srv.Close)
 	art.SetImageBase(srv.URL + "/")

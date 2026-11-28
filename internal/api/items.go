@@ -653,17 +653,19 @@ type creditsBody struct {
 }
 
 type castBody struct {
-	PersonID int64  `json:"person_id"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Episodes *int   `json:"episodes"`
+	PersonID int64         `json:"person_id"`
+	Name     string        `json:"name"`
+	Role     string        `json:"role"`
+	Episodes *int          `json:"episodes"`
+	Image    *db.CardImage `json:"image,omitempty"`
 }
 
 type crewBody struct {
-	PersonID   int64  `json:"person_id"`
-	Name       string `json:"name"`
-	Role       string `json:"role"`
-	Department string `json:"department"`
+	PersonID   int64         `json:"person_id"`
+	Name       string        `json:"name"`
+	Role       string        `json:"role"`
+	Department string        `json:"department"`
+	Image      *db.CardImage `json:"image,omitempty"`
 }
 
 // creditsJSON shapes an item's credits; a series' cast carry how many
@@ -672,14 +674,15 @@ func creditsJSON(list []db.Credit, series bool) *creditsBody {
 	b := &creditsBody{Cast: []castBody{}, Crew: []crewBody{}}
 	for _, c := range list {
 		if c.Kind == "cast" {
-			cb := castBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role}
+			cb := castBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role, Image: db.PhotoImage(c.PhotoKey, c.PhotoColor)}
 			if series && c.Episodes > 0 {
 				cb.Episodes = &c.Episodes
 			}
 			b.Cast = append(b.Cast, cb)
 			continue
 		}
-		b.Crew = append(b.Crew, crewBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role, Department: c.Department})
+		b.Crew = append(b.Crew, crewBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role, Department: c.Department,
+			Image: db.PhotoImage(c.PhotoKey, c.PhotoColor)})
 	}
 	return b
 }

@@ -269,7 +269,7 @@ The detail of a film or a series carries `credits`:
   "credits": {
     "cast": [
       {"person_id": 811, "name": "Ilse Varga", "role": "Ida", "episodes": null,
-       "image": {"key": "7e8a2b9d0f1e3c5a7b5b1c0e9a3f6d4c", "w": [180, 420], "ar": 0.667, "color": null}}
+       "image": {"key": "7e8a2b9d0f1e3c5a7b5b1c0e9a3f6d4c", "w": [240, 420], "ar": 0.6666666666666666, "color": null}}
     ],
     "crew": [
       {"person_id": 902, "name": "Tomas Reinholt", "role": "Director", "department": "Directing"}
@@ -282,13 +282,13 @@ The detail of a film or a series carries `credits`:
 |---|---|
 | `cast` | In billing order, at most 20 (P7). `role` is the character. `episodes` is set on a series: how many episodes the person is in. |
 | `crew` | Directors and writers, and a series' creators. `role` is the job, or a person's jobs in one department joined with commas, such as `Screenplay, Story`; a series' creators are `Creator`. |
-| `image` | The person's photo, shaped like every image (section 6). Absent when the provider has none. `color` is null until the photo has been fetched once. |
+| `image` | On the cast and the crew: the person's photo, shaped like every image (section 6). Absent when the provider has none. A photo is always 2:3, at widths 240 and 420, so both are known before it is fetched (`06-library-and-metadata.md`, section 8). `color` is null until the photo has been fetched once; fetching it stamps nothing, so a detail kept by its `ETag` shows the colour from the item's next change. |
 
 A person: `GET /people/{id}`.
 
 ```json
 {"id": 811, "name": "Ilse Varga", "department": "Acting", "titles": 5,
- "image": {"key": "7e8a2b9d0f1e3c5a7b5b1c0e9a3f6d4c", "w": [180, 420], "ar": 0.667, "color": "#3a2f2a"}}
+ "image": {"key": "7e8a2b9d0f1e3c5a7b5b1c0e9a3f6d4c", "w": [240, 420], "ar": 0.6666666666666666, "color": "#3a2f2a"}}
 ```
 
 - `department` is what the person is known for. `titles` counts the films and series on this server that credit them.
@@ -570,7 +570,8 @@ What the copy does not hold: files with their streams and chapters, credits, and
 - No authentication: keys are 128 random-looking bits and the content is artwork.
 - `Cache-Control: public, max-age=31536000, immutable`. A changed image has a new key.
 - The server never resizes an image in its own process. Local images, and provider images downloaded at one size, are scaled once to the widths kept by an ffmpeg child (`06-library-and-metadata.md`, section 8).
-- A person's photo is fetched from the provider the first time a client asks for it, not when a library is matched (D33). That first request waits for the fetch. A photo the provider cannot give is `404`, and the server does not ask for it again for a day (P7).
+- A person's photo is fetched from the provider the first time a client asks for it, not when a library is matched (D33). That first request waits for the fetch. A photo the provider cannot give is `404`, and the server does not ask for it again for a day (P7). A photo whose files were deleted from the data directory is fetched again in the same way.
+- **What a request without a token can cause.** Only a person's photo makes this route ask the provider, and only for a key that a stored credit gave, from the path the provider gave with it: a key that is no image's and no person's is `404` at once. So a client can cause at most one download for each person that the library credits, and after a failure one a day. One download runs for a key at a time, and every request for that key waits for it; at most two run at once for everyone, and a request that waits 15 s for one of them is answered `503` with code `busy` and `Retry-After: 5`. A download has 15 s. A provider that does not answer costs the requests that wait for it those 15 s and a `404`; one that is down, answers an error of its own, or answers `429` stops every download for a minute, or for what its `Retry-After` gives, at most an hour, and every request for a photo not on disk is answered `503` with `Retry-After` at once meanwhile. Without a metadata key nothing is fetched, and a photo not on disk is `404`. No other request waits on the provider, except the key's check (8.1) and the search for candidates (8.4).
 
 ## 7. Playback
 
@@ -1091,7 +1092,7 @@ From stage 5 (D47). `GET /admin/update`:
 | 429 | `too_many` | Too many wrong sign-ins, setup codes or code lookups, or too many pairings started. |
 | 502 | `upstream` | TMDB or Jellyfin could not be reached, or answered with something unexpected. |
 | 503 | `unavailable` | The file is missing or its disk is away. |
-| 503 | `busy` | Every transcode slot is in use, or the encoders' check is asked for while a transcode runs. |
+| 503 | `busy` | Every transcode slot is in use, or the encoders' check is asked for while a transcode runs, or a person's photo cannot be fetched now (6). |
 | 500 | `internal` | A bug. The message carries an id that is also in the server's log. |
 
 ## 10. Worked examples

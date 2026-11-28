@@ -3,7 +3,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -16,6 +18,13 @@ import (
 // Images finds where an image's file of one width is kept.
 type Images interface {
 	Path(key, kind string, width int) string
+}
+
+// Photos makes sure a person's photo is on disk, fetching it the first
+// time it is asked for (docs/04-api.md, section 6). With ok false and wait
+// 0 there is no such photo; a wait asks the client to come back after it.
+type Photos interface {
+	Photo(ctx context.Context, key string) (ok bool, wait time.Duration)
 }
 
 // validKey is a key as images have them: 32 lower-case hex characters.
@@ -44,6 +53,18 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind, widths, err := s.db.ImageByKey(r.Context(), key)
+	if errors.Is(err, db.ErrNotFound) && s.photos != nil {
+		// A person's photo, fetched when it is first asked for.
+		ok, wait := s.photos.Photo(r.Context(), key)
+		if wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(wait.Seconds())))))
+			s.fail(w, r, http.StatusServiceUnavailable, "busy", "people's photos cannot be fetched now: try again later")
+			return
+		}
+		if ok {
+			kind, widths, err = "photo", slices.Clone(db.PhotoWidths), nil
+		}
+	}
 	if errors.Is(err, db.ErrNotFound) || (err == nil && len(widths) == 0) {
 		s.fail(w, r, http.StatusNotFound, "not_found", "no such image")
 		return
