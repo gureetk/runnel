@@ -195,6 +195,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if key != nil {
 			s.log.Info("the metadata key was changed")
+			if s.fetches != nil {
+				s.fetches.KeySet(context.WithoutCancel(r.Context()))
+			}
 		} else {
 			s.log.Info("the metadata key was removed")
 		}

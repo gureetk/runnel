@@ -569,6 +569,7 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 **Background work and the start-time log**
 
 - A task carries the library it works for, where it has one. Removing a library removes its queued work.
+- A `fetch` task is keyed `item:<id>`, for a film or a series. Its `payload` is `{"force":true}` for an item's refresh, which asks the provider whatever the age of what it has, and NULL otherwise.
 - The Jellyfin import's task, of no library, keeps its request in `payload`, the Jellyfin key with it, until its run ends. Its done row then goes like any other.
 - A `done` row stays until no row of its kind and library is queued or running. Then all of them are deleted together. Progress is counted from that: the `done` rows out of all rows.
 - A `failed` row stays until it is retried or cancelled. A failed probe of a file that has changed since goes when the scan sees the change, and the file is probed afresh.
@@ -885,4 +886,5 @@ DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - 1000;
 - A test database with 14,720 file rows and nothing else was 3.1 MB.
 - A prototype with 10,741 items, 10,491 files and 52,455 stream rows was 9.6 MB.
 - People and credits, on synthetic rows: 30,000 people and 78,360 credits (3,300 films and 240 series with 22 to 24 credits each) added 9.2 MB to the file. Reading one item's credits took 0.04 ms. How many different people a real library credits is not known, so the 30,000 is an assumption.
+- The provider cache, on generated answers in TMDB's shape, gzip-compressed: the 2,400 answers for 2,000 films and 100 series with 300 seasons, beside 5,000 files and their items, made a database of 15.8 MB (development sandbox, 27 November 2026). How large real answers are is not measured.
 - The image cache and the sidecar cache are files on disk, not rows. See `02-architecture.md`.

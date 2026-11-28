@@ -132,6 +132,23 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	importer.Queued = queue.Wake
 	queue.Register(importer.Kind())
 
+	// The metadata provider's client, with the environment's key or the
+	// one an admin set (docs/06-library-and-metadata.md, section 6.4), and
+	// the fetches of metadata it makes, queued after each build, after an
+	// import that wrote ids, each night, and when a new key is set
+	// (section 6.3 there).
+	keys := tmdb.Stored(database, cfg.TMDBKey)
+	metadata := tmdb.New(database, keys, version, log)
+	fetcher := meta.NewFetcher(database, metadata, keys, log)
+	fetcher.Queued = queue.Wake
+	fetcher.Resume = func() { queue.Resume("fetch") }
+	queue.Register(fetcher.Kind())
+	importer.Matched = func(ctx context.Context) {
+		if _, err := fetcher.Queue(ctx, 0, false); err != nil && ctx.Err() == nil {
+			log.Error("cannot queue fetches after the import", "err", err)
+		}
+	}
+
 	scanner := scan.New(database, log)
 	scanner.Queued = queue.Wake
 	scanner.Images = artwork.Sync
@@ -153,11 +170,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			attrs = append(attrs, "folders", folders)
 		}
 		log.Info("items built", attrs...)
+		if _, err := fetcher.Queue(ctx, libraryID, false); err != nil && ctx.Err() == nil {
+			log.Error("cannot queue fetches after a build", "library", libraryID, "err", err)
+		}
 		return nil
 	}
-	// The metadata provider's client, with the environment's key or the
-	// one an admin set (docs/06-library-and-metadata.md, section 6.4).
-	metadata := tmdb.New(database, tmdb.Stored(database, cfg.TMDBKey), version, log)
 	// At start and each night: the delete markers older than 90 days go,
 	// with what only they could tell (docs/03-data-model.md, section 5),
 	// and so do the files of images whose items went, and the provider's
@@ -184,6 +201,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			log.Error("cannot drop metadata not refreshed for 180 days", "err", err)
 		} else if n > 0 {
 			log.Info("dropped metadata not refreshed for 180 days", "items", n)
+		}
+		if n, err := fetcher.Queue(ctx, 0, true); err != nil && ctx.Err() == nil {
+			log.Error("cannot queue the nightly fetches", "err", err)
+		} else if n > 0 {
+			log.Info("fetches queued", "items", n)
 		}
 	}
 	background, stopBackground := context.WithCancel(context.Background())
@@ -230,6 +252,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Transcodes:     transcoder,
 		Metadata:       metadata,
 		TMDBKey:        cfg.TMDBKey,
+		Fetches:        fetcher,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{

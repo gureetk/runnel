@@ -125,6 +125,14 @@ func (d *DB) ImportMatches(ctx context.Context, in []ImportMatch, write bool) (i
 		}
 		ids := make([]int64, 0, len(out))
 		for _, m := range out {
+			// A new TMDB id is another title: what was fetched for the old
+			// one is fetched again.
+			if v, ok := m.IDs["tmdb"]; ok {
+				if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET refreshed_at = NULL WHERE id = ?
+					AND (SELECT value FROM external_ids WHERE item_id = ? AND provider = 'tmdb') IS NOT ?`, m.ItemID, m.ItemID, v); err != nil {
+					return err
+				}
+			}
 			for _, p := range slices.Sorted(maps.Keys(m.IDs)) {
 				if _, err := tx.tx.ExecContext(ctx, `INSERT INTO external_ids (item_id, provider, value) VALUES (?, ?, ?)
 					ON CONFLICT (item_id, provider) DO UPDATE SET value = excluded.value`, m.ItemID, p, m.IDs[p]); err != nil {
