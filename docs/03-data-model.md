@@ -542,6 +542,15 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 
 - The providers' ids that a film's or a series' names carry (`06-library-and-metadata.md`, section 4.5) are written into `external_ids` by every build, and make the item `matched`, unless its `match_state` is `manual` or `ignored`. Ids that differ from the item's replace all of its rows of `external_ids` and set `refreshed_at` to NULL, so that the new title is fetched. A change stamps the item.
 
+**Matching by search**
+
+- A search may match a film or a series that is `unmatched` or `review`, has no `tmdb`, `imdb` or `tvdb` row in `external_ids`, and whose folder has no `overrides` row (`06-library-and-metadata.md`, section 6.2).
+- A match writes the `tmdb` row, sets `match_state` to `matched`, `match_confidence` to the score, clears `match_note` and `refreshed_at`, and stamps the item. A search that takes no match sets `review` with candidates, or `unmatched` without, the best score as the confidence, and `match_note`; the item is stamped when its state or its confidence changed.
+- `match_note` keeps the title, the year and the time searched for: a build that gives the item another title or year makes it searched for again.
+- A search's outcome is written only while the item may still be searched for under the same title and year: a manual match, or a rename, that comes meanwhile wins.
+- A match from the import, or from ids in names, clears `match_confidence` and `match_note`.
+- A `match` task is keyed `item:<id>`, as a fetch is; its `payload` is `{"force":true}` for an item's refresh.
+
 **Manual matches**
 
 - A manual match writes `overrides`, keyed by folder. Matching reads `overrides` before anything else. A rescan that drops and rebuilds an item therefore finds the same match again.

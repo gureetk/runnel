@@ -59,6 +59,10 @@ type Fetcher struct {
 	Images interface {
 		Want(ctx context.Context, libraryID, itemID int64, kind, ref string) error
 	}
+	// Match, when set, searches for what has no match: whatever queues
+	// fetches queues searches too, and an item's refresh searches again
+	// for an item that has no match (section 6.2 there).
+	Match *Matcher
 }
 
 // want asks for an item's provider image of a kind.
@@ -82,9 +86,10 @@ func (f *Fetcher) Kind() tasks.Kind {
 
 // Queue queues a fetch for every film and series of a library, or of
 // every library with 0, that needs one: never fetched, or past its age
-// (db.QueueFetches). again queues what failed too, as the nightly round
-// and a library's refresh do. Without a key it queues nothing. It returns
-// how many it queued.
+// (db.QueueFetches), and with a matcher a search for every one that needs
+// one. again queues what failed too, as the nightly round and a library's
+// refresh do. Without a key it queues nothing. It returns how many
+// fetches it queued.
 func (f *Fetcher) Queue(ctx context.Context, libraryID int64, again bool) (int, error) {
 	if key, err := f.key(ctx); err != nil || key == "" {
 		return 0, err
@@ -93,7 +98,24 @@ func (f *Fetcher) Queue(ctx context.Context, libraryID int64, again bool) (int, 
 	if err == nil && n > 0 && f.Queued != nil {
 		f.Queued()
 	}
+	if err == nil && f.Match != nil {
+		_, err = f.Match.Queue(ctx, libraryID, again)
+	}
 	return n, err
+}
+
+// Fetch queues the fetch of one film or series, as a new match asks: it
+// reads what the cache holds while young enough.
+func (f *Fetcher) Fetch(ctx context.Context, itemID, libraryID int64) {
+	if err := f.db.QueueFetch(ctx, itemID, libraryID, false, f.now().UnixMilli()); err != nil {
+		if ctx.Err() == nil {
+			f.log.Error("cannot queue a fetch", "item", itemID, "err", err)
+		}
+		return
+	}
+	if f.Queued != nil {
+		f.Queued()
+	}
 }
 
 // Built is told that a library's items were built: a film that went may
@@ -112,6 +134,11 @@ func (f *Fetcher) Built(ctx context.Context, libraryID int64) error {
 func (f *Fetcher) Refresh(ctx context.Context, itemID, libraryID int64) error {
 	if err := f.db.QueueFetch(ctx, itemID, libraryID, true, f.now().UnixMilli()); err != nil {
 		return err
+	}
+	if f.Match != nil {
+		if err := f.Match.Refresh(ctx, itemID, libraryID); err != nil {
+			return err
+		}
 	}
 	if f.Queued != nil {
 		f.Queued()

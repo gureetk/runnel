@@ -344,3 +344,71 @@ type Found struct {
 		ID int `json:"id"`
 	} `json:"tv_results"`
 }
+
+// The searches by title (docs/06-library-and-metadata.md, sections 6.2 and
+// 6.4): a film's and a series'.
+const (
+	MovieSearchPath  = "/search/movie"
+	SeriesSearchPath = "/search/tv"
+)
+
+// MovieSearchQuery is a film's search by its title, with the year when it
+// is known (0 when not): TMDB's year, which takes any release date in it.
+func MovieSearchQuery(title string, year int) url.Values {
+	q := url.Values{"query": {title}, "include_adult": {"false"}, "language": {Language}, "page": {"1"}}
+	if year > 0 {
+		q.Set("year", strconv.Itoa(year))
+	}
+	return q
+}
+
+// SeriesSearchQuery is a series' search by its title, with the year of its
+// first air date when it is known (0 when not).
+func SeriesSearchQuery(title string, year int) url.Values {
+	q := url.Values{"query": {title}, "include_adult": {"false"}, "language": {Language}, "page": {"1"}}
+	if year > 0 {
+		q.Set("first_air_date_year", strconv.Itoa(year))
+	}
+	return q
+}
+
+// SearchResult is one title that a search answers: a film's names and
+// date, or a series'.
+type SearchResult struct {
+	ID            int     `json:"id"`
+	Title         string  `json:"title"`          // a film's
+	OriginalTitle string  `json:"original_title"` // a film's
+	ReleaseDate   string  `json:"release_date"`   // a film's
+	Name          string  `json:"name"`           // a series'
+	OriginalName  string  `json:"original_name"`  // a series'
+	FirstAirDate  string  `json:"first_air_date"` // a series'
+	PosterPath    string  `json:"poster_path"`
+	Popularity    float64 `json:"popularity"`
+}
+
+// Names are the result's title and its original title.
+func (r SearchResult) Names() (title, original string) {
+	if r.Name != "" || r.OriginalName != "" {
+		return r.Name, r.OriginalName
+	}
+	return r.Title, r.OriginalTitle
+}
+
+// Year is the year of the result's date, or 0.
+func (r SearchResult) Year() int {
+	d := r.ReleaseDate
+	if d == "" {
+		d = r.FirstAirDate
+	}
+	if len(d) < 4 {
+		return 0
+	}
+	y, _ := strconv.Atoi(d[:4])
+	return y
+}
+
+// SearchPage is one page of a search's answer.
+type SearchPage struct {
+	Results      []SearchResult `json:"results"`
+	TotalResults int            `json:"total_results"`
+}
