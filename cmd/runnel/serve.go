@@ -148,6 +148,9 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	// place (section 8 there).
 	fetcher.Images = artwork
 	artwork.Lost = fetcher.Again
+	// People's photos are fetched when a client first asks for one, and
+	// never by matching (section 8 there; D33).
+	photos := meta.NewPhotos(artwork, keys, log)
 	importer.Matched = func(ctx context.Context) {
 		if _, err := fetcher.Queue(ctx, 0, false); err != nil && ctx.Err() == nil {
 			log.Error("cannot queue fetches after the import", "err", err)
@@ -207,6 +210,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		} else if n > 0 {
 			log.Info("dropped metadata not refreshed for 180 days", "items", n)
 		}
+		if n, err := photos.Drop(ctx, time.Now().Add(-tmdb.Kept)); err != nil && ctx.Err() == nil {
+			log.Error("cannot drop people's photos fetched 180 days ago", "err", err)
+		} else if n > 0 {
+			log.Info("dropped people's photos fetched 180 days ago", "people", n)
+		}
 		if n, err := database.DropUncredited(ctx); err != nil && ctx.Err() == nil {
 			log.Error("cannot drop people without credits", "err", err)
 		} else if n > 0 {
@@ -255,6 +263,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Scans:          scanner,
 		Gate:           gate,
 		Images:         artwork,
+		Photos:         photos,
 		Work:           queue,
 		Imports:        importer,
 		Encoders:       encoders,

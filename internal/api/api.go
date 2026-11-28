@@ -48,6 +48,9 @@ type Config struct {
 	Gate Gate
 	// Images is where images' files are kept. Nil serves none.
 	Images Images
+	// Photos fetches a person's photo when it is first asked for. Nil
+	// fetches none.
+	Photos Photos
 	// Work is the background queue, which admin calls look at and wake.
 	// Nil has nothing paused by a provider.
 	Work Work
@@ -85,6 +88,7 @@ type Server struct {
 	scans      Scans
 	gate       Gate
 	images     Images
+	photos     Photos
 	work       Work
 	imports    Imports
 	encoders   Encoders
@@ -137,6 +141,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		scans:         c.Scans,
 		gate:          gate,
 		images:        c.Images,
+		photos:        c.Photos,
 		work:          c.Work,
 		imports:       c.Imports,
 		encoders:      c.Encoders,

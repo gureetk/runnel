@@ -475,18 +475,28 @@ func (a *Artwork) download(ctx context.Context, url, file string) (found bool, e
 	case resp.StatusCode != http.StatusOK:
 		return false, fmt.Errorf("image: the provider answered %d", resp.StatusCode)
 	}
+	err = writeAtMost(file, resp.Body, maxImage)
+	return err == nil, err
+}
+
+// errTooLarge is a download larger than an image may be.
+var errTooLarge = fmt.Errorf("image: larger than %d bytes", maxImage)
+
+// writeAtMost writes what r gives to file, as it arrives, and fails with
+// errTooLarge past limit bytes.
+func writeAtMost(file string, r io.Reader, limit int64) error {
 	f, err := os.Create(file)
 	if err != nil {
-		return false, err
+		return err
 	}
-	n, err := io.Copy(f, io.LimitReader(resp.Body, maxImage+1))
+	n, err := io.Copy(f, io.LimitReader(r, limit+1))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil && n > maxImage {
-		err = fmt.Errorf("image: larger than %d bytes", maxImage)
+	if err == nil && n > limit {
+		err = errTooLarge
 	}
-	return err == nil, err
+	return err
 }
 
 func (a *Artwork) filesThere(set db.ImageSet, kind string) bool {

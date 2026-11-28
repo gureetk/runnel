@@ -243,3 +243,105 @@ func (d *DB) DropUncredited(ctx context.Context) (int, error) {
 	}
 	return int(n), nil
 }
+
+// PhotoWidths are the widths a person's photo is kept at, and PhotoAspect
+// its shape: every photo is cropped to 2:3 and scaled to both widths, so
+// its address and its widths are known before it is fetched
+// (docs/06-library-and-metadata.md, section 8).
+var PhotoWidths = []int{240, 420}
+
+// PhotoAspect is a person's photo's width divided by its height.
+const PhotoAspect = 2.0 / 3.0
+
+// PhotoImage is a person's photo as a credit or a person shows it, or nil
+// when the provider has none. Its colour is unknown until it is fetched.
+func PhotoImage(key, color string) *CardImage {
+	if key == "" {
+		return nil
+	}
+	aspect := PhotoAspect
+	im := &CardImage{Key: key, W: PhotoWidths, Aspect: &aspect}
+	if color != "" {
+		im.Color = &color
+	}
+	return im
+}
+
+// Photo is a person's photo, as GET /img finds it by its key.
+type Photo struct {
+	PersonID  int64
+	Ref       string // the provider's path
+	FetchedAt int64  // 0 until it is fetched
+	TriedAt   int64  // the last try that failed, or 0
+}
+
+// PhotoOf finds the person whose photo has key. ErrNotFound: no person's.
+func (d *DB) PhotoOf(ctx context.Context, key string) (Photo, error) {
+	var p Photo
+	err := d.r.QueryRowContext(ctx, `SELECT id, COALESCE(image_ref, ''), COALESCE(image_fetched_at, 0), COALESCE(image_tried_at, 0)
+		FROM people WHERE image_key = ?`, key).Scan(&p.PersonID, &p.Ref, &p.FetchedAt, &p.TriedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Photo{}, ErrNotFound
+	}
+	if err != nil {
+		return Photo{}, fmt.Errorf("db: read a person's photo: %w", err)
+	}
+	return p, nil
+}
+
+// SetPhoto records that the photo of key, from ref, was fetched, with its
+// colour. A person whose photo changed meanwhile is left alone. Nothing is
+// stamped: people are not part of the local copy, and a detail shows the
+// colour from its next change (docs/04-api.md, section 2.4).
+func (d *DB) SetPhoto(ctx context.Context, key, ref, color string, now int64) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		_, err := tx.tx.ExecContext(ctx, `UPDATE people SET image_color = ?, image_fetched_at = ?, image_tried_at = NULL
+			WHERE image_key = ? AND image_ref = ?`, nullString(color), now, key, ref)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("db: record a person's photo: %w", err)
+	}
+	return nil
+}
+
+// PhotoFailed records a try to fetch the photo of key, from ref, that
+// failed: it is not tried again for a day (P7).
+func (d *DB) PhotoFailed(ctx context.Context, key, ref string, now int64) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		_, err := tx.tx.ExecContext(ctx, `UPDATE people SET image_tried_at = ? WHERE image_key = ? AND image_ref = ?`, now, key, ref)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("db: record a person's photo that failed: %w", err)
+	}
+	return nil
+}
+
+// DropStalePhotos forgets the people's photos fetched before before (D53):
+// it returns their keys, whose files the caller deletes. The key stays, so
+// the next request for the photo fetches it again.
+func (d *DB) DropStalePhotos(ctx context.Context, before int64) ([]string, error) {
+	var keys []string
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		keys = keys[:0]
+		rows, err := tx.tx.QueryContext(ctx, `UPDATE people SET image_color = NULL, image_fetched_at = NULL, image_tried_at = NULL
+			WHERE image_fetched_at < ? AND image_key IS NOT NULL RETURNING image_key`, before)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				return err
+			}
+			keys = append(keys, k)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("db: drop people's photos not fetched for 180 days: %w", err)
+	}
+	return keys, nil
+}

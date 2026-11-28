@@ -16,6 +16,8 @@ type personBody struct {
 	Name       string `json:"name"`
 	Department string `json:"department"`
 	Titles     int    `json:"titles"`
+	// Image is the person's photo; absent when the provider has none.
+	Image *db.CardImage `json:"image,omitempty"`
 }
 
 // handlePerson is GET /people/{id} (docs/04-api.md, section 4.8).
@@ -30,5 +32,6 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, gerr)
 		return
 	}
-	writeJSON(w, http.StatusOK, personBody{ID: p.ID, Name: p.Name, Department: p.Department, Titles: p.Titles})
+	writeJSON(w, http.StatusOK, personBody{ID: p.ID, Name: p.Name, Department: p.Department, Titles: p.Titles,
+		Image: db.PhotoImage(p.PhotoKey, p.PhotoColor)})
 }
