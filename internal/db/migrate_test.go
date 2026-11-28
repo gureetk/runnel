@@ -93,7 +93,7 @@ var keptTables = []string{"chapters", "credits", "external_ids", "external_track
 
 // addedColumns are the columns that migrations after 0002 add, empty, to
 // a table: a row compares the same without them.
-var addedColumns = []string{"episode_order"}
+var addedColumns = []string{"episode_order", "airing"}
 
 // dump reads every row of the kept tables, as text, in order.
 func dump(t *testing.T, db *sql.DB, skipMeta ...string) map[string][]string {
@@ -160,7 +160,7 @@ func TestRebuildKeepsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if v, _ := d.schemaVersion(ctx); v != 4 {
+	if v, _ := d.schemaVersion(ctx); v != SchemaVersion() {
 		t.Fatalf("schema version %d", v)
 	}
 	after := dump(t, d.r, "schema_version")
@@ -334,7 +334,7 @@ ALTER TABLE new_users RENAME TO users;`}
 	if n := rowCount(t, d.w, `SELECT count(*) FROM users`); n != 2 {
 		t.Fatalf("%d users after a rebuild that was rolled back", n)
 	}
-	if v, _ := d.schemaVersion(ctx); v != 4 {
+	if v, _ := d.schemaVersion(ctx); v != SchemaVersion() {
 		t.Fatalf("schema version %d", v)
 	}
 	var on int

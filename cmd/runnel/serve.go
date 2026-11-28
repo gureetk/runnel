@@ -161,7 +161,9 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	// At start and each night: the delete markers older than 90 days go,
 	// with what only they could tell (docs/03-data-model.md, section 5),
 	// and so do the files of images whose items went, and the provider's
-	// answers not fetched again for 180 days (section 4 there; D53).
+	// answers and what was read from them onto items, when not fetched
+	// again for 180 days (section 4 there; D53). The walk that follows
+	// titles those items from their names again.
 	scanner.Nightly = func(ctx context.Context) {
 		if p, err := database.Prune(ctx, time.Now().UnixMilli()); err != nil {
 			log.Error("pruning failed", "err", err)
@@ -177,6 +179,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			log.Error("cannot prune the provider cache", "err", err)
 		} else if n > 0 {
 			log.Info("pruned the provider cache", "answers", n)
+		}
+		if n, err := database.DropStale(ctx, time.Now().Add(-tmdb.Kept).UnixMilli()); err != nil && ctx.Err() == nil {
+			log.Error("cannot drop metadata not refreshed for 180 days", "err", err)
+		} else if n > 0 {
+			log.Info("dropped metadata not refreshed for 180 days", "items", n)
 		}
 	}
 	background, stopBackground := context.WithCancel(context.Background())

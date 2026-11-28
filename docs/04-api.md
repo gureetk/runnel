@@ -99,8 +99,8 @@ A film's card, to show the fields an episode does not have:
 | Field | Notes |
 |---|---|
 | `type` | `movie`, `series`, `season`, `episode` or `collection` (2.3). |
-| `overview`, `rating`, `content_rating` | The same values as on the detail. Absent until metadata has arrived. |
-| `genres` | Films and series only. |
+| `overview`, `date`, `runtime_ms`, `rating`, `content_rating` | The same values as on the detail. Absent until metadata has arrived (`06-library-and-metadata.md`, section 6.3), and absent again when it is dropped after 180 days without a refresh (D53). `rating` is the provider's average of its users' votes, out of 10. `content_rating` is the certification of one country (6.3 there). |
+| `genres` | Films and series only, by name. Absent until metadata has arrived. |
 | `series_id`, `series_title`, `season`, `episode`, `episode_end`, `absolute` | Seasons and episodes only. `episode_end` is set when one file holds several episodes. `absolute` is set for series numbered in one running count. `episode` is null for an episode without a number (D51): a file whose name gives none, or only a decimal such as `08.5`, titled from its name. |
 | `root_id` | Films and series only: the library folder the item was built from. Seasons and episodes are in their series' folder. |
 | `available` | False when none of the item's own files is there. For a series or a season: none of its episodes' files. A folder that is away does not change it: that is said once, for the folder, in `GET /libraries` and `/changes`. A client shows an item as unavailable when either says so. |
@@ -130,7 +130,6 @@ Everything on the card, and what a detail screen and the player need besides: th
   "runtime_ms": 1440000,
   "rating": 7.9,
   "content_rating": "TV-14",
-  "genres": ["Drama"],
   "series_id": 377,
   "series_title": "Harbor Lantern",
   "season": 1,
@@ -183,6 +182,7 @@ Everything on the card, and what a detail screen and the player need besides: th
 
 | Field | Notes |
 |---|---|
+| `original_title` | The title in its original language, where it differs from `title`; null otherwise, and until metadata has arrived. |
 | `prefs` | Films, episodes and series: the track choice to start with. For an episode or a series, the user's choice for the series if there is one, otherwise the user's defaults; for a film, the defaults. `sub_mode` is `off`, `forced`, `auto` or `on`. `auto` means subtitles are shown when the audio is not in `audio_lang`. |
 | `files` | Versions and parts. `part` 0 is a whole item. Parts 1..n play in order. The main version, whose `label` is null, comes first, then versions whose label is a number and a `p` or an `i`, such as `1080p`, the highest first, then the others by label. A version's parts follow each other. |
 | `numbering` | Series only: `seasons`, or `absolute` when its files carry one running count (`06-library-and-metadata.md`, section 5). |

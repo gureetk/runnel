@@ -113,6 +113,7 @@ type existing struct {
 	title, sort          string
 	year                 int
 	addedAt              int64
+	refreshed            bool           // metadata was written onto it: the build leaves its title
 	links                map[int64]link // file id -> how it plays the item
 	lowest               int64          // the lowest file id the item plays; for a series, of its episodes
 	matched              bool           // a desired item has it, or it was removed
@@ -237,7 +238,8 @@ func (b *builder) load() error {
 	// A film or a series is in the scope by its folder, a season or an
 	// episode by its series'.
 	query := `SELECT i.id, i.type, i.root_id, i.path_key, i.parent_id, i.series_id, i.season_number, i.episode_number,
-		   i.episode_number_end, i.absolute_number, i.numbering, i.title, i.sort_title, i.year, i.added_at, i.episode_order
+		   i.episode_number_end, i.absolute_number, i.numbering, i.title, i.sort_title, i.year, i.added_at, i.episode_order,
+		   i.refreshed_at IS NOT NULL
 		 FROM items i`
 	args := []any{b.lib}
 	where := ` WHERE i.library_id = ? AND i.type IN ('movie', 'series', 'season', 'episode')`
@@ -257,7 +259,7 @@ func (b *builder) load() error {
 		var key, numbering sql.NullString
 		var order sql.NullFloat64
 		if err := rows.Scan(&e.id, &e.typ, &root, &key, &parent, &series, &season, &episode, &end, &absolute,
-			&numbering, &e.title, &e.sort, &year, &e.addedAt, &order); err != nil {
+			&numbering, &e.title, &e.sort, &year, &e.addedAt, &order, &e.refreshed); err != nil {
 			rows.Close()
 			return err
 		}
@@ -723,6 +725,20 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 		return id, nil
 	}
 
+	// Once metadata was written onto an item, its title and year are the
+	// provider's (docs/06-library-and-metadata.md, section 5), unless an
+	// episode now has another number: what the provider said of the old
+	// one goes, and its name titles it until its season is read again.
+	if e.refreshed {
+		renumbered := e.typ == "episode" && (e.season != f.season || e.episode != f.episode || e.end != f.end ||
+			e.absolute != f.absolute || e.unnumbered != f.unnumbered)
+		if !renumbered {
+			f.title, f.sort, f.year = e.title, e.sort, e.year
+		} else if _, err := b.tx.tx.ExecContext(b.ctx, `UPDATE items SET overview = NULL, release_date = NULL, runtime_ms = NULL,
+			rating = NULL, refreshed_at = NULL WHERE id = ?`, e.id); err != nil {
+			return 0, err
+		}
+	}
 	same := e.typ == f.typ && e.rootID == f.rootID && e.key == f.key && e.parentID == f.parentID && e.seriesID == f.seriesID &&
 		e.season == f.season && e.episode == f.episode && e.end == f.end && e.absolute == f.absolute &&
 		e.unnumbered == f.unnumbered && e.order == f.order &&

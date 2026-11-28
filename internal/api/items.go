@@ -57,29 +57,35 @@ func (s *Server) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"libraries": out})
 }
 
-// cardBody is a card (docs/04-api.md, section 2.1) as far as stage 2 has
-// its data. What needs metadata is absent.
+// cardBody is a card (docs/04-api.md, section 2.1). What metadata brings
+// is absent until it has arrived.
 type cardBody struct {
-	ID          int64                   `json:"id"`
-	Type        string                  `json:"type"`
-	LibraryID   int64                   `json:"library_id"`
-	RootID      *int64                  `json:"root_id,omitempty"`
-	Title       string                  `json:"title"`
-	Year        *int                    `json:"year,omitempty"`
-	SeriesID    *int64                  `json:"series_id,omitempty"`
-	SeriesTitle string                  `json:"series_title,omitempty"`
-	Season      *int                    `json:"season,omitempty"`
-	Episode     *episodeNumber          `json:"episode,omitempty"`
-	EpisodeEnd  *int                    `json:"episode_end,omitempty"`
-	Absolute    *int                    `json:"absolute,omitempty"`
-	Available   bool                    `json:"available"`
-	Images      map[string]db.CardImage `json:"images,omitempty"`
-	State       *stateBody              `json:"state,omitempty"`
-	Counts      *countsBody             `json:"counts,omitempty"`
-	ListedAt    *int64                  `json:"listed_at,omitempty"`
-	NewEpisodes *int                    `json:"new_episodes,omitempty"`
-	AddedAt     int64                   `json:"added_at"`
-	Seq         int64                   `json:"seq"`
+	ID            int64                   `json:"id"`
+	Type          string                  `json:"type"`
+	LibraryID     int64                   `json:"library_id"`
+	RootID        *int64                  `json:"root_id,omitempty"`
+	Title         string                  `json:"title"`
+	Overview      string                  `json:"overview,omitempty"`
+	Year          *int                    `json:"year,omitempty"`
+	Date          string                  `json:"date,omitempty"`
+	RuntimeMS     *int64                  `json:"runtime_ms,omitempty"`
+	Rating        *float64                `json:"rating,omitempty"`
+	ContentRating string                  `json:"content_rating,omitempty"`
+	Genres        []string                `json:"genres,omitempty"`
+	SeriesID      *int64                  `json:"series_id,omitempty"`
+	SeriesTitle   string                  `json:"series_title,omitempty"`
+	Season        *int                    `json:"season,omitempty"`
+	Episode       *episodeNumber          `json:"episode,omitempty"`
+	EpisodeEnd    *int                    `json:"episode_end,omitempty"`
+	Absolute      *int                    `json:"absolute,omitempty"`
+	Available     bool                    `json:"available"`
+	Images        map[string]db.CardImage `json:"images,omitempty"`
+	State         *stateBody              `json:"state,omitempty"`
+	Counts        *countsBody             `json:"counts,omitempty"`
+	ListedAt      *int64                  `json:"listed_at,omitempty"`
+	NewEpisodes   *int                    `json:"new_episodes,omitempty"`
+	AddedAt       int64                   `json:"added_at"`
+	Seq           int64                   `json:"seq"`
 }
 
 // countsBody is a series' or a season's counts. A series counts its
@@ -113,6 +119,13 @@ func cardJSON(c db.Card, p personal) cardBody {
 	}
 	if c.Year != 0 {
 		b.Year = &c.Year
+	}
+	b.Overview, b.Date, b.ContentRating, b.Genres = c.Overview, c.Date, c.ContentRating, c.Genres
+	if c.RuntimeMS != 0 {
+		b.RuntimeMS = &c.RuntimeMS
+	}
+	if c.Rating != 0 {
+		b.Rating = &c.Rating
 	}
 	if p.states != nil && (c.Type == "movie" || c.Type == "episode") {
 		b.State = p.state(c.ID)
@@ -507,7 +520,11 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	body := detailBody{cardBody: cardJSON(c, mine), OriginalTitle: nil, ExternalIDs: m.ExternalIDs,
+	var original *string
+	if c.OriginalTitle != "" {
+		original = &c.OriginalTitle
+	}
+	body := detailBody{cardBody: cardJSON(c, mine), OriginalTitle: original, ExternalIDs: m.ExternalIDs,
 		Match: matchBody{State: m.State}}
 	if m.Confidence != 0 {
 		body.Match.Confidence = &m.Confidence
@@ -572,8 +589,8 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// detailBody is an item's detail (docs/04-api.md, section 2.2), as far as
-// stage 2 has its data: the card; for a film, an episode or a series the
+// detailBody is an item's detail (docs/04-api.md, section 2.2): the card,
+// with the original title; for a film, an episode or a series the
 // track choice to start with; for a film or an episode its files; for an
 // episode its neighbours; for a series its numbering, its seasons and
 // where its Play button starts.
