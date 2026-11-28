@@ -215,6 +215,9 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		if err := f.db.ApplyMetadata(ctx, id, filmMetadata(m), now); err != nil {
 			return err
 		}
+		if err := f.db.ApplyCredits(ctx, id, "tmdb", filmCredits(m.Credits)); err != nil {
+			return err
+		}
 		if err := f.wantAll(ctx, target.LibraryID, id, m.PosterPath, m.BackdropPath, m.Images.Logo()); err != nil {
 			return err
 		}
@@ -238,6 +241,23 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		return fmt.Errorf("fetch: TMDB's details of series %s: %w", tmdbID, err)
 	}
 	if err := f.db.ApplyMetadata(ctx, id, seriesMetadata(s), now); err != nil {
+		return err
+	}
+	credits := s.AggregateCredits
+	if credits == nil {
+		// An answer without them: they are asked by themselves.
+		ans, err := f.provider.Get(ctx, tmdb.AggregateCreditsPath(tmdbID), tmdb.AggregateCreditsQuery(), age)
+		if err != nil {
+			return err
+		}
+		credits = &tmdb.AggregateCredits{}
+		if ans.Status == http.StatusOK {
+			if err := json.Unmarshal(ans.Body, credits); err != nil {
+				return fmt.Errorf("fetch: TMDB's credits of series %s: %w", tmdbID, err)
+			}
+		}
+	}
+	if err := f.db.ApplyCredits(ctx, id, "tmdb", seriesCredits(s, *credits)); err != nil {
 		return err
 	}
 	if err := f.wantAll(ctx, target.LibraryID, id, s.PosterPath, s.BackdropPath, s.Images.Logo()); err != nil {

@@ -19,7 +19,6 @@ var laterStages = map[string]string{
 	"GET /admin/items/{id}/candidates":           "4: matching",
 	"PUT /admin/items/{id}/match":                "4: matching",
 	"DELETE /admin/items/{id}/match":             "4: matching",
-	"GET /people/{id}":                           "4: credits and people",
 	"GET /admin/update":                          "5: a newer release",
 	"GET /files/{id}/video.mp4":                  "7: playing in a browser",
 	"GET /files/{id}/audio.mp4":                  "7: playing in a browser",

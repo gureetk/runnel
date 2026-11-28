@@ -207,6 +207,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		} else if n > 0 {
 			log.Info("dropped metadata not refreshed for 180 days", "items", n)
 		}
+		if n, err := database.DropUncredited(ctx); err != nil && ctx.Err() == nil {
+			log.Error("cannot drop people without credits", "err", err)
+		} else if n > 0 {
+			log.Info("dropped people without credits", "people", n)
+		}
 		if n, err := fetcher.Queue(ctx, 0, true); err != nil && ctx.Err() == nil {
 			log.Error("cannot queue the nightly fetches", "err", err)
 		} else if n > 0 {

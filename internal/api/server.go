@@ -49,7 +49,7 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		API: apiBody{
 			Version: 1,
 			// A feature is listed once this server implements it.
-			Features: []string{"changes", "collections", "list", "pairing", "prepare"},
+			Features: []string{"changes", "collections", "credits", "list", "pairing", "prepare"},
 		},
 		Transcode: s.transcodeInfo(),
 	})

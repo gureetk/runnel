@@ -107,7 +107,7 @@ func TestListSorts(t *testing.T) {
 		many[i] = "1"
 	}
 	for _, query := range []string{
-		"person=4", "library=1&sort=listed", "library=1&order=up", "library=1&offset=-1",
+		"library=1&sort=listed", "library=1&order=up", "library=1&offset=-1",
 		"library=1&offset=1&cursor=" + *date.Next, "library=1&cursor=" + *date.Next, "list=1&library=1",
 		"ids=1,x", "ids=" + strings.Join(many, ","), "ids=1&library=1", "parent=" + idStr(series.ID) + "&sort=added",
 		"series=" + idStr(series.ID) + "&played=1", "library=1&type=episode", "parent=" + idStr(series.ID) + "&library=2",

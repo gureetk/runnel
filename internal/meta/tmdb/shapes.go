@@ -122,6 +122,70 @@ type Named struct {
 	Title string `json:"title"`
 }
 
+// Person is how TMDB names a person in a credit.
+type Person struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	KnownFor    string `json:"known_for_department"`
+	ProfilePath string `json:"profile_path"`
+}
+
+// Credits is a film's cast and crew, appended to its details.
+type Credits struct {
+	Cast []CastCredit `json:"cast"`
+	Crew []CrewCredit `json:"crew"`
+}
+
+// CastCredit is one of a film's cast.
+type CastCredit struct {
+	Person
+	Character string `json:"character"`
+	Order     int    `json:"order"`
+}
+
+// CrewCredit is one job of a film's crew.
+type CrewCredit struct {
+	Person
+	Job        string `json:"job"`
+	Department string `json:"department"`
+}
+
+// AggregateCredits is a series' cast and crew over all its episodes,
+// appended to its details, or asked by itself (AggregateCreditsPath).
+type AggregateCredits struct {
+	Cast []SeriesCast `json:"cast"`
+	Crew []SeriesCrew `json:"crew"`
+}
+
+// SeriesCast is one of a series' cast, with the roles they play.
+type SeriesCast struct {
+	Person
+	Roles []struct {
+		Character string `json:"character"`
+		Episodes  int    `json:"episode_count"`
+	} `json:"roles"`
+	Episodes int `json:"total_episode_count"`
+	Order    int `json:"order"`
+}
+
+// SeriesCrew is one of a series' crew, with their jobs.
+type SeriesCrew struct {
+	Person
+	Jobs []struct {
+		Job      string `json:"job"`
+		Episodes int    `json:"episode_count"`
+	} `json:"jobs"`
+	Department string `json:"department"`
+	Episodes   int    `json:"total_episode_count"`
+}
+
+// AggregateCreditsPath is a series' credits asked by themselves, for an
+// answer that came without them.
+func AggregateCreditsPath(id string) string { return "/tv/" + id + "/aggregate_credits" }
+
+// AggregateCreditsQuery is the query of AggregateCreditsPath.
+func AggregateCreditsQuery() url.Values { return url.Values{"language": {Language}} }
+
 // Movie is what the server reads of a film's details, with what they
 // append (section 6.4 there). Credits and images are read by their own
 // parts.
@@ -139,6 +203,7 @@ type Movie struct {
 	PosterPath    string  `json:"poster_path"`
 	BackdropPath  string  `json:"backdrop_path"`
 	Images        Images  `json:"images"`
+	Credits       Credits `json:"credits"`
 	// Collection is the collection the film belongs to, or nil.
 	Collection *struct {
 		ID   int    `json:"id"`
@@ -221,6 +286,9 @@ type Series struct {
 		ImdbID string `json:"imdb_id"`
 		TvdbID int    `json:"tvdb_id"`
 	} `json:"external_ids"`
+	CreatedBy []Person `json:"created_by"`
+	// AggregateCredits is nil when the answer came without them.
+	AggregateCredits *AggregateCredits `json:"aggregate_credits"`
 }
 
 // Airing reports whether the series still airs: TMDB says it is in
