@@ -26,7 +26,7 @@ func TestEpisodesWithoutANumber(t *testing.T) {
 		t.Fatalf("seasons %+v", d.Seasons)
 	}
 	season1, specials := (*d.Seasons)[0], (*d.Seasons)[1]
-	if season1.Counts.Episodes != 4 || specials.Counts.Episodes != 1 {
+	if *season1.Counts.Episodes != 4 || *specials.Counts.Episodes != 1 {
 		t.Fatalf("counts: season 1 %+v, specials %+v", season1.Counts, specials.Counts)
 	}
 

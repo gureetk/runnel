@@ -175,8 +175,8 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			attrs = append(attrs, "folders", folders)
 		}
 		log.Info("items built", attrs...)
-		if _, err := fetcher.Queue(ctx, libraryID, false); err != nil && ctx.Err() == nil {
-			log.Error("cannot queue fetches after a build", "library", libraryID, "err", err)
+		if err := fetcher.Built(ctx, libraryID); err != nil && ctx.Err() == nil {
+			log.Error("cannot sync collections or queue fetches after a build", "library", libraryID, "err", err)
 		}
 		return nil
 	}

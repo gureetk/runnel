@@ -29,6 +29,20 @@ const (
 	seriesAppends = "aggregate_credits,alternative_titles,content_ratings,external_ids,images"
 )
 
+// CollectionPath is a collection's details request's path, and
+// CollectionQuery its query.
+func CollectionPath(id string) string { return "/collection/" + id }
+func CollectionQuery() url.Values     { return url.Values{"language": {Language}} }
+
+// Collection is what the server reads of a collection's details.
+type Collection struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	BackdropPath string `json:"backdrop_path"`
+}
+
 // MoviePath, SeriesPath and SeasonPath are the details requests' paths.
 func MoviePath(id string) string              { return "/movie/" + id }
 func SeriesPath(id string) string             { return "/tv/" + id }
@@ -125,7 +139,12 @@ type Movie struct {
 	PosterPath    string  `json:"poster_path"`
 	BackdropPath  string  `json:"backdrop_path"`
 	Images        Images  `json:"images"`
-	ExternalIDs   struct {
+	// Collection is the collection the film belongs to, or nil.
+	Collection *struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"belongs_to_collection"`
+	ExternalIDs struct {
 		ImdbID string `json:"imdb_id"`
 	} `json:"external_ids"`
 	ReleaseDates struct {

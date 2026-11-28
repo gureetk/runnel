@@ -22,10 +22,11 @@ func ItemOfKey(key string) int64 {
 	return id
 }
 
-// FetchTarget is a film or a series as fetching its metadata reads it.
+// FetchTarget is a film, a series or a collection as fetching its
+// metadata reads it.
 type FetchTarget struct {
 	ID, LibraryID int64
-	Type          string // movie or series
+	Type          string // movie, series or collection
 	MatchState    string
 	Numbering     string // a series': seasons or absolute
 	Airing        bool
@@ -85,14 +86,14 @@ func (d *DB) FetchTargetOf(ctx context.Context, id int64) (FetchTarget, error) {
 // every library with ?2 = 0, that has never been fetched, was fetched
 // before ?3, or before ?4 while it airs, or is a series with a season or a
 // numbered episode not fetched yet, outside a running count's. ?1 is now.
-const needsFetch = `i.type IN ('movie', 'series') AND i.match_state IN ('matched', 'manual') AND (?2 = 0 OR i.library_id = ?2)
+const needsFetch = `i.type IN ('movie', 'series', 'collection') AND i.match_state IN ('matched', 'manual') AND (?2 = 0 OR i.library_id = ?2)
 	AND (i.refreshed_at IS NULL
 	  OR i.refreshed_at < CASE WHEN i.airing = 1 THEN ?4 ELSE ?3 END
 	  OR (i.type = 'series' AND COALESCE(i.numbering, 'seasons') <> 'absolute' AND EXISTS (SELECT 1 FROM items c
 	        WHERE c.series_id = i.id AND c.refreshed_at IS NULL AND (c.type = 'season' OR c.episode_number IS NOT NULL))))`
 
-// QueueFetches queues a fetch for every film and series of a library, or
-// of every library with 0, that needs one: matched, and never fetched,
+// QueueFetches queues a fetch for every film, series and collection of a
+// library, or of every library with 0, that needs one: matched, and never fetched,
 // fetched more than every ago, or more than airing ago while it airs, or a
 // series with a season or an episode that is not fetched yet
 // (docs/06-library-and-metadata.md, section 6.3). A fetch that runs is

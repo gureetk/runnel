@@ -73,6 +73,7 @@ type cardBody struct {
 	Rating        *float64                `json:"rating,omitempty"`
 	ContentRating string                  `json:"content_rating,omitempty"`
 	Genres        []string                `json:"genres,omitempty"`
+	CollectionID  *int64                  `json:"collection_id,omitempty"`
 	SeriesID      *int64                  `json:"series_id,omitempty"`
 	SeriesTitle   string                  `json:"series_title,omitempty"`
 	Season        *int                    `json:"season,omitempty"`
@@ -93,9 +94,10 @@ type cardBody struct {
 // episodes and seasons outside the specials. unplayed is the signed-in
 // user's.
 type countsBody struct {
-	Episodes int  `json:"episodes"`
+	Episodes *int `json:"episodes,omitempty"` // series and seasons
 	Unplayed *int `json:"unplayed,omitempty"`
 	Seasons  *int `json:"seasons,omitempty"`
+	Films    *int `json:"films,omitempty"` // collections
 }
 
 // unplayedOf is a series' or a season's unplayed count, or nil where no
@@ -146,9 +148,15 @@ func cardJSON(c db.Card, p personal) cardBody {
 		}
 	case "season":
 		b.SeriesID, b.SeriesTitle, b.Season = &c.SeriesID, c.SeriesTitle, &c.Season
-		b.Counts = &countsBody{Episodes: c.Episodes, Unplayed: p.unplayedOf(c.ID)}
+		b.Counts = &countsBody{Episodes: &c.Episodes, Unplayed: p.unplayedOf(c.ID)}
 	case "series":
-		b.Counts = &countsBody{Episodes: c.Episodes, Unplayed: p.unplayedOf(c.ID), Seasons: &c.Seasons}
+		b.Counts = &countsBody{Episodes: &c.Episodes, Unplayed: p.unplayedOf(c.ID), Seasons: &c.Seasons}
+	case "collection":
+		b.Counts = &countsBody{Films: &c.Episodes}
+	case "movie":
+		if c.CollectionID != 0 {
+			b.CollectionID = &c.CollectionID
+		}
 	}
 	return b
 }
@@ -208,7 +216,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	for _, k := range []string{"collection", "person"} {
+	for _, k := range []string{"person"} {
 		if q.Has(k) {
 			s.fail(w, r, http.StatusBadRequest, "bad_request", k+" arrives with metadata, in a later version of the server")
 			return
@@ -508,6 +516,10 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, gerr)
 		return
 	}
+	if c.Type == "collection" {
+		s.collectionDetail(w, r, c)
+		return
+	}
 	m, err := s.db.MatchOf(r.Context(), id)
 	if err != nil {
 		s.internal(w, r, err)
@@ -548,6 +560,16 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		pb := prefsJSON(p)
 		body.Prefs = &pb
 	}
+	if c.CollectionID != 0 {
+		coll, err := s.db.Item(r.Context(), c.CollectionID)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			s.internal(w, r, err)
+			return
+		}
+		if err == nil {
+			body.Collection = &collectionRef{ID: coll.ID, Title: coll.Title}
+		}
+	}
 	switch c.Type {
 	case "movie", "episode":
 		files, err := s.db.ItemFiles(r.Context(), id)
@@ -579,7 +601,7 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		list := []seasonBody{}
 		for _, se := range seasons {
 			list = append(list, seasonBody{ID: se.ID, Season: se.Season, Title: se.Title,
-				Counts: countsBody{Episodes: se.Episodes, Unplayed: mine.unplayedOf(se.ID)}})
+				Counts: countsBody{Episodes: &se.Episodes, Unplayed: mine.unplayedOf(se.ID)}})
 		}
 		body.Seasons = &list
 		at, ok, err := s.db.ResumeOf(r.Context(), user, id)
@@ -612,6 +634,52 @@ type detailBody struct {
 	Files         *[]fileBody       `json:"files,omitempty"`
 	Prev          *neighbourBody    `json:"prev,omitempty"`
 	Next          *neighbourBody    `json:"next,omitempty"`
+	Collection    *collectionRef    `json:"collection,omitempty"`
+}
+
+// collectionRef is a film's collection, on its detail.
+type collectionRef struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+}
+
+// collectionBody is a collection's detail (docs/04-api.md, section 2.3):
+// the card, its films in release order, and what its main button starts.
+type collectionBody struct {
+	cardBody
+	Items  []cardBody        `json:"items"`
+	Resume *collectionResume `json:"resume"`
+}
+
+type collectionResume struct {
+	ID         int64 `json:"id"`
+	PositionMS int64 `json:"position_ms"`
+}
+
+// collectionDetail answers a collection's detail: its films are those of
+// its library that point at it, by release date, then title; resume is
+// the first of them that is not played.
+func (s *Server) collectionDetail(w http.ResponseWriter, r *http.Request, c db.Card) {
+	lq := db.ListQuery{UserID: callerOf(r.Context()).user.ID, Collection: c.ID, Types: []string{"movie"}, Played: -1, Sort: "date"}
+	films, _, err := s.db.ListItems(r.Context(), lq, nil, 0, 1000)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	mine, err := s.personalOf(r.Context(), append([]db.Card{c}, films...))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	body := collectionBody{cardBody: cardJSON(c, mine), Items: []cardBody{}}
+	for _, f := range films {
+		fb := cardJSON(f, mine)
+		body.Items = append(body.Items, fb)
+		if body.Resume == nil && fb.State != nil && !fb.State.Played {
+			body.Resume = &collectionResume{ID: f.ID, PositionMS: fb.State.PositionMS}
+		}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 type matchBody struct {

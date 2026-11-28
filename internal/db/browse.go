@@ -54,6 +54,9 @@ type Card struct {
 	RuntimeMS                                    int64
 	Rating                                       float64
 	Genres                                       []string
+	// CollectionID is a film's collection, when its library shows one.
+	// A collection's count of films is in Episodes.
+	CollectionID int64
 }
 
 // CardImage is an image as a card shows it: its key, the widths stored,
@@ -77,11 +80,14 @@ const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_titl
                                WHERE e.series_id = i.id AND e.type = 'episode' AND f.missing_since IS NULL)
     WHEN 'season' THEN EXISTS (SELECT 1 FROM items e JOIN item_files l ON l.item_id = e.id JOIN files f ON f.id = l.file_id
                                WHERE e.parent_id = i.id AND f.missing_since IS NULL)
+    WHEN 'collection' THEN EXISTS (SELECT 1 FROM items e JOIN item_files l ON l.item_id = e.id JOIN files f ON f.id = l.file_id
+                               WHERE e.collection_id = i.id AND f.missing_since IS NULL)
     ELSE EXISTS (SELECT 1 FROM item_files l JOIN files f ON f.id = l.file_id WHERE l.item_id = i.id AND f.missing_since IS NULL)
   END,
   CASE i.type
     WHEN 'series' THEN (SELECT count(*) FROM items e WHERE e.series_id = i.id AND e.type = 'episode' AND e.season_number > 0)
     WHEN 'season' THEN (SELECT count(*) FROM items e WHERE e.parent_id = i.id AND e.type = 'episode')
+    WHEN 'collection' THEN (SELECT count(*) FROM items e WHERE e.collection_id = i.id)
     ELSE 0 END,
   CASE i.type
     WHEN 'series' THEN (SELECT count(*) FROM items e WHERE e.series_id = i.id AND e.type = 'season' AND e.season_number > 0)
@@ -91,7 +97,8 @@ const cardColumns = `i.id, i.type, i.library_id, i.root_id, i.title, i.sort_titl
   i.added_at, i.updated_seq,
   i.overview, i.release_date, i.content_rating, i.original_title, i.runtime_ms, i.rating,
   CASE WHEN i.type IN ('movie', 'series') THEN (SELECT json_group_array(g.genre) FROM
-    (SELECT genre FROM item_genres WHERE item_id = i.id ORDER BY genre) g) END`
+    (SELECT genre FROM item_genres WHERE item_id = i.id ORDER BY genre) g) END,
+  i.collection_id`
 
 func scanCards(rows *sql.Rows) ([]Card, error) { return scanCardsWith(rows, nil) }
 
@@ -122,11 +129,11 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 	var root, year, parent, series, season, episode, end, absolute sql.NullInt64
 	var seriesTitle, images sql.NullString
 	var overview, date, contentRating, original, genres sql.NullString
-	var runtime sql.NullInt64
+	var runtime, collection sql.NullInt64
 	var rating sql.NullFloat64
 	dest := []any{&c.ID, &c.Type, &c.LibraryID, &root, &c.Title, &c.SortTitle, &year, &parent, &series,
 		&seriesTitle, &season, &episode, &end, &absolute, &c.Place, &c.Available, &c.Episodes, &c.Seasons, &images, &c.AddedAt, &c.Seq,
-		&overview, &date, &contentRating, &original, &runtime, &rating, &genres}
+		&overview, &date, &contentRating, &original, &runtime, &rating, &genres, &collection}
 	if extra != nil {
 		dest = append(dest, extra)
 	}
@@ -144,7 +151,7 @@ func scanCard(rows *sql.Rows, extra any) (Card, error) {
 		}
 	}
 	c.Overview, c.Date, c.ContentRating, c.OriginalTitle = overview.String, date.String, contentRating.String, original.String
-	c.RuntimeMS, c.Rating = runtime.Int64, rating.Float64
+	c.RuntimeMS, c.Rating, c.CollectionID = runtime.Int64, rating.Float64, collection.Int64
 	c.RootID, c.Year, c.ParentID, c.SeriesID, c.SeriesTitle = root.Int64, int(year.Int64), parent.Int64, series.Int64, seriesTitle.String
 	c.Season, c.Episode, c.EpisodeEnd, c.Absolute = int(season.Int64), int(episode.Int64), int(end.Int64), int(absolute.Int64)
 	c.Unnumbered = c.Type == "episode" && !episode.Valid

@@ -44,8 +44,21 @@ func (s *Server) listQuery(w http.ResponseWriter, r *http.Request) (db.ListQuery
 		}
 		lq.Listed = true
 	}
+	if v := q.Get("collection"); v != "" || q.Has("collection") {
+		id, perr := strconv.ParseInt(v, 10, 64)
+		coll, gerr := s.db.Item(r.Context(), id)
+		switch {
+		case perr != nil || errors.Is(gerr, db.ErrNotFound) || (gerr == nil && coll.Type != "collection"):
+			s.fail(w, r, http.StatusNotFound, "not_found", "no such collection")
+			return lq, false
+		case gerr != nil:
+			s.internal(w, r, gerr)
+			return lq, false
+		}
+		lq.Collection, lq.Types = id, []string{"movie"}
+	}
 	var kind string
-	if v := q.Get("library"); v != "" || (!lq.Listed && lq.Genre == "") {
+	if v := q.Get("library"); v != "" || (!lq.Listed && lq.Genre == "" && lq.Collection == 0) {
 		id, perr := strconv.ParseInt(v, 10, 64)
 		lib, gerr := s.db.Library(r.Context(), id)
 		switch {
@@ -62,6 +75,10 @@ func (s *Server) listQuery(w http.ResponseWriter, r *http.Request) (db.ListQuery
 		lq.LibraryID, kind = lib.ID, map[string]string{"movies": "movie", "shows": "series"}[lib.Kind]
 	}
 	switch t := q.Get("type"); {
+	case lq.Collection != 0 && t != "" && t != "movie":
+		s.fail(w, r, http.StatusBadRequest, "bad_request", `a collection's films are of type "movie"`)
+		return lq, false
+	case lq.Collection != 0:
 	case t == "movie" || t == "series":
 		lq.Types = []string{t}
 	case t != "":
@@ -85,13 +102,16 @@ func (s *Server) listQuery(w http.ResponseWriter, r *http.Request) (db.ListQuery
 		if lq.Listed {
 			lq.Sort = "listed"
 		}
+		if lq.Collection != 0 {
+			lq.Sort = "date"
+		}
 	case !db.Sorts[lq.Sort] || (lq.Sort == "listed" && !lq.Listed):
 		s.fail(w, r, http.StatusBadRequest, "bad_request", `sort is "title", "added", "date" or "rating", and "listed" with list`)
 		return lq, false
 	}
 	switch q.Get("order") {
 	case "":
-		lq.Desc = lq.Sort != "title"
+		lq.Desc = lq.Sort != "title" && !(lq.Collection != 0 && lq.Sort == "date")
 	case "asc":
 	case "desc":
 		lq.Desc = true
