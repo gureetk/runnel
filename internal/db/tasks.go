@@ -221,6 +221,44 @@ func (d *DB) Tasks(ctx context.Context) ([]TaskRow, error) {
 
 // AddTask queues a task, or queues it again when it exists and is done
 // or failed.
+// QueueTask queues a task to run no earlier than runAfter, a time in
+// Unix milliseconds: the queue takes the earliest first, so a task queued
+// to run after 1 waits behind every one queued to run after 0. A task of
+// that kind and key that is queued, done or failed takes the new payload
+// and time; one that runs is left to finish.
+func (d *DB) QueueTask(ctx context.Context, kind, key string, libraryID int64, payload string, runAfter, now int64) error {
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		_, err := tx.tx.ExecContext(ctx,
+			`INSERT INTO tasks (kind, key, library_id, payload, run_after, created_at) VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (kind, key) DO UPDATE SET state = 'queued', attempts = 0, run_after = excluded.run_after, error = NULL,
+			   payload = excluded.payload
+			 WHERE tasks.state <> 'running'`,
+			kind, key, nullInt(libraryID), nullString(payload), runAfter, now)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("db: queue a %s task: %w", kind, err)
+	}
+	return nil
+}
+
+// HurryThumbs moves the queued thumbs of a season's episodes, which wait
+// behind every other image, to the front, as when the season is opened
+// (docs/06-library-and-metadata.md, section 8). It writes only when there
+// are such thumbs.
+func (d *DB) HurryThumbs(ctx context.Context, seasonID int64) error {
+	const which = `kind = 'image' AND state = 'queued' AND run_after = 1 AND key IN
+		(SELECT 'tmdb:' || id || ':thumb' FROM items WHERE parent_id = ? AND type = 'episode')`
+	var any bool
+	if err := d.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tasks WHERE `+which+`)`, seasonID).Scan(&any); err != nil || !any {
+		return err
+	}
+	return d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		_, err := tx.tx.ExecContext(ctx, `UPDATE tasks SET run_after = 0 WHERE `+which, seasonID)
+		return err
+	})
+}
+
 func (d *DB) AddTask(ctx context.Context, kind, key string, libraryID int64, payload string, now int64) error {
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
 		_, err := tx.tx.ExecContext(ctx,

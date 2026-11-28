@@ -13,9 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -26,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gureetk/runnel/internal/db"
+	"github.com/gureetk/runnel/internal/meta/tmdb"
 	"github.com/gureetk/runnel/internal/parse"
 	"github.com/gureetk/runnel/internal/scan"
 	"github.com/gureetk/runnel/internal/tasks"
@@ -33,7 +36,15 @@ import (
 
 // Widths are the widths kept of each kind of image
 // (docs/06-library-and-metadata.md, section 8).
-var Widths = map[string][]int{"poster": {342, 500}, "backdrop": {1280}, "thumb": {300}, "logo": {500}}
+var Widths = map[string][]int{"poster": {342, 500}, "backdrop": {780, 1280}, "thumb": {440, 780}, "logo": {500}}
+
+// providerSize is the size of TMDB's image downloaded for each kind: the
+// smallest of its sizes that is as wide as the kind's widest width, or
+// its original where none is (section 8 there).
+var providerSize = map[string]string{"poster": "w500", "backdrop": "w1280", "logo": "w500", "thumb": "original"}
+
+// maxImage is the most an image's download may be.
+const maxImage = 32 << 20
 
 // kindsFor are the kinds of local image each type of item takes.
 var kindsFor = map[string][]string{
@@ -50,15 +61,25 @@ type Artwork struct {
 	ffprobe string
 	log     *slog.Logger
 	now     func() time.Time
+	http    *http.Client
+	base    string // where the provider's images are
 	// Queued is called after image work was queued.
 	Queued func()
+	// Lost, when set, is told of the items whose local images went, so
+	// that the provider's images are fetched in their place.
+	Lost func(ctx context.Context, items []int64)
 }
 
 // NewArtwork keeps images under dataDir/images, made by the ffmpeg and
 // ffprobe at the paths given.
 func NewArtwork(d *db.DB, dataDir, ffmpeg, ffprobe string, log *slog.Logger) *Artwork {
-	return &Artwork{db: d, dir: filepath.Join(dataDir, "images"), ffmpeg: ffmpeg, ffprobe: ffprobe, log: log, now: time.Now}
+	return &Artwork{db: d, dir: filepath.Join(dataDir, "images"), ffmpeg: ffmpeg, ffprobe: ffprobe, log: log, now: time.Now,
+		http: &http.Client{Timeout: time.Minute}, base: tmdb.ImageBase}
 }
+
+// SetImageBase points the provider's images at another address, for
+// tests.
+func (a *Artwork) SetImageBase(base string) { a.base = base }
 
 // Path is where an image's file of one width is kept.
 func (a *Artwork) Path(key, kind string, width int) string {
@@ -88,12 +109,57 @@ type owner struct {
 	bases []string
 }
 
-// task is what an image task is about.
+// task is what an image task is about: a local file, or a provider's
+// image.
 type task struct {
-	Item int64  `json:"item"`
-	Kind string `json:"kind"`
-	Root int64  `json:"root"`
-	Path string `json:"path"` // below the root
+	Item   int64  `json:"item"`
+	Kind   string `json:"kind"`
+	Root   int64  `json:"root,omitempty"`
+	Path   string `json:"path,omitempty"`   // below the root
+	Source string `json:"source,omitempty"` // the provider: tmdb
+	Ref    string `json:"ref,omitempty"`    // the provider's path of the image
+}
+
+// providerKey is a provider's image's key: 128 bits of the SHA-256 of the
+// provider and its path (section 8 there).
+func providerKey(source, ref string) string {
+	sum := sha256.Sum256([]byte(source + ":" + ref))
+	return hex.EncodeToString(sum[:16])
+}
+
+// Want queues the download of a provider's image of an item, unless the
+// item has a local image of that kind, which comes first, or has this one
+// already with its files. A thumb waits behind every other image, until
+// its season is opened (Hurry).
+func (a *Artwork) Want(ctx context.Context, libraryID, itemID int64, kind, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	wanted, set, err := a.db.ImageWanted(ctx, itemID, kind, providerKey("tmdb", ref))
+	if err != nil || !wanted && (set.Key == "" || a.filesThere(set, kind)) {
+		return err
+	}
+	payload, _ := json.Marshal(task{Item: itemID, Kind: kind, Source: "tmdb", Ref: ref})
+	var runAfter int64
+	if kind == "thumb" {
+		runAfter = 1
+	}
+	key := "tmdb:" + strconv.FormatInt(itemID, 10) + ":" + kind
+	if err := a.db.QueueTask(ctx, "image", key, libraryID, string(payload), runAfter, a.now().UnixMilli()); err != nil {
+		return err
+	}
+	if a.Queued != nil {
+		a.Queued()
+	}
+	return nil
+}
+
+// Hurry moves a season's episodes' thumbs to the front of the image work,
+// as when a client opens the season.
+func (a *Artwork) Hurry(ctx context.Context, seasonID int64) {
+	if err := a.db.HurryThumbs(ctx, seasonID); err != nil && ctx.Err() == nil {
+		a.log.Error("cannot move a season's thumbs forward", "season", seasonID, "err", err)
+	}
 }
 
 // Sync gives a library's items the local images that a scan of one of
@@ -142,6 +208,15 @@ func (a *Artwork) Sync(ctx context.Context, libraryID, rootID int64, inScope fun
 			return err
 		}
 		a.removeFiles(keys)
+		if a.Lost != nil {
+			var items []int64
+			for _, im := range have {
+				if slices.Contains(gone, im.ID) {
+					items = append(items, im.ItemID)
+				}
+			}
+			a.Lost(ctx, items)
+		}
 	}
 	if queued && a.Queued != nil {
 		a.Queued()
@@ -300,6 +375,9 @@ func (a *Artwork) run(ctx context.Context, t db.Task) error {
 	if err := json.Unmarshal([]byte(t.Payload), &job); err != nil {
 		return fmt.Errorf("image task %s: %w", t.Key, err)
 	}
+	if job.Source != "" {
+		return a.runProvider(ctx, job)
+	}
 	root, err := a.db.RootPath(ctx, job.Root)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil
@@ -331,7 +409,7 @@ func (a *Artwork) run(ctx context.Context, t db.Task) error {
 		if a.ffmpeg == "" || a.ffprobe == "" {
 			return &tasks.Pause{Err: errors.New("ffmpeg and ffprobe are needed to scale images"), For: noToolWait}
 		}
-		if set, err = a.scale(ctx, file, key, job.Kind); err != nil {
+		if set, err = a.scale(ctx, file, key, job.Kind, false); err != nil {
 			return err
 		}
 	}
@@ -341,6 +419,74 @@ func (a *Artwork) run(ctx context.Context, t db.Task) error {
 	}
 	a.removeFiles(gone)
 	return nil
+}
+
+// runProvider downloads a provider's image into the image folder,
+// scales it as a local file is scaled, and stores it as the item's image
+// of that kind. One the provider does not have leaves nothing to do; one
+// the item no longer wants is not downloaded.
+func (a *Artwork) runProvider(ctx context.Context, job task) error {
+	key := providerKey(job.Source, job.Ref)
+	wanted, set, err := a.db.ImageWanted(ctx, job.Item, job.Kind, key)
+	if err != nil {
+		return err
+	}
+	if !wanted && (set.Key == "" || a.filesThere(set, job.Kind)) {
+		return nil
+	}
+	if a.ffmpeg == "" || a.ffprobe == "" {
+		return &tasks.Pause{Err: errors.New("ffmpeg and ffprobe are needed to scale images"), For: noToolWait}
+	}
+	if err := os.MkdirAll(filepath.Join(a.dir, key[:2]), 0o755); err != nil {
+		return err
+	}
+	file := filepath.Join(a.dir, key[:2], fmt.Sprintf("%s.download%x%s", key, rand.Uint64(), path.Ext(job.Ref)))
+	defer os.Remove(file)
+	found, err := a.download(ctx, a.base+providerSize[job.Kind]+job.Ref, file)
+	if err != nil || !found {
+		return err
+	}
+	if set, err = a.scale(ctx, file, key, job.Kind, true); err != nil {
+		return err
+	}
+	gone, err := a.db.SetProviderImage(ctx, job.Item, job.Kind, job.Source, set, job.Ref)
+	if err != nil {
+		return err
+	}
+	a.removeFiles(gone)
+	return nil
+}
+
+// download writes an image to file, as it arrives: found is false for one
+// the provider does not have.
+func (a *Artwork) download(ctx context.Context, url, file string) (found bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("image: %w", err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return false, nil
+	case resp.StatusCode != http.StatusOK:
+		return false, fmt.Errorf("image: the provider answered %d", resp.StatusCode)
+	}
+	f, err := os.Create(file)
+	if err != nil {
+		return false, err
+	}
+	n, err := io.Copy(f, io.LimitReader(resp.Body, maxImage+1))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n > maxImage {
+		err = fmt.Errorf("image: larger than %d bytes", maxImage)
+	}
+	return err == nil, err
 }
 
 func (a *Artwork) filesThere(set db.ImageSet, kind string) bool {
@@ -353,8 +499,10 @@ func (a *Artwork) filesThere(set db.ImageSet, kind string) bool {
 }
 
 // scale writes the image at each width of its kind, none wider than the
-// file itself, and reads its colour from the smallest.
-func (a *Artwork) scale(ctx context.Context, file, key, kind string) (db.ImageSet, error) {
+// file itself, and reads its colour from the smallest. With asIs, a file
+// already of a width and in the kind's format is kept as it is: a
+// provider's download, which needs no encoding again.
+func (a *Artwork) scale(ctx context.Context, file, key, kind string, asIs bool) (db.ImageSet, error) {
 	w, h, err := a.size(ctx, file)
 	if err != nil {
 		return db.ImageSet{}, err
@@ -374,6 +522,18 @@ func (a *Artwork) scale(ctx context.Context, file, key, kind string) (db.ImageSe
 		// Two items may show one picture, whose image tasks then write the
 		// same key at once: each writes a file of its own and renames it.
 		tmp := fmt.Sprintf("%s.tmp%x%s", out, rand.Uint64(), extension(kind))
+		// A file already of that width and format is kept as it is, not
+		// encoded again.
+		if asIs && width == w && strings.EqualFold(path.Ext(file), extension(kind)) {
+			if err := copyFile(file, tmp); err != nil {
+				os.Remove(tmp)
+				return db.ImageSet{}, err
+			}
+			if err := os.Rename(tmp, out); err != nil {
+				return db.ImageSet{}, err
+			}
+			continue
+		}
 		args := []string{"-v", "error", "-nostdin", "-y", "-i", file, "-vf", "scale=" + strconv.Itoa(width) + ":-1", "-frames:v", "1"}
 		if kind != "logo" {
 			args = append(args, "-q:v", "3")
@@ -393,6 +553,23 @@ func (a *Artwork) scale(ctx context.Context, file, key, kind string) (db.ImageSe
 		set.Color = fmt.Sprintf("#%02x%02x%02x", rgb[0], rgb[1], rgb[2])
 	}
 	return set, nil
+}
+
+func copyFile(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(to)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // size reads an image's width and height with ffprobe.

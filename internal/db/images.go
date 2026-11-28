@@ -135,8 +135,10 @@ func (d *DB) SetLocalImage(ctx context.Context, itemID int64, kind string, set I
 		if err := tx.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM items WHERE id = ?)`, itemID).Scan(&exists); err != nil || !exists {
 			return err // the item went since the image was queued
 		}
+		// One image of a kind: a local image takes the place of any other,
+		// the provider's too (docs/06-library-and-metadata.md, section 8).
 		rows, err := tx.tx.QueryContext(ctx,
-			`DELETE FROM images WHERE item_id = ? AND kind = ? AND source = 'local' AND key <> ? RETURNING key`, itemID, kind, set.Key)
+			`DELETE FROM images WHERE item_id = ? AND kind = ? AND key <> ? RETURNING key`, itemID, kind, set.Key)
 		if err != nil {
 			return err
 		}
@@ -170,6 +172,82 @@ func (d *DB) SetLocalImage(ctx context.Context, itemID int64, kind string, set I
 		return nil, fmt.Errorf("db: set image of item %d: %w", itemID, err)
 	}
 	return gone, nil
+}
+
+// SetProviderImage makes a provider's image an item's image of a kind, in
+// place of the provider's other image of that kind, and bumps the item's
+// sequence, unless the item has a local image of that kind, which comes
+// first: then nothing is written. ref is the provider's path of the image.
+// It returns the keys that no image has any more, this one's among them
+// when it was not written.
+func (d *DB) SetProviderImage(ctx context.Context, itemID int64, kind, source string, set ImageSet, ref string) ([]string, error) {
+	widths, _ := json.Marshal(set.Widths)
+	var gone []string
+	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		var exists, local bool
+		if err := tx.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM items WHERE id = ?),
+			EXISTS (SELECT 1 FROM images WHERE item_id = ? AND kind = ? AND source = 'local')`, itemID, itemID, kind).Scan(&exists, &local); err != nil {
+			return err
+		}
+		if !exists || local {
+			if unused, err := keyUnused(ctx, tx, set.Key); err != nil {
+				return err
+			} else if unused {
+				gone = append(gone, set.Key)
+			}
+			return nil
+		}
+		rows, err := tx.tx.QueryContext(ctx,
+			`DELETE FROM images WHERE item_id = ? AND kind = ? AND key <> ? RETURNING key`, itemID, kind, set.Key)
+		if err != nil {
+			return err
+		}
+		var old []string
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				rows.Close()
+				return err
+			}
+			old = append(old, k)
+		}
+		rows.Close()
+		if _, err := tx.tx.ExecContext(ctx,
+			`INSERT INTO images (item_id, kind, key, widths, aspect, color, source, source_ref, rank) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+			 ON CONFLICT (item_id, kind, key) DO UPDATE SET widths = excluded.widths, aspect = excluded.aspect, color = excluded.color,
+			   source = excluded.source, source_ref = excluded.source_ref`,
+			itemID, kind, set.Key, string(widths), nullFloat(set.Aspect), nullString(set.Color), source, ref); err != nil {
+			return err
+		}
+		for _, k := range old {
+			if unused, err := keyUnused(ctx, tx, k); err != nil {
+				return err
+			} else if unused {
+				gone = append(gone, k)
+			}
+		}
+		return tx.stampItems(ctx, []int64{itemID})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("db: set image of item %d: %w", itemID, err)
+	}
+	return gone, nil
+}
+
+// ImageWanted reports whether an item still wants a provider's image of a
+// kind with that key: it has neither a local image of the kind nor this
+// one already. set is this one, when it has it.
+func (d *DB) ImageWanted(ctx context.Context, itemID int64, kind, key string) (wanted bool, set ImageSet, err error) {
+	var local bool
+	if err := d.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM images WHERE item_id = ? AND kind = ? AND source = 'local')`,
+		itemID, kind).Scan(&local); err != nil {
+		return false, ImageSet{}, fmt.Errorf("db: read images: %w", err)
+	}
+	if local {
+		return false, ImageSet{}, nil
+	}
+	set, ok, err := d.ImageOfItem(ctx, itemID, kind, key)
+	return !ok, set, err
 }
 
 // ImageByKey is the kind and the stored widths of an image, or

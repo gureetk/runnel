@@ -91,3 +91,37 @@ func TestRefresh(t *testing.T) {
 		t.Errorf("not an admin: %d", rec.Code)
 	}
 }
+
+type hurriedImages struct {
+	mu      sync.Mutex
+	seasons []int64
+}
+
+func (h *hurriedImages) Path(key, kind string, width int) string { return "" }
+
+func (h *hurriedImages) Hurry(ctx context.Context, season int64) {
+	h.mu.Lock()
+	h.seasons = append(h.seasons, season)
+	h.mu.Unlock()
+}
+
+// TestOpeningASeasonHurriesItsThumbs: the first page of a season's
+// episodes moves their thumbs forward (docs/06-library-and-metadata.md,
+// section 8); a series' seasons, and a later page, do not.
+func TestOpeningASeasonHurriesItsThumbs(t *testing.T) {
+	b := newBrowse(t)
+	h := &hurriedImages{}
+	b.images = h
+	var page itemsPage
+	b.call(t, "GET", "/api/v1/items?library=2", b.token, "", nil, &page)
+	series := page.Items[0].ID
+	b.call(t, "GET", "/api/v1/items?parent="+strconv.FormatInt(series, 10), b.token, "", nil, &page)
+	season := page.Items[0].ID
+	b.call(t, "GET", "/api/v1/items?parent="+strconv.FormatInt(season, 10)+"&limit=1", b.token, "", nil, &page)
+	if page.Next != nil {
+		b.call(t, "GET", "/api/v1/items?parent="+strconv.FormatInt(season, 10)+"&limit=1&cursor="+*page.Next, b.token, "", nil, &page)
+	}
+	if len(h.seasons) != 1 || h.seasons[0] != season {
+		t.Errorf("hurried %v, want season %d once", h.seasons, season)
+	}
+}

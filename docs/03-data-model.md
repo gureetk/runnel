@@ -480,7 +480,7 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 **Images**
 
 - A local image has `source = 'local'` and `rank` 0. Its `source_ref` holds the root, the path below it, the size and the time of the file it was made from, so that a scan can tell an unchanged file without reading it.
-- Writing an item's image of a kind replaces its other local image of that kind, and bumps the item's `updated_seq`. So does removing one. The files of a key that no image has any more are deleted: at once when an image is replaced or removed, and when its item went, by a sweep of `images/` at start and each night. The sweep leaves files younger than an hour, since an image task writes its files before the row that names them, and keys that a person's photo has.
+- An item has one image of a kind. Writing a local image replaces any other of that kind, the provider's too; a provider's image (`source = 'tmdb'`, `source_ref` its path at TMDB) replaces the provider's other image of that kind, and is not written while the item has a local one (`06-library-and-metadata.md`, section 8). Either bumps the item's `updated_seq`. So does removing one. D53's drop deletes the provider's images of what it drops. The files of a key that no image has any more are deleted: at once when an image is replaced or removed, and when its item went, by a sweep of `images/` at start and each night. The sweep leaves files younger than an hour, since an image task writes its files before the row that names them, and keys that a person's photo has.
 
 **External tracks**
 
@@ -569,6 +569,7 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 **Background work and the start-time log**
 
 - A task carries the library it works for, where it has one. Removing a library removes its queued work.
+- An `image` task is keyed `image:<item>:<kind>` for a local file and `tmdb:<item>:<kind>` for a provider's image. A thumb's waits behind every other: it is queued with `run_after = 1` where the others have 0, and the queue takes the lowest `run_after` first, then the lowest id. Listing a season's episodes sets its thumbs' to 0.
 - A `fetch` task is keyed `item:<id>`, for a film or a series. Its `payload` is `{"force":true}` for an item's refresh, which asks the provider whatever the age of what it has, and NULL otherwise.
 - The Jellyfin import's task, of no library, keeps its request in `payload`, the Jellyfin key with it, until its run ends. Its done row then goes like any other.
 - A `done` row stays until no row of its kind and library is queued or running. Then all of them are deleted together. Progress is counted from that: the `done` rows out of all rows.

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -259,6 +260,11 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		child := map[string]string{"series": "season", "season": "episode"}[parent.Type]
+		// A season opened: its episodes' thumbs come first among the
+		// images still to fetch (docs/06-library-and-metadata.md, section 8).
+		if h, ok := s.images.(interface{ Hurry(context.Context, int64) }); ok && first && child == "episode" {
+			h.Hurry(r.Context(), id)
+		}
 		if t := q.Get("type"); t != "" && t != child {
 			s.fail(w, r, http.StatusBadRequest, "bad_request", "the children of a "+parent.Type+" are of type "+strconv.Quote(child))
 			return

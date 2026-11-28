@@ -5,6 +5,7 @@ package tmdb
 import (
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Language is the language every request asks TMDB's text in, and Country
@@ -56,6 +57,51 @@ func FindQuery(source string) url.Values {
 	return url.Values{"external_source": {source}, "language": {Language}}
 }
 
+// ImageBase is where TMDB's images are, before a size and an image's
+// path: /configuration's secure_base_url (section 6.4 there).
+const ImageBase = "https://image.tmdb.org/t/p/"
+
+// Image is one of the images that the details append.
+type Image struct {
+	Path     string  `json:"file_path"`
+	Language *string `json:"iso_639_1"`
+	Width    int     `json:"width"`
+	Votes    float64 `json:"vote_average"`
+}
+
+// Images are the images that the details append: the server reads only
+// the logos, since the poster and the backdrop are the details' own.
+type Images struct {
+	Logos []Image `json:"logos"`
+}
+
+// Logo is the logo to show: a PNG, since an SVG is not decoded, in the
+// request's language first, then without one, then any, the best voted
+// first. "" when there is none.
+func (im Images) Logo() string {
+	best, rank := "", 4
+	var votes float64
+	for _, l := range im.Logos {
+		if !strings.HasSuffix(strings.ToLower(l.Path), ".png") {
+			continue
+		}
+		r := 2
+		switch {
+		case l.Language != nil && *l.Language == language2:
+			r = 0
+		case l.Language == nil:
+			r = 1
+		}
+		if r < rank || r == rank && l.Votes > votes {
+			best, rank, votes = l.Path, r, l.Votes
+		}
+	}
+	return best
+}
+
+// language2 is Language's language alone, as images name theirs.
+const language2 = "en"
+
 // Named is something TMDB names: a genre, an alternative title.
 type Named struct {
 	Name  string `json:"name"`
@@ -76,6 +122,9 @@ type Movie struct {
 	VoteCount     int     `json:"vote_count"`
 	Genres        []Named `json:"genres"`
 	ImdbID        string  `json:"imdb_id"`
+	PosterPath    string  `json:"poster_path"`
+	BackdropPath  string  `json:"backdrop_path"`
+	Images        Images  `json:"images"`
 	ExternalIDs   struct {
 		ImdbID string `json:"imdb_id"`
 	} `json:"external_ids"`
@@ -127,6 +176,9 @@ type Series struct {
 	Genres         []Named `json:"genres"`
 	Status         string  `json:"status"`
 	InProduction   bool    `json:"in_production"`
+	PosterPath     string  `json:"poster_path"`
+	BackdropPath   string  `json:"backdrop_path"`
+	Images         Images  `json:"images"`
 	NextEpisode    *struct {
 		Season int `json:"season_number"`
 	} `json:"next_episode_to_air"`
@@ -178,13 +230,15 @@ func (s Series) HasSeason(n int) bool {
 
 // Season is what the server reads of a season's details.
 type Season struct {
-	Number   int    `json:"season_number"`
-	Name     string `json:"name"`
-	Overview string `json:"overview"`
-	AirDate  string `json:"air_date"`
-	Episodes []struct {
+	Number     int    `json:"season_number"`
+	Name       string `json:"name"`
+	Overview   string `json:"overview"`
+	AirDate    string `json:"air_date"`
+	PosterPath string `json:"poster_path"`
+	Episodes   []struct {
 		Number      int     `json:"episode_number"`
 		Name        string  `json:"name"`
+		StillPath   string  `json:"still_path"`
 		Overview    string  `json:"overview"`
 		AirDate     string  `json:"air_date"`
 		Runtime     int     `json:"runtime"`
