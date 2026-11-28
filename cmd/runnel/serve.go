@@ -143,6 +143,11 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	fetcher.Queued = queue.Wake
 	fetcher.Resume = func() { queue.Resume("fetch") }
 	queue.Register(fetcher.Kind())
+	// What is fetched asks for its images; an item whose local image went
+	// is fetched again from the cache, so that the provider's takes its
+	// place (section 8 there).
+	fetcher.Images = artwork
+	artwork.Lost = fetcher.Again
 	importer.Matched = func(ctx context.Context) {
 		if _, err := fetcher.Queue(ctx, 0, false); err != nil && ctx.Err() == nil {
 			log.Error("cannot queue fetches after the import", "err", err)

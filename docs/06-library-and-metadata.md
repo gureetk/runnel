@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5; and for builds of only what a scan looked at, in sections 2.2 and 5. Revised again the same day: ids in names, as Jellyfin reads them, in sections 4.5 and 6.1, where they now come before the import, since every build writes them; what metadata writes onto items, and how the build leaves their titles once it has, in sections 5 and 6.3; and fetching by id, as TMDB's reference gives its requests, in sections 6.2 to 6.4 and 9.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5; and for builds of only what a scan looked at, in sections 2.2 and 5. Revised again the same day: ids in names, as Jellyfin reads them, in sections 4.5 and 6.1, where they now come before the import, since every build writes them; what metadata writes onto items, and how the build leaves their titles once it has, in sections 5 and 6.3; and fetching by id, as TMDB's reference gives its requests, in sections 6.2 to 6.4 and 9. Revised on 28 November 2026: artwork from TMDB, and the widths settled against the designs, in section 8.
 
 ## 1. The pipeline
 
@@ -424,23 +424,27 @@ A library that Jellyfin has already matched can be imported. That is quicker and
 
 ## 8. Artwork
 
-| Kind | For | Width kept |
-|---|---|---|
-| `poster` | films, series, seasons | 342, and 500 for the detail screen |
-| `backdrop` | films, series | 1280 |
-| `thumb` | episodes | 300 |
-| `logo` | films, series | 500 |
-| a person's photo | cast and crew | One width for cards and one for the person page, chosen from the provider's sizes when stage 4 is specified |
+| Kind | For | Widths kept | Downloaded from TMDB | Why, in the designs |
+|---|---|---|---|---|
+| `poster` | films, series, seasons | 342, 500 | `w500` | PosterCards: 264 px in TV rows, 248 in TV search, about 333 px for a phone's three columns (111 dp at 3×), 140 px and more in the web's grids; 500 for the web's larger cards, such as a collection's 180 px at 2× |
+| `backdrop` | films, series | 780, 1280 | `w1280` | The TV's film page draws it at 1280 × 720 and the hero card at 1040 × 360; 780 for a WideCard without a thumb (440 px on TV, 280 on the web at 2×, 240 dp on a phone at 3×) |
+| `thumb` | episodes | 440, 780 | `original` | The TV's EpisodeItems have 400 px thumbnails and its WideCards are 440 px; 780 for the web and phones, as backdrops. TMDB's widest fixed still is 300 (6.4), so the original is downloaded and scaled once |
+| `logo` | films, series | 500 | `w500` | Kept as PNG; a logo TMDB has only as SVG is not taken, since ffmpeg does not decode SVG |
+| a person's photo | cast and crew | Settled with credits and people (6.3) | | PersonCards 208 px on TV, 112 on the web, 84 dp on touch; the person page 360 × 480 on TV, 220 × 293 on the web |
 
 - **Local images first** (4.8). They are scaled to the widths above by an ffmpeg child, once, none wider than the file itself: a file narrower than a width is kept at its own, and that is the width listed. A scan finds them after it has built the items, and queues an `image` task for each one that is new or changed (section 9). An image whose file went is removed, with its files. The files of an item's images go with the item, at the next start or by night (`03-data-model.md`, section 4). A scan also makes again an image whose files were deleted from the data directory.
-- **Provider images** are downloaded at the provider's own sizes nearest to those widths. The server never decodes a large image in its own process.
+- **Provider images** are downloaded once, at the size in the table, and scaled to the widths kept by an ffmpeg child, as local images are; a download already of a width kept is kept as it is. The server never decodes an image in its own process. A download is written to the image folder as it arrives, at most 32 MB, and removed once scaled.
+- **Which.** A film's or a series' poster and backdrop are its details' `poster_path` and `backdrop_path`, which TMDB chooses for the request's language; its logo is the best-voted PNG among the appended logos, in English first, then without a language, then any. A season's poster is its season's `poster_path`, an episode's thumb its `still_path`, and a file of several episodes the first one's. A path that is absent asks for nothing.
+- **One image of a kind.** A local image comes first: an item with one of a kind downloads none of the provider's for it, and a local image that arrives replaces the provider's. When a local image goes, the item is fetched again from the cache (6.3), and the provider's takes its place. A refresh whose paths are those already stored downloads nothing; a new path replaces the old image. What was downloaded goes with D53's drop after 180 days without a refresh, and the sweep deletes its files.
+- **Key** of a provider's image: the first 128 bits of the SHA-256 of `tmdb:` and its path.
 - **Key.** 32 hex characters derived from the image's source: the provider and its image path, or a local file's fingerprint (2.1). For a local file it is the first 128 bits of the SHA-256 of `local:` and the fingerprint. A changed image has a new key, so responses can be cached forever.
 - **On disk**: `images/<first two characters>/<key>_<width>.jpg` under the data directory, and `.png` for a logo, which keeps its transparency.
 - **Placeholder colour**: the average colour of the smallest stored width, computed once, by an ffmpeg child that scales it to one pixel.
-- **Order of work**: posters and backdrops for films and series first. Episode thumbs are fetched when their season is first opened, and in the background at the lowest priority.
+- **Order of work**: posters, backdrops and logos of films, series and seasons first. Episode thumbs are queued behind every other image, and a client that lists a season's episodes (`GET /items?parent=`, its first page) moves that season's to the front.
 - A library of 3,000 films and 240 series comes to roughly 3,500 posters and backdrops, a few hundred megabytes at most.
 - **People's photos arrive on first request** (D33). A film can credit dozens of people, so matching a library downloads none of them. The key is derived from the photo's path when the credits are stored, so the address exists at once. `GET /img/{key}/{w}` for a key with no file on disk finds the person, downloads the provider's nearest size, stores it, works out the colour and answers. A photo the provider cannot give is `404`, and is not tried again for a day.
-- **Episode stills, to check when stage 4 is specified**: how wide the provider's stills are. The TV's episode rows are 400 px wide. If the largest fixed size is narrower, the original is fetched and scaled once by an ffmpeg child (`11-design-review.md`, U5).
+- **Episode stills**, checked on 27 November 2026: TMDB's fixed still sizes are 92, 185 and 300 wide (6.4), narrower than the TV's 400 px rows, so a still is the original, scaled once (`11-design-review.md`, U5).
+- **Images made before** keep their widths until their file changes: a backdrop or a thumb scaled when the widths were 1280 and 300 is served at those, the nearest it has (`04-api.md`, section 6).
 
 ## 9. Background work
 

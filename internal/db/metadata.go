@@ -43,6 +43,15 @@ type EpisodeMetadata struct {
 	Date            string
 	RuntimeMS       int64
 	Rating          float64
+	Still           string // the provider's path of its picture, or ""
+}
+
+// SeasonWritten is what ApplySeason wrote onto: the season, 0 when the
+// series holds none of that number, and each episode with the provider's
+// still of its first number, for its thumb.
+type SeasonWritten struct {
+	SeasonID int64
+	Stills   map[int64]string
 }
 
 // shown is an item's metadata as a card or a detail shows it: what,
@@ -233,8 +242,10 @@ func reindex(ctx context.Context, tx *Tx, id int64, title, original string, alia
 // a number (D51), and the episodes of a series numbered in one running
 // count, which wait for its mapping to seasons (section 6.5 there), are
 // left as they are. A series that holds no such season is left as it is.
-func (d *DB) ApplySeason(ctx context.Context, seriesID int64, m SeasonMetadata, sortTitle func(string) string, now int64) error {
+func (d *DB) ApplySeason(ctx context.Context, seriesID int64, m SeasonMetadata, sortTitle func(string) string, now int64) (SeasonWritten, error) {
+	out := SeasonWritten{Stills: map[int64]string{}}
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
+		out = SeasonWritten{Stills: map[int64]string{}}
 		var seasonID int64
 		err := tx.tx.QueryRowContext(ctx, `SELECT id FROM items WHERE parent_id = ? AND type = 'season' AND season_number = ?`,
 			seriesID, m.Number).Scan(&seasonID)
@@ -244,6 +255,7 @@ func (d *DB) ApplySeason(ctx context.Context, seriesID int64, m SeasonMetadata, 
 		if err != nil {
 			return err
 		}
+		out.SeasonID = seasonID
 		var stamp []int64
 		if changed, err := writeShown(ctx, tx, seasonID, m.Title, sortTitle, m.Overview, m.Date, 0, 0, now); err != nil {
 			return err
@@ -306,6 +318,9 @@ func (d *DB) ApplySeason(ctx context.Context, seriesID int64, m SeasonMetadata, 
 				}
 				continue
 			}
+			if got[0].Number == e.first && got[0].Still != "" {
+				out.Stills[e.id] = got[0].Still
+			}
 			var runtime int64
 			for _, pe := range got {
 				runtime += pe.RuntimeMS
@@ -321,9 +336,9 @@ func (d *DB) ApplySeason(ctx context.Context, seriesID int64, m SeasonMetadata, 
 		return tx.stampItems(ctx, stamp)
 	})
 	if err != nil {
-		return fmt.Errorf("db: write the metadata of season %d of item %d: %w", m.Number, seriesID, err)
+		return SeasonWritten{}, fmt.Errorf("db: write the metadata of season %d of item %d: %w", m.Number, seriesID, err)
 	}
-	return nil
+	return out, nil
 }
 
 // writeShown writes a season's or an episode's metadata, marks it
@@ -356,7 +371,8 @@ func writeShown(ctx context.Context, tx *Tx, id int64, title string, sortTitle f
 
 // DropStale drops what was read from a provider onto items that have not
 // been refreshed since before (D53): every column a provider fills, the
-// genres, whether a series airs, and the time it was refreshed. Titles and
+// genres, whether a series airs, the provider's images, whose files the
+// sweep deletes, and the time it was refreshed. Titles and
 // years go back to what the names say at the next build, which the nightly
 // walk after it runs; the providers' ids stay, since they are the match. It
 // returns how many items it dropped, each stamped.
@@ -392,6 +408,9 @@ func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 				return err
 			}
 			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM item_genres WHERE item_id = ?`, s.id); err != nil {
+				return err
+			}
+			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM images WHERE item_id = ? AND source <> 'local'`, s.id); err != nil {
 				return err
 			}
 			if s.typ != "season" {

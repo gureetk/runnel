@@ -124,7 +124,7 @@ func TestFilmImages(t *testing.T) {
 		poster.Color == nil || len(*poster.Color) != 7 || len(poster.Key) != 32 {
 		t.Fatalf("poster %+v", poster)
 	}
-	if !slices.Equal(backdrop.W, []int{1280}) || !slices.Equal(logo.W, []int{500}) {
+	if !slices.Equal(backdrop.W, []int{780, 1280}) || !slices.Equal(logo.W, []int{500}) {
 		t.Fatalf("backdrop %+v, logo %+v", backdrop, logo)
 	}
 	if lone := im["Lone Lantern/poster"]; !slices.Equal(lone.W, []int{200}) {
@@ -182,13 +182,13 @@ func TestSeriesImages(t *testing.T) {
 	e.image("Harbor Lantern (2021)/poster.jpg", 600, 900)
 	e.image("Harbor Lantern (2021)/backdrop.jpg", 1280, 720)
 	e.image("Harbor Lantern (2021)/Season 01/cover.jpg", 600, 900)
-	e.image("Harbor Lantern (2021)/Season 01/backdrop.jpg", 1280, 720) // a season keeps a poster only
-	e.image("Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01-thumb.jpg", 640, 360)
-	e.image("Harbor Lantern (2021)/Season 01/thumb.jpg", 640, 360) // named for no episode
+	e.image("Harbor Lantern (2021)/Season 01/backdrop.jpg", 1280, 720)                     // a season keeps a poster only
+	e.image("Harbor Lantern (2021)/Season 01/Harbor Lantern - S01E01-thumb.jpg", 640, 360) // kept at 440 and its own 640
+	e.image("Harbor Lantern (2021)/Season 01/thumb.jpg", 640, 360)                         // named for no episode
 	e.scan()
 	im := e.images()
 	if len(im) != 4 || im["Harbor Lantern/poster"].Key == "" || im["Harbor Lantern/backdrop"].Key == "" ||
-		im["Season 1/poster"].Key == "" || !slices.Equal(im["Episode 1/thumb"].W, []int{300}) {
+		im["Season 1/poster"].Key == "" || !slices.Equal(im["Episode 1/thumb"].W, []int{440, 640}) {
 		t.Fatalf("images %v", im)
 	}
 }

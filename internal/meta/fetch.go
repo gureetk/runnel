@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +54,19 @@ type Fetcher struct {
 	// Queued, when set, is called after fetches were queued; Resume ends
 	// a pause of the fetches, after a new key was set.
 	Queued, Resume func()
+	// Images, when set, is asked for the provider's images of what was
+	// fetched (docs/06-library-and-metadata.md, section 8).
+	Images interface {
+		Want(ctx context.Context, libraryID, itemID int64, kind, ref string) error
+	}
+}
+
+// want asks for an item's provider image of a kind.
+func (f *Fetcher) want(ctx context.Context, libraryID, itemID int64, kind, ref string) error {
+	if f.Images == nil || itemID == 0 {
+		return nil
+	}
+	return f.Images.Want(ctx, libraryID, itemID, kind, ref)
 }
 
 // NewFetcher makes the fetcher, which asks p with the key that key gives.
@@ -183,13 +198,19 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		if err := json.Unmarshal(ans.Body, &m); err != nil {
 			return fmt.Errorf("fetch: TMDB's details of film %s: %w", tmdbID, err)
 		}
-		return f.db.ApplyMetadata(ctx, id, filmMetadata(m), now)
+		if err := f.db.ApplyMetadata(ctx, id, filmMetadata(m), now); err != nil {
+			return err
+		}
+		return f.wantAll(ctx, target.LibraryID, id, m.PosterPath, m.BackdropPath, m.Images.Logo())
 	}
 	var s tmdb.Series
 	if err := json.Unmarshal(ans.Body, &s); err != nil {
 		return fmt.Errorf("fetch: TMDB's details of series %s: %w", tmdbID, err)
 	}
 	if err := f.db.ApplyMetadata(ctx, id, seriesMetadata(s), now); err != nil {
+		return err
+	}
+	if err := f.wantAll(ctx, target.LibraryID, id, s.PosterPath, s.BackdropPath, s.Images.Logo()); err != nil {
 		return err
 	}
 	// A running count waits for its mapping to seasons (section 6.5 there).
@@ -204,7 +225,7 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		if !s.HasSeason(n) {
 			// The provider lists no such season: the season and its
 			// episodes keep their titles until the series' next refresh.
-			if err := f.db.ApplySeason(ctx, id, db.SeasonMetadata{Number: n}, parse.SortTitle, now); err != nil {
+			if _, err := f.db.ApplySeason(ctx, id, db.SeasonMetadata{Number: n}, parse.SortTitle, now); err != nil {
 				return err
 			}
 			continue
@@ -226,11 +247,53 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 				return fmt.Errorf("fetch: TMDB's season %d of series %s: %w", n, tmdbID, err)
 			}
 		}
-		if err := f.db.ApplySeason(ctx, id, seasonMetadata(n, se), parse.SortTitle, now); err != nil {
+		written, err := f.db.ApplySeason(ctx, id, seasonMetadata(n, se), parse.SortTitle, now)
+		if err != nil {
+			return err
+		}
+		if err := f.want(ctx, target.LibraryID, written.SeasonID, "poster", se.PosterPath); err != nil {
+			return err
+		}
+		for _, ep := range slices.Sorted(maps.Keys(written.Stills)) {
+			if err := f.want(ctx, target.LibraryID, ep, "thumb", written.Stills[ep]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// wantAll asks for a film's or a series' poster, backdrop and logo.
+func (f *Fetcher) wantAll(ctx context.Context, libraryID, id int64, poster, backdrop, logo string) error {
+	for _, im := range [][2]string{{"poster", poster}, {"backdrop", backdrop}, {"logo", logo}} {
+		if err := f.want(ctx, libraryID, id, im[0], im[1]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Again queues the fetch of the films and series that the items given
+// are, or belong to, reading what the cache holds: after their local
+// images went, the provider's take their place.
+func (f *Fetcher) Again(ctx context.Context, items []int64) {
+	if key, err := f.key(ctx); err != nil || key == "" {
+		return
+	}
+	queued := false
+	for _, id := range items {
+		owner, lib, err := f.db.FetchOwner(ctx, id)
+		if err == nil && owner != 0 {
+			err = f.db.QueueFetch(ctx, owner, lib, false, f.now().UnixMilli())
+			queued = true
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) && ctx.Err() == nil {
+			f.log.Error("cannot queue a fetch after a local image went", "item", id, "err", err)
+		}
+	}
+	if queued && f.Queued != nil {
+		f.Queued()
+	}
 }
 
 // find asks the provider for its title of the item's IMDb or TheTVDB id,
@@ -336,7 +399,8 @@ func seasonMetadata(n int, s tmdb.Season) db.SeasonMetadata {
 	out := db.SeasonMetadata{Number: n, Title: strings.TrimSpace(s.Name), Overview: s.Overview, Date: s.AirDate}
 	for _, e := range s.Episodes {
 		out.Episodes = append(out.Episodes, db.EpisodeMetadata{Number: e.Number, Title: strings.TrimSpace(e.Name),
-			Overview: e.Overview, Date: e.AirDate, RuntimeMS: int64(e.Runtime) * 60000, Rating: rating(e.VoteAverage, e.VoteCount)})
+			Overview: e.Overview, Date: e.AirDate, RuntimeMS: int64(e.Runtime) * 60000, Rating: rating(e.VoteAverage, e.VoteCount),
+			Still: e.StillPath})
 	}
 	return out
 }

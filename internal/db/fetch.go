@@ -161,6 +161,27 @@ func (d *DB) SetMatchID(ctx context.Context, id int64, provider, value string) e
 	return nil
 }
 
+// FetchOwner is the film or the series that an item is, or belongs to,
+// and its library: 0 for an item of another type.
+func (d *DB) FetchOwner(ctx context.Context, id int64) (owner, libraryID int64, err error) {
+	var typ string
+	var series sql.NullInt64
+	err = d.r.QueryRowContext(ctx, `SELECT type, series_id, library_id FROM items WHERE id = ?`, id).Scan(&typ, &series, &libraryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("db: read an item: %w", err)
+	}
+	switch typ {
+	case "movie", "series":
+		return id, libraryID, nil
+	case "season", "episode":
+		return series.Int64, libraryID, nil
+	}
+	return 0, libraryID, nil
+}
+
 // MatchNote reads why an item is on the review list, as JSON, or "".
 func (d *DB) MatchNote(ctx context.Context, id int64) (string, error) {
 	var n sql.NullString

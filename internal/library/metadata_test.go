@@ -120,7 +120,7 @@ func TestMetadataOnASeason(t *testing.T) {
 		{Number: 2, Title: "Low Tide", Date: "2021-04-12", RuntimeMS: 1400000},
 		{Number: 3, Title: "North Light", Date: "2021-04-19", RuntimeMS: 1500000},
 	}}
-	if err := e.db.ApplySeason(ctx, series.ID, s, parse.SortTitle, 1000); err != nil {
+	if _, err := e.db.ApplySeason(ctx, series.ID, s, parse.SortTitle, 1000); err != nil {
 		t.Fatal(err)
 	}
 	seasons, eps := children(e.items(), series.ID)
@@ -161,7 +161,7 @@ func TestMetadataOnASeason(t *testing.T) {
 
 	// A running count is left to its mapping (06, section 6.5).
 	running := byTitle(items, "series", "Salt Road")
-	if err := e.db.ApplySeason(ctx, running.ID, db.SeasonMetadata{Number: 1, Episodes: []db.EpisodeMetadata{{Number: 1, Title: "The Long Swim"}}}, parse.SortTitle, 1000); err != nil {
+	if _, err := e.db.ApplySeason(ctx, running.ID, db.SeasonMetadata{Number: 1, Episodes: []db.EpisodeMetadata{{Number: 1, Title: "The Long Swim"}}}, parse.SortTitle, 1000); err != nil {
 		t.Fatal(err)
 	}
 	_, eps = children(e.items(), running.ID)
