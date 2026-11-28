@@ -188,6 +188,7 @@ func (s *Server) routes() {
 	s.handle("GET "+Prefix+"/genres", s.json(s.signedIn(s.handleGenres)))
 	s.handle("GET "+Prefix+"/changes", s.json(s.signedIn(s.handleChanges)))
 	s.handle("GET "+Prefix+"/items/{id}", s.json(s.signedIn(s.handleItem)))
+	s.handle("GET "+Prefix+"/people/{id}", s.json(s.signedIn(s.handlePerson)))
 	s.handle("GET "+Prefix+"/files/{id}", s.json(s.signedIn(s.handleFile)))
 	s.handle("GET "+Prefix+"/files/{id}/raw", s.media(s.handleRaw))
 	s.handle("GET "+Prefix+"/files/{id}/external/{external_id}", s.media(s.handleExternal))

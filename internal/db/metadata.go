@@ -382,8 +382,8 @@ func writeShown(ctx context.Context, tx *Tx, id int64, title string, sortTitle f
 
 // DropStale drops what was read from a provider onto items that have not
 // been refreshed since before (D53): every column a provider fills, the
-// genres, whether a series airs, the provider's images, whose files the
-// sweep deletes, and the time it was refreshed. Titles and
+// genres, the credits, whether a series airs, the provider's images,
+// whose files the sweep deletes, and the time it was refreshed. Titles and
 // years go back to what the names say at the next build, which the nightly
 // walk after it runs; a collection, which has no name, is titled
 // "Collection" until it is fetched again. The providers' ids stay, since
@@ -428,6 +428,9 @@ func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 				return err
 			}
 			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM item_genres WHERE item_id = ?`, s.id); err != nil {
+				return err
+			}
+			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM credits WHERE item_id = ?`, s.id); err != nil {
 				return err
 			}
 			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM images WHERE item_id = ? AND source <> 'local'`, s.id); err != nil {

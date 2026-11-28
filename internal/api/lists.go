@@ -57,8 +57,21 @@ func (s *Server) listQuery(w http.ResponseWriter, r *http.Request) (db.ListQuery
 		}
 		lq.Collection, lq.Types = id, []string{"movie"}
 	}
+	if v := q.Get("person"); v != "" || q.Has("person") {
+		id, perr := strconv.ParseInt(v, 10, 64)
+		_, gerr := s.db.PersonOf(r.Context(), id)
+		switch {
+		case perr != nil || errors.Is(gerr, db.ErrNotFound):
+			s.fail(w, r, http.StatusNotFound, "not_found", "no such person")
+			return lq, false
+		case gerr != nil:
+			s.internal(w, r, gerr)
+			return lq, false
+		}
+		lq.Person = id
+	}
 	var kind string
-	if v := q.Get("library"); v != "" || (!lq.Listed && lq.Genre == "" && lq.Collection == 0) {
+	if v := q.Get("library"); v != "" || (!lq.Listed && lq.Genre == "" && lq.Collection == 0 && lq.Person == 0) {
 		id, perr := strconv.ParseInt(v, 10, 64)
 		lib, gerr := s.db.Library(r.Context(), id)
 		switch {
@@ -102,7 +115,7 @@ func (s *Server) listQuery(w http.ResponseWriter, r *http.Request) (db.ListQuery
 		if lq.Listed {
 			lq.Sort = "listed"
 		}
-		if lq.Collection != 0 {
+		if lq.Collection != 0 || lq.Person != 0 {
 			lq.Sort = "date"
 		}
 	case !db.Sorts[lq.Sort] || (lq.Sort == "listed" && !lq.Listed):
@@ -174,7 +187,34 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, limit int) {
 		k := keyOf[c.ID]
 		return encodeCursor(listCursor{S: lq.Sort, D: lq.Desc, N: k.Null, V: k.Value, T: k.Title, I: k.ID})
 	}
-	s.page(w, r, cards, limit, next, withTotal, total)
+	var credits map[int64]db.PersonCredit
+	if lq.Person != 0 {
+		ids := make([]int64, len(cards))
+		for i, c := range cards {
+			ids[i] = c.ID
+		}
+		if credits, err = s.db.CreditsOfPerson(r.Context(), lq.Person, ids); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	s.page(w, r, cards, limit, next, withTotal, total, func(b *cardBody) {
+		if c, ok := credits[b.ID]; ok {
+			cb := creditBody{Kind: c.Kind, Role: c.Role}
+			if c.Episodes > 0 {
+				cb.Episodes = &c.Episodes
+			}
+			b.Credit = &cb
+		}
+	})
+}
+
+// creditBody is how a title of a person's credits them, on its card in
+// GET /items?person= (docs/04-api.md, section 4.3).
+type creditBody struct {
+	Kind     string `json:"kind"`
+	Role     string `json:"role"`
+	Episodes *int   `json:"episodes,omitempty"`
 }
 
 // itemsByID answers the cards of some items, in the order asked for: at

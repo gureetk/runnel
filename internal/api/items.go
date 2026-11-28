@@ -74,6 +74,7 @@ type cardBody struct {
 	ContentRating string                  `json:"content_rating,omitempty"`
 	Genres        []string                `json:"genres,omitempty"`
 	CollectionID  *int64                  `json:"collection_id,omitempty"`
+	Credit        *creditBody             `json:"credit,omitempty"`
 	SeriesID      *int64                  `json:"series_id,omitempty"`
 	SeriesTitle   string                  `json:"series_title,omitempty"`
 	Season        *int                    `json:"season,omitempty"`
@@ -216,12 +217,6 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	for _, k := range []string{"person"} {
-		if q.Has(k) {
-			s.fail(w, r, http.StatusBadRequest, "bad_request", k+" arrives with metadata, in a later version of the server")
-			return
-		}
-	}
 	limit := 100
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -349,7 +344,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 
 // page answers a page of cards: at most limit of them, the next cursor
 // when there are more, and the total on a first page.
-func (s *Server) page(w http.ResponseWriter, r *http.Request, cards []db.Card, limit int, next func(db.Card) string, withTotal bool, total int) {
+func (s *Server) page(w http.ResponseWriter, r *http.Request, cards []db.Card, limit int, next func(db.Card) string, withTotal bool, total int, more ...func(*cardBody)) {
 	body := struct {
 		Items []cardBody `json:"items"`
 		Next  *string    `json:"next"`
@@ -366,7 +361,11 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request, cards []db.Card, l
 		return
 	}
 	for _, c := range cards {
-		body.Items = append(body.Items, cardJSON(c, mine))
+		cb := cardJSON(c, mine)
+		for _, f := range more {
+			f(&cb)
+		}
+		body.Items = append(body.Items, cb)
 	}
 	if withTotal {
 		body.Total = &total
@@ -570,6 +569,14 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 			body.Collection = &collectionRef{ID: coll.ID, Title: coll.Title}
 		}
 	}
+	if c.Type == "movie" || c.Type == "series" {
+		credits, err := s.db.Credits(r.Context(), id)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		body.Credits = creditsJSON(credits, c.Type == "series")
+	}
 	switch c.Type {
 	case "movie", "episode":
 		files, err := s.db.ItemFiles(r.Context(), id)
@@ -635,6 +642,46 @@ type detailBody struct {
 	Prev          *neighbourBody    `json:"prev,omitempty"`
 	Next          *neighbourBody    `json:"next,omitempty"`
 	Collection    *collectionRef    `json:"collection,omitempty"`
+	Credits       *creditsBody      `json:"credits,omitempty"`
+}
+
+// creditsBody is a film's or a series' cast and crew (docs/04-api.md,
+// section 2.4).
+type creditsBody struct {
+	Cast []castBody `json:"cast"`
+	Crew []crewBody `json:"crew"`
+}
+
+type castBody struct {
+	PersonID int64  `json:"person_id"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Episodes *int   `json:"episodes"`
+}
+
+type crewBody struct {
+	PersonID   int64  `json:"person_id"`
+	Name       string `json:"name"`
+	Role       string `json:"role"`
+	Department string `json:"department"`
+}
+
+// creditsJSON shapes an item's credits; a series' cast carry how many
+// episodes they are in.
+func creditsJSON(list []db.Credit, series bool) *creditsBody {
+	b := &creditsBody{Cast: []castBody{}, Crew: []crewBody{}}
+	for _, c := range list {
+		if c.Kind == "cast" {
+			cb := castBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role}
+			if series && c.Episodes > 0 {
+				cb.Episodes = &c.Episodes
+			}
+			b.Cast = append(b.Cast, cb)
+			continue
+		}
+		b.Crew = append(b.Crew, crewBody{PersonID: c.PersonID, Name: c.Name, Role: c.Role, Department: c.Department})
+	}
+	return b
 }
 
 // collectionRef is a film's collection, on its detail.

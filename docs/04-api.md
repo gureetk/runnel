@@ -281,7 +281,7 @@ The detail of a film or a series carries `credits`:
 | Field | Notes |
 |---|---|
 | `cast` | In billing order, at most 20 (P7). `role` is the character. `episodes` is set on a series: how many episodes the person is in. |
-| `crew` | Directors and writers, and a series' creators. `role` is the job. |
+| `crew` | Directors and writers, and a series' creators. `role` is the job, or a person's jobs in one department joined with commas, such as `Screenplay, Story`; a series' creators are `Creator`. |
 | `image` | The person's photo, shaped like every image (section 6). Absent when the provider has none. `color` is null until the photo has been fetched once. |
 
 A person: `GET /people/{id}`.
@@ -470,7 +470,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | `genre` | One genre name. Without `library`: the films and series of every library. |
 | `list` | `1`: what the signed-in user has on My list (4.7). Unavailable items are included. It does not go with `library`, `parent` or `series`. |
 | `collection` | A collection's id: its films. It needs no `library`, and `type` can only be `movie`. `404` for an id that is not a collection's. |
-| `person` | A person's id: the films and series that credit them. Each card gains `credit`, such as `{"kind": "cast", "role": "Edda", "episodes": 12}`. |
+| `person` | A person's id: the films and series that credit them, newest first unless `sort` says otherwise. Each card gains `credit`, the credit of theirs the title shows first, such as `{"kind": "cast", "role": "Edda", "episodes": 12}`; `episodes` only on a series. It needs no `library`. `404` for an id that is not a person's. |
 | `played` | `0` or `1`. For series, `0` means some episode outside the specials is unplayed. |
 | `sort` | `title` (default), `added`, `date`, `rating`. Episodes default to season and episode order. With `list` there is also `listed`, its default. With `collection` and `person` the default is `date`. A series was `added` when its newest episode was. `date` is the release date, or the year where that is not known. Items without a date or a rating come last, in either order. Items that sort the same go by title. |
 | `order` | `asc` or `desc`. Defaults to `asc` for `title` and `desc` for the others, except with `collection`, where `date` runs `asc`. |

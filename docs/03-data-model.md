@@ -500,7 +500,7 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 - Two files that resolve to the same item are versions: two rows in `item_files` with different labels, the main version's NULL. The parts of one version are rows with the same label and `part` 1 to n.
 - Rebuilding items from files must be idempotent. Running it twice changes nothing and bumps no `updated_seq`.
 - An item that no file makes any more is deleted when items are built, with a tombstone at a sequence value of the transaction. One transaction can delete several items, so `tombstones` is keyed by the sequence value and the item together. Taking a folder out of a library deletes the items built from it in the same way.
-- An item's id is never given again once the item is gone, and neither is the id of a library, a library folder, a user or a token. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `last_library_id`, `last_root_id`, `last_user_id` and `last_token_id` hold the highest ids given.
+- An item's id is never given again once the item is gone, and neither is the id of a library, a library folder, a user, a token or a person. SQLite gives a new row the highest id plus one, so the id of a row that had the highest would come back. A client that missed the removal, work queued for the old row, or a call made from a page loaded before would take the new one for it. `meta.last_item_id`, `last_library_id`, `last_root_id`, `last_user_id`, `last_token_id` and `last_person_id` hold the highest ids given.
 - A collection is an item of type `collection`. It has a library and no folder: its `root_id` and `path_key` are NULL.
 
 **Metadata on items**
@@ -523,7 +523,9 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 
 - A `people` row is one person at the provider.
 - An item's `credits` rows are replaced as a whole when its metadata is fetched: at most 20 of the cast in billing order, then directors, then writers, with a series' creators first among the writers (P7). `ord` is the order shown.
-- Replacing an item's credits bumps its `updated_seq`.
+- Replacing an item's credits bumps its `updated_seq`, when what they show changed: a fetch that gives the same credits, names and photos stamps nothing.
+- A person's `name` and `department` are rewritten by every fetch that credits them. A photo path that changes gives a new `image_key`, and clears `image_color`, `image_fetched_at` and `image_tried_at`. A key is one person's: a person whose key another person's new path gives loses it.
+- D53's drop of an item's metadata takes its credits too.
 - A photo is not downloaded when an item is matched. `image_key` is derived from the provider's path at that time, so the photo's URL exists at once. The photo is fetched when a client first asks for it, and `image_fetched_at` and `image_color` are set then. After a try that failed, `image_tried_at` keeps the server from asking again for a day (`04-api.md`, section 6).
 - A person with no credits left is deleted by the nightly cleanup.
 
@@ -888,5 +890,5 @@ DELETE FROM play_log WHERE id <= (SELECT MAX(id) FROM play_log) - 1000;
 - A test database with 14,720 file rows and nothing else was 3.1 MB.
 - A prototype with 10,741 items, 10,491 files and 52,455 stream rows was 9.6 MB.
 - People and credits, on synthetic rows: 30,000 people and 78,360 credits (3,300 films and 240 series with 22 to 24 credits each) added 9.2 MB to the file. Reading one item's credits took 0.04 ms. How many different people a real library credits is not known, so the 30,000 is an assumption.
-- The provider cache, on generated answers in TMDB's shape, gzip-compressed: the 2,400 answers for 2,000 films and 100 series with 300 seasons, beside 5,000 files and their items, made a database of 15.8 MB (development sandbox, 27 November 2026). How large real answers are is not measured.
+- The provider cache, on generated answers in TMDB's shape, gzip-compressed: the 2,400 answers for 2,000 films and 100 series with 300 seasons, beside 5,000 files and their items, made a database of 15.8 MB (development sandbox, 27 November 2026); with their credits stored, about 84,000 rows, 20.3 MiB (28 November 2026). How large real answers are is not measured.
 - The image cache and the sidecar cache are files on disk, not rows. See `02-architecture.md`.
