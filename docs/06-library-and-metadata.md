@@ -2,7 +2,7 @@
 
 How files on disk become items a person can browse: scanning, probing, parsing names, building items, matching them to a metadata provider and fetching artwork. Tables and columns refer to `03-data-model.md`. Evidence is in the project's research notes, which are not published.
 
-**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5; and for builds of only what a scan looked at, in sections 2.2 and 5.
+**Revised, 20 November 2026,** for what the client designs added (D33, D34, `11-design-review.md`): collections, cast and crew, photos fetched when first asked for, why an item is on the review list, leaving an item unmatched, the preview of a series match, the import's report, and progress of background work. Nothing here has been run against a provider yet. Revised on 21 November 2026 for shapes of names that a review of stage 1 found with invented names (sections 4.2 to 4.4), checked against Jellyfin's documentation and its naming code. Revised on 27 November 2026, as stage 4 begins: a folder's own numbering, and episodes without a number (D51), in sections 4.3 and 5; `.nfo` files out of section 6.1. Revised again the same day for grouping folders and mixed libraries (D49, D52): sections 4.9 and 4.10, which sections 4.1 to 4.3 and 4.6 refer to, and what keeps its id through a change of kind, in section 5; and for builds of only what a scan looked at, in sections 2.2 and 5. Revised again the same day: ids in names, as Jellyfin reads them, in sections 4.5 and 6.1, where they now come before the import, since every build writes them.
 
 ## 1. The pipeline
 
@@ -185,6 +185,10 @@ Not handled in version 1: `1x02`, dates as episode numbers and numbers inside br
 
 `[imdbid-tt1234567]`, `[tmdbid-12345]`, `[tvdbid-12345]` on a folder or a file settle the match without a search. Several may appear together.
 
+- **The form**, as Jellyfin reads it: in square brackets, the provider's name, a dash or an equals sign, and the value up to the closing bracket, with spaces around the value dropped and case ignored, so `[TMDBID=12345]` counts too. Curly or round brackets do not [checked: its page on films, and `PathExtensions.GetAttributeValue` in its source on a mirror of its main branch, 27 November 2026]. A TMDB or TheTVDB id is a number, an IMDb id `tt` and a number; a value of another form is left out, and where a name gives a provider twice, the first counts. Jellyfin also finds an IMDb id anywhere in a name without brackets; Runnel does not.
+- **Where.** A film's ids are those of its folder's name, and then of its files' names, in file order, for any provider the folder does not give; a lone file's are its own name's. A series' are its folder's. Season folders and episode files may carry ids too, in Jellyfin's documentation, but they name a season or an episode, and are not read.
+- **What they do.** Each build writes them into `external_ids` and makes the item `matched` (section 6.1), unless it was matched by hand or left unmatched on purpose. Ids that only add to the item's are added. Ids that differ from the item's name another title: they replace every id the item has, and what was fetched for the old title is fetched again for the new one. A name that loses its ids leaves the item's as they are: they are its match.
+
 ### 4.6 Extras
 
 Kept out of lists in version 1.
@@ -281,8 +285,8 @@ Run after every scan. It must be idempotent: a second run changes nothing and bu
 For a film or a series, stop at the first step that gives an answer:
 
 1. **A manual match** in `overrides` for this folder. A row that names the provider `none` means the folder was left unmatched on purpose: stop here, and the item is `ignored`.
-2. **The one-time import** from Jellyfin (section 7), which seeds provider ids by path.
-3. **Ids in the name** (4.5). `.nfo` files are not read: the scanner does not see them, and no stage builds it.
+2. **Ids in the name** (4.5). Every build writes them again, so where the import gave other ids, the name's win at the next build. Jellyfin reads the same ids from the same names, so the two seldom differ. `.nfo` files are not read: the scanner does not see them, and no stage builds it.
+3. **The one-time import** from Jellyfin (section 7), which seeds provider ids by path.
 4. **Search and score** (6.2).
 
 Episodes are never searched for. They are looked up by number inside their series' match.

@@ -105,8 +105,7 @@ var (
 )
 
 // name reads a folder's or a file's name as a title and a year:
-// "Name (year) [ids]". Brackets are dropped; ids in them are for matching,
-// later.
+// "Name (year) [ids]". Brackets are dropped; IDs reads the ids in them.
 func name(s string) (title string, year int) {
 	s = brackets.ReplaceAllString(s, " ")
 	if m := yearParens.FindAllStringSubmatchIndex(s, -1); m != nil {

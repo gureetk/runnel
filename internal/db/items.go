@@ -55,7 +55,10 @@ type DesiredFilm struct {
 	Key    string // path_key: the folder, or the lone file
 	Title  string
 	Year   int
-	Files  []DesiredFile
+	// IDs are the providers' ids that its folder's or its files' names
+	// carry (docs/06-library-and-metadata.md, section 4.5).
+	IDs   map[string]string
+	Files []DesiredFile
 }
 
 // DesiredSeries is a series item and its episodes, as its files say. Its
@@ -66,6 +69,8 @@ type DesiredSeries struct {
 	Title    string
 	Year     int
 	Absolute bool // numbered in one running count
+	// IDs are the providers' ids that its folder's name carries.
+	IDs      map[string]string
 	Episodes []DesiredEpisode
 }
 
@@ -482,8 +487,12 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 	}
 
 	for i, f := range films {
-		if _, err := b.put(filmItems[i], fields{typ: "movie", rootID: f.RootID, key: f.Key, title: f.Title,
-			sort: b.sortTitle(f.Title), year: f.Year, addedAt: b.addedAt(f.Files), links: linksOf(f.Files)}); err != nil {
+		id, err := b.put(filmItems[i], fields{typ: "movie", rootID: f.RootID, key: f.Key, title: f.Title,
+			sort: b.sortTitle(f.Title), year: f.Year, addedAt: b.addedAt(f.Files), links: linksOf(f.Files)})
+		if err != nil {
+			return err
+		}
+		if err := b.nameIDs(id, f.IDs); err != nil {
 			return err
 		}
 	}
@@ -505,6 +514,9 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 		seriesID, err := b.put(seriesItems[i], fields{typ: "series", rootID: s.RootID, key: s.Key, title: s.Title,
 			sort: b.sortTitle(s.Title), year: s.Year, numbering: numbering, addedAt: newest})
 		if err != nil {
+			return err
+		}
+		if err := b.nameIDs(seriesID, s.IDs); err != nil {
 			return err
 		}
 		seasonIDs := map[int]int64{}
@@ -592,6 +604,75 @@ func episodeTitle(ep DesiredEpisode) string {
 		return "Episode " + strconv.Itoa(ep.Absolute)
 	}
 	return "Episode " + strconv.Itoa(ep.Episode)
+}
+
+// nameIDs writes the providers' ids that a film's or a series' names
+// carry, and makes it matched (docs/06-library-and-metadata.md, sections 4.5
+// and 6.1). An item matched by hand, or left unmatched on purpose, is left
+// as it is. Ids that only add to what the item has are added. Ids that
+// differ from the item's name another title: they replace every id the
+// item has, and what was fetched for the old title is fetched anew. An item
+// that changes is stamped, since its detail did.
+func (b *builder) nameIDs(id int64, want map[string]string) error {
+	if len(want) == 0 {
+		return nil
+	}
+	var state string
+	if err := b.tx.tx.QueryRowContext(b.ctx, `SELECT match_state FROM items WHERE id = ?`, id).Scan(&state); err != nil {
+		return err
+	}
+	if state == "manual" || state == "ignored" {
+		return nil
+	}
+	have := map[string]string{}
+	rows, err := b.tx.tx.QueryContext(b.ctx, `SELECT provider, value FROM external_ids WHERE item_id = ?`, id)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var p, v string
+		if err := rows.Scan(&p, &v); err != nil {
+			rows.Close()
+			return err
+		}
+		have[p] = v
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	differs, adds := false, false
+	for p, v := range want {
+		h, ok := have[p]
+		differs = differs || ok && h != v
+		adds = adds || !ok
+	}
+	if state == "matched" && !differs && !adds {
+		return nil
+	}
+	if differs {
+		if _, err := b.tx.tx.ExecContext(b.ctx, `DELETE FROM external_ids WHERE item_id = ?`, id); err != nil {
+			return err
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(want)) {
+		if _, err := b.tx.tx.ExecContext(b.ctx, `INSERT INTO external_ids (item_id, provider, value) VALUES (?, ?, ?)
+			ON CONFLICT (item_id, provider) DO UPDATE SET value = excluded.value`, id, p, want[p]); err != nil {
+			return err
+		}
+	}
+	q := `UPDATE items SET match_state = 'matched', match_confidence = NULL, match_note = NULL WHERE id = ?`
+	if differs {
+		q = `UPDATE items SET match_state = 'matched', match_confidence = NULL, match_note = NULL, refreshed_at = NULL WHERE id = ?`
+	}
+	if _, err := b.tx.tx.ExecContext(b.ctx, q, id); err != nil {
+		return err
+	}
+	if !b.written[id] {
+		b.res.Changed++
+		return b.stamp(id)
+	}
+	return nil
 }
 
 // removed reports whether the item was deleted in this build.
