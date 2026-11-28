@@ -96,6 +96,17 @@ func (f *Fetcher) Queue(ctx context.Context, libraryID int64, again bool) (int, 
 	return n, err
 }
 
+// Built is told that a library's items were built: a film that went may
+// leave a collection with one film, which goes, whether or not a key is
+// set; then what needs metadata is queued.
+func (f *Fetcher) Built(ctx context.Context, libraryID int64) error {
+	if err := f.Collections(ctx, libraryID, nil, nil); err != nil {
+		return err
+	}
+	_, err := f.Queue(ctx, libraryID, false)
+	return err
+}
+
 // Refresh queues the fetch of one film or series that asks the provider
 // again, whatever the age of what it has.
 func (f *Fetcher) Refresh(ctx context.Context, itemID, libraryID int64) error {
@@ -164,6 +175,9 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 	if err != nil {
 		return err
 	}
+	if target.Type == "collection" {
+		return f.fetchCollection(ctx, target, force)
+	}
 	if (target.Type != "movie" && target.Type != "series") || (target.MatchState != "matched" && target.MatchState != "manual") {
 		return nil
 	}
@@ -201,7 +215,23 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		if err := f.db.ApplyMetadata(ctx, id, filmMetadata(m), now); err != nil {
 			return err
 		}
-		return f.wantAll(ctx, target.LibraryID, id, m.PosterPath, m.BackdropPath, m.Images.Logo())
+		if err := f.wantAll(ctx, target.LibraryID, id, m.PosterPath, m.BackdropPath, m.Images.Logo()); err != nil {
+			return err
+		}
+		// Only the collections the film named before and names now
+		// can change.
+		refs, names := []string{}, map[string]string{}
+		if was := target.IDs["tmdb_collection"]; was != "" {
+			refs = append(refs, was)
+		}
+		if m.Collection != nil && m.Collection.ID != 0 {
+			ref := strconv.Itoa(m.Collection.ID)
+			names[ref] = strings.TrimSpace(m.Collection.Name)
+			if !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+		}
+		return f.Collections(ctx, target.LibraryID, refs, names)
 	}
 	var s tmdb.Series
 	if err := json.Unmarshal(ans.Body, &s); err != nil {
@@ -261,6 +291,59 @@ func (f *Fetcher) fetch(ctx context.Context, id int64, force bool) error {
 		}
 	}
 	return nil
+}
+
+// Collections makes a library's collections what its films say
+// (db.SyncCollections), after a film's fetch and after a build, and
+// queues the fetch of each one it made: its title, overview and artwork
+// (docs/06-library-and-metadata.md, section 6.6). refs, when not nil,
+// are the only provider collections counted; names are the provider's
+// names of collections a fetch has just read.
+func (f *Fetcher) Collections(ctx context.Context, libraryID int64, refs []string, names map[string]string) error {
+	made, err := f.db.SyncCollections(ctx, libraryID, refs, names, parse.SortTitle, f.now().UnixMilli())
+	if err != nil {
+		return err
+	}
+	for _, id := range made {
+		if err := f.db.QueueFetch(ctx, id, libraryID, false, f.now().UnixMilli()); err != nil {
+			return err
+		}
+	}
+	if len(made) > 0 && f.Queued != nil {
+		f.Queued()
+	}
+	return nil
+}
+
+// fetchCollection reads a collection's details, its title, overview,
+// poster and backdrop. A collection TMDB has not keeps the name it was
+// made with.
+func (f *Fetcher) fetchCollection(ctx context.Context, target db.FetchTarget, force bool) error {
+	ref := target.IDs["tmdb_collection"]
+	if ref == "" {
+		return nil
+	}
+	age := Every
+	if force {
+		age = 0
+	}
+	ans, err := f.provider.Get(ctx, tmdb.CollectionPath(ref), tmdb.CollectionQuery(), age)
+	if err != nil {
+		return err
+	}
+	now := f.now().UnixMilli()
+	if ans.Status == http.StatusNotFound {
+		return f.db.ApplyMetadata(ctx, target.ID, db.Metadata{}, now)
+	}
+	var c tmdb.Collection
+	if err := json.Unmarshal(ans.Body, &c); err != nil {
+		return fmt.Errorf("fetch: TMDB's details of collection %s: %w", ref, err)
+	}
+	title := strings.TrimSpace(c.Name)
+	if err := f.db.ApplyMetadata(ctx, target.ID, db.Metadata{Title: title, SortTitle: parse.SortTitle(title), Overview: c.Overview}, now); err != nil {
+		return err
+	}
+	return f.wantAll(ctx, target.LibraryID, target.ID, c.PosterPath, c.BackdropPath, "")
 }
 
 // wantAll asks for a film's or a series' poster, backdrop and logo.
@@ -364,6 +447,11 @@ func filmMetadata(m tmdb.Movie) db.Metadata {
 	ids := map[string]string{}
 	if v := cmp.Or(m.ExternalIDs.ImdbID, m.ImdbID); v != "" {
 		ids["imdb"] = v
+	}
+	// The collection it belongs to, or none: "" takes an earlier one away.
+	ids["tmdb_collection"] = ""
+	if m.Collection != nil && m.Collection.ID != 0 {
+		ids["tmdb_collection"] = strconv.Itoa(m.Collection.ID)
 	}
 	return db.Metadata{Title: strings.TrimSpace(m.Title), SortTitle: parse.SortTitle(strings.TrimSpace(m.Title)),
 		OriginalTitle: m.OriginalTitle, Overview: m.Overview, Date: m.ReleaseDate,

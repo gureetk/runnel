@@ -513,8 +513,9 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 **Collections**
 
 - A film whose metadata names a collection gets an `external_ids` row with provider `tmdb_collection`. The row is there whether or not a collection is shown.
-- A library shows a collection when it holds two or more films with the same `tmdb_collection` value (D33). The collection item is made in that library then, with the same `external_ids` row, and those films point at it with `collection_id`.
-- When fewer than two of its films are left, the collection item is deleted, with a tombstone, and `collection_id` is cleared on the film that remains.
+- A library shows a collection when it holds two or more films with the same `tmdb_collection` value (D33). The collection item is made in that library then, with the same `external_ids` row and `match_state` `matched`, and those films point at it with `collection_id`. Films of other libraries are not counted.
+- When fewer than two of its films are left, the collection item is deleted, with a tombstone, and `collection_id` is cleared on the film that remains. A film whose file is only missing is still an item, and still counts.
+- The count runs after every build and after each film's fetch (`06-library-and-metadata.md`, section 6.6). Running it again changes nothing and stamps nothing.
 - Setting or clearing `collection_id` bumps the film's `updated_seq`.
 - A collection's films are ordered by `release_date`, then `sort_title`.
 

@@ -21,9 +21,11 @@ type ListQuery struct {
 	Types     []string // "movie", "series", or both
 	Genre     string
 	Listed    bool // only what the user has on My list
-	Played    int  // -1: either; 0: films not played and series with an episode not played; 1: the others
-	Sort      string
-	Desc      bool
+	// Collection, when set, is a collection whose films are listed.
+	Collection int64
+	Played     int // -1: either; 0: films not played and series with an episode not played; 1: the others
+	Sort       string
+	Desc       bool
 }
 
 // Sorts are the orders a list can have. "listed" goes with Listed only.
@@ -72,6 +74,10 @@ func (q ListQuery) from() (string, []any) {
 	if q.LibraryID != 0 {
 		b.WriteString(` AND i.library_id = ?`)
 		args = append(args, q.LibraryID)
+	}
+	if q.Collection != 0 {
+		b.WriteString(` AND i.collection_id = ?`)
+		args = append(args, q.Collection)
 	}
 	if q.Genre != "" {
 		b.WriteString(` AND EXISTS (SELECT 1 FROM item_genres g WHERE g.item_id = i.id AND g.genre = ?)`)

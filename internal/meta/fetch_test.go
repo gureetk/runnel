@@ -70,8 +70,7 @@ func newFetchEnv(t *testing.T, kind string) *fetchEnv {
 			return err
 		}
 		e.built++
-		_, err := e.f.Queue(ctx, id, false)
-		return err
+		return e.f.Built(ctx, id)
 	}
 	return e
 }

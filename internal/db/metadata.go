@@ -24,7 +24,7 @@ type Metadata struct {
 	ContentRating    string
 	Genres           []string
 	Aliases          []string          // alternative titles, for the search index
-	IDs              map[string]string // other providers' ids it gives: imdb, tvdb
+	IDs              map[string]string // other providers' ids it gives: imdb, tvdb, tmdb_collection; "" takes one away
 	Airing           bool              // a series that still airs
 }
 
@@ -165,7 +165,11 @@ func (d *DB) ApplyMetadata(ctx context.Context, id int64, m Metadata, now int64)
 		next.genres = slices.Compact(next.genres)
 		next.ids = maps.Clone(old.ids)
 		for p, v := range m.IDs {
-			if p != "tmdb" && v != "" {
+			switch {
+			case p == "tmdb":
+			case v == "":
+				delete(next.ids, p)
+			default:
 				next.ids[p] = v
 			}
 		}
@@ -186,6 +190,13 @@ func (d *DB) ApplyMetadata(ctx context.Context, id int64, m Metadata, now int64)
 			}
 			for _, g := range next.genres {
 				if _, err := tx.tx.ExecContext(ctx, `INSERT INTO item_genres (item_id, genre) VALUES (?, ?)`, id, g); err != nil {
+					return err
+				}
+			}
+		}
+		for _, p := range slices.Sorted(maps.Keys(old.ids)) {
+			if _, kept := next.ids[p]; !kept {
+				if _, err := tx.tx.ExecContext(ctx, `DELETE FROM external_ids WHERE item_id = ? AND provider = ?`, id, p); err != nil {
 					return err
 				}
 			}
@@ -374,8 +385,9 @@ func writeShown(ctx context.Context, tx *Tx, id int64, title string, sortTitle f
 // genres, whether a series airs, the provider's images, whose files the
 // sweep deletes, and the time it was refreshed. Titles and
 // years go back to what the names say at the next build, which the nightly
-// walk after it runs; the providers' ids stay, since they are the match. It
-// returns how many items it dropped, each stamped.
+// walk after it runs; a collection, which has no name, is titled
+// "Collection" until it is fetched again. The providers' ids stay, since
+// they are the match. It returns how many items it dropped, each stamped.
 func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 	var n int
 	err := d.Write(ctx, func(ctx context.Context, tx *Tx) error {
@@ -403,6 +415,14 @@ func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 		ids := make([]int64, len(all))
 		for i, s := range all {
 			ids[i] = s.id
+			if s.typ == "collection" {
+				// A collection has no name of its own to fall back to.
+				s.title = "Collection"
+				if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET title = ?, sort_title = ? WHERE id = ?`,
+					s.title, strings.ToLower(s.title), s.id); err != nil {
+					return err
+				}
+			}
 			if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET original_title = NULL, overview = NULL, release_date = NULL,
 				runtime_ms = NULL, rating = NULL, content_rating = NULL, airing = NULL, refreshed_at = NULL WHERE id = ?`, s.id); err != nil {
 				return err

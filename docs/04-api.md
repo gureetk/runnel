@@ -469,7 +469,7 @@ The cards are shortened here. They are whole cards, so `recent` carries the `ove
 | `ids` | Comma-separated ids, at most 200. For refreshing a few cards. It goes alone. The cards come in the order asked for, once each, and an id that no item has is left out. |
 | `genre` | One genre name. Without `library`: the films and series of every library. |
 | `list` | `1`: what the signed-in user has on My list (4.7). Unavailable items are included. It does not go with `library`, `parent` or `series`. |
-| `collection` | A collection's id: its films. |
+| `collection` | A collection's id: its films. It needs no `library`, and `type` can only be `movie`. `404` for an id that is not a collection's. |
 | `person` | A person's id: the films and series that credit them. Each card gains `credit`, such as `{"kind": "cast", "role": "Edda", "episodes": 12}`. |
 | `played` | `0` or `1`. For series, `0` means some episode outside the specials is unplayed. |
 | `sort` | `title` (default), `added`, `date`, `rating`. Episodes default to season and episode order. With `list` there is also `listed`, its default. With `collection` and `person` the default is `date`. A series was `added` when its newest episode was. `date` is the release date, or the year where that is not known. Items without a date or a rating come last, in either order. Items that sort the same go by title. |

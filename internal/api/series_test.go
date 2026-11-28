@@ -32,7 +32,7 @@ func (b *browse) series(t *testing.T) cardBody {
 func TestSeriesSeasonsAndEpisodes(t *testing.T) {
 	b := newBrowse(t)
 	series := b.series(t)
-	if series.Counts == nil || series.Counts.Episodes != 3 || series.Counts.Seasons == nil || *series.Counts.Seasons != 2 || !series.Available {
+	if series.Counts == nil || *series.Counts.Episodes != 3 || series.Counts.Seasons == nil || *series.Counts.Seasons != 2 || !series.Available {
 		t.Fatalf("a series card counts its episodes and seasons outside the specials: %+v %+v", series, series.Counts)
 	}
 
@@ -44,7 +44,7 @@ func TestSeriesSeasonsAndEpisodes(t *testing.T) {
 	}
 	var got []string
 	for _, s := range *d.Seasons {
-		got = append(got, s.Title+":"+strconv.Itoa(s.Counts.Episodes))
+		got = append(got, s.Title+":"+strconv.Itoa(*s.Counts.Episodes))
 	}
 	if string(mustJSON(got)) != `["Season 1:2","Season 2:1","Specials:1"]` {
 		t.Fatalf("seasons %v", got)
