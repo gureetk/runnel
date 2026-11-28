@@ -191,6 +191,7 @@ type builder struct {
 	firstSeen map[int64]int64                // file id -> first_seen_at
 	written   map[int64]bool                 // items stamped in this build
 	touched   map[int64]bool                 // seasons and series whose episodes changed
+	overrides map[string]Override            // "root|key" -> the manual match kept for that folder; nil until read
 }
 
 func keyOf(typ string, root int64, key string) string {
@@ -494,6 +495,9 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 		if err != nil {
 			return err
 		}
+		if err := b.override(id, f.RootID, f.Key); err != nil {
+			return err
+		}
 		if err := b.nameIDs(id, f.IDs); err != nil {
 			return err
 		}
@@ -516,6 +520,9 @@ func (b *builder) build(films []DesiredFilm, series []DesiredSeries) error {
 		seriesID, err := b.put(seriesItems[i], fields{typ: "series", rootID: s.RootID, key: s.Key, title: s.Title,
 			sort: b.sortTitle(s.Title), year: s.Year, numbering: numbering, addedAt: newest})
 		if err != nil {
+			return err
+		}
+		if err := b.override(seriesID, s.RootID, s.Key); err != nil {
 			return err
 		}
 		if err := b.nameIDs(seriesID, s.IDs); err != nil {
@@ -606,6 +613,96 @@ func episodeTitle(ep DesiredEpisode) string {
 		return "Episode " + strconv.Itoa(ep.Absolute)
 	}
 	return "Episode " + strconv.Itoa(ep.Episode)
+}
+
+// readOverrides reads the manual matches kept for the library's folders.
+func (b *builder) readOverrides() error {
+	if b.overrides != nil {
+		return nil
+	}
+	b.overrides = map[string]Override{}
+	rows, err := b.tx.tx.QueryContext(b.ctx, `SELECT o.root_id, o.path_key, o.provider, o.value, o.season_offset, o.episode_offset,
+		COALESCE(o.numbering, '') FROM overrides o JOIN roots r ON r.id = o.root_id WHERE r.library_id = ?`, b.lib)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var root int64
+		var key string
+		var o Override
+		if err := rows.Scan(&root, &key, &o.Provider, &o.Value, &o.SeasonOffset, &o.EpisodeOffset, &o.Numbering); err != nil {
+			return err
+		}
+		b.overrides[strconv.FormatInt(root, 10)+"|"+key] = o
+	}
+	return rows.Err()
+}
+
+// override applies the manual match kept for a film's or a series'
+// folder (docs/06-library-and-metadata.md, section 6.1), which comes
+// before any other: an item that a build makes again, or a folder that
+// reads as the other kind, finds it. One left unmatched on purpose is
+// ignored; one matched by hand is manual with the id kept. An item that
+// already says so is left as it is.
+func (b *builder) override(id, root int64, key string) error {
+	if err := b.readOverrides(); err != nil {
+		return err
+	}
+	o, ok := b.overrides[strconv.FormatInt(root, 10)+"|"+key]
+	if !ok {
+		return nil
+	}
+	var state string
+	var have sql.NullString
+	if err := b.tx.tx.QueryRowContext(b.ctx, `SELECT match_state, (SELECT value FROM external_ids WHERE item_id = ?1 AND provider = ?2)
+		FROM items WHERE id = ?1`, id, o.Provider).Scan(&state, &have); err != nil {
+		return err
+	}
+	switch {
+	case o.Provider == "none" && state == "ignored", o.Provider != "none" && state == "manual" && have.String == o.Value:
+		return nil
+	}
+	if _, err := b.tx.tx.ExecContext(b.ctx, `DELETE FROM external_ids WHERE item_id = ? AND provider IN `+providerIDs, id); err != nil {
+		return err
+	}
+	q := `UPDATE items SET match_state = 'ignored', match_confidence = NULL, match_note = NULL WHERE id = ?`
+	if o.Provider != "none" {
+		if _, err := b.tx.tx.ExecContext(b.ctx, `INSERT INTO external_ids (item_id, provider, value) VALUES (?, ?, ?)`,
+			id, o.Provider, o.Value); err != nil {
+			return err
+		}
+		q = `UPDATE items SET match_state = 'manual', match_confidence = NULL, match_note = NULL, refreshed_at = NULL WHERE id = ?`
+	}
+	if _, err := b.tx.tx.ExecContext(b.ctx, q, id); err != nil {
+		return err
+	}
+	if !b.written[id] {
+		b.res.Changed++
+		return b.stamp(id)
+	}
+	return nil
+}
+
+// moveOverride moves the manual match kept for a folder to the folder its
+// item now has, as when the folder was renamed: the match goes with the
+// item. A folder that has one of its own keeps it.
+func (b *builder) moveOverride(fromRoot int64, from string, toRoot int64, to string) error {
+	if err := b.readOverrides(); err != nil {
+		return err
+	}
+	fk, tk := strconv.FormatInt(fromRoot, 10)+"|"+from, strconv.FormatInt(toRoot, 10)+"|"+to
+	o, ok := b.overrides[fk]
+	if _, taken := b.overrides[tk]; !ok || taken {
+		return nil
+	}
+	if _, err := b.tx.tx.ExecContext(b.ctx, `UPDATE overrides SET root_id = ?, path_key = ? WHERE root_id = ? AND path_key = ?`,
+		toRoot, to, fromRoot, from); err != nil {
+		return err
+	}
+	delete(b.overrides, fk)
+	b.overrides[tk] = o
+	return nil
 }
 
 // nameIDs writes the providers' ids that a film's or a series' names
@@ -746,6 +843,11 @@ func (b *builder) put(e *existing, f fields) (int64, error) {
 		e.addedAt == f.addedAt && maps.Equal(e.links, f.links)
 	if same {
 		return e.id, nil
+	}
+	if (f.typ == "movie" || f.typ == "series") && e.typ == f.typ && e.key != "" && (e.key != f.key || e.rootID != f.rootID) {
+		if err := b.moveOverride(e.rootID, e.key, f.rootID, f.key); err != nil {
+			return 0, err
+		}
 	}
 	seq, err := b.tx.Seq(b.ctx)
 	if err != nil {

@@ -555,6 +555,9 @@ ALTER TABLE items ADD COLUMN airing INTEGER;  -- series: 1 while the provider sa
 
 - A manual match writes `overrides`, keyed by folder. Matching reads `overrides` before anything else. A rescan that drops and rebuilds an item therefore finds the same match again.
 - A row with provider `none` means the item was left unmatched on purpose. Matching skips that folder, and the item's `match_state` is `ignored`.
+- Every build applies a folder's row to the film or the series it makes there, before the ids in its names: a row with a provider's id makes the item `manual` with that id as its only provider's id; `none` makes it `ignored` without any. An item that already says so is left alone. When a film or a series takes a new key, as when its folder is renamed, its folder's row moves with it, unless the new folder has one.
+- Writing a row replaces the item's providers' ids (`tmdb`, `imdb`, `tvdb`, `anidb`, `anilist`, `mal`, `tmdb_collection`) and stamps it; `none`, and forgetting a match, also clear what was fetched for it, as D53's drop does, its seasons' and episodes' too. Forgetting deletes the row and makes the item `unmatched`.
+- An episode without a number (D51) takes no row: `ignored` on the episode itself takes it off the review list, and forgetting makes it `unmatched` again.
 
 **Watch state**
 

@@ -74,6 +74,9 @@ type Config struct {
 	// Fetches queues the fetching of metadata. Nil fetches nothing, and
 	// a refresh answers 409.
 	Fetches Fetches
+	// Matches searches the provider for an item's candidates. Nil
+	// searches for none.
+	Matches Matches
 	// StartedAt is when the server started; the API's own start when zero.
 	StartedAt time.Time
 }
@@ -96,6 +99,7 @@ type Server struct {
 	transcodes Transcodes
 	metadata   Metadata
 	fetches    Fetches
+	matches    Matches
 	envKey     string
 	startedAt  time.Time
 	mux        *http.ServeMux
@@ -149,6 +153,7 @@ func New(d *db.DB, log *slog.Logger, c Config) *Server {
 		transcodes:    c.Transcodes,
 		metadata:      c.Metadata,
 		fetches:       c.Fetches,
+		matches:       c.Matches,
 		envKey:        c.TMDBKey,
 		streams:       transcodeStreams{running: map[*transcodeStream]bool{}, last: map[sessionKey]*transcodeStream{}},
 		startedAt:     c.StartedAt,
@@ -235,6 +240,10 @@ func (s *Server) routes() {
 	s.handle("POST "+Prefix+"/admin/libraries/{id}/refresh", s.json(s.admin(s.handleRefreshLibrary)))
 	s.handle("GET "+Prefix+"/admin/parse-report", s.json(s.admin(s.handleParseReport)))
 	s.handle("POST "+Prefix+"/admin/items/{id}/refresh", s.json(s.admin(s.handleRefreshItem)))
+	s.handle("GET "+Prefix+"/admin/review", s.json(s.admin(s.handleReview)))
+	s.handle("GET "+Prefix+"/admin/items/{id}/candidates", s.json(s.admin(s.handleCandidates)))
+	s.handle("PUT "+Prefix+"/admin/items/{id}/match", s.json(s.admin(s.handleMatch)))
+	s.handle("DELETE "+Prefix+"/admin/items/{id}/match", s.json(s.admin(s.handleForgetMatch)))
 	s.handle("POST "+Prefix+"/admin/import/jellyfin/users", s.json(s.admin(s.handleJellyfinUsers)))
 	s.handle("POST "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleStartImport)))
 	s.handle("GET "+Prefix+"/admin/import/jellyfin", s.json(s.admin(s.handleImportReport)))

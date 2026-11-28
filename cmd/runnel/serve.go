@@ -280,6 +280,7 @@ func runServer(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		Metadata:       metadata,
 		TMDBKey:        cfg.TMDBKey,
 		Fetches:        fetcher,
+		Matches:        matcher,
 		StartedAt:      started,
 	}).Handler()
 	srv := &http.Server{
