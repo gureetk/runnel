@@ -15,10 +15,6 @@ import (
 // (docs/01-roadmap.md, section 4, exit criterion 1), with the stage, and
 // the one call of Jellyfin's that the document names.
 var laterStages = map[string]string{
-	"GET /admin/review":                          "4: review",
-	"GET /admin/items/{id}/candidates":           "4: matching",
-	"PUT /admin/items/{id}/match":                "4: matching",
-	"DELETE /admin/items/{id}/match":             "4: matching",
 	"GET /admin/update":                          "5: a newer release",
 	"GET /files/{id}/video.mp4":                  "7: playing in a browser",
 	"GET /files/{id}/audio.mp4":                  "7: playing in a browser",

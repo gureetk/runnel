@@ -395,13 +395,9 @@ func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 		if err != nil {
 			return err
 		}
-		type stale struct {
-			id         int64
-			typ, title string
-		}
-		var all []stale
+		var all []staleItem
 		for rows.Next() {
-			var s stale
+			var s staleItem
 			if err := rows.Scan(&s.id, &s.typ, &s.title); err != nil {
 				rows.Close()
 				return err
@@ -412,41 +408,52 @@ func (d *DB) DropStale(ctx context.Context, before int64) (int, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		ids := make([]int64, len(all))
-		for i, s := range all {
-			ids[i] = s.id
-			if s.typ == "collection" {
-				// A collection has no name of its own to fall back to.
-				s.title = "Collection"
-				if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET title = ?, sort_title = ? WHERE id = ?`,
-					s.title, strings.ToLower(s.title), s.id); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET original_title = NULL, overview = NULL, release_date = NULL,
-				runtime_ms = NULL, rating = NULL, content_rating = NULL, airing = NULL, refreshed_at = NULL WHERE id = ?`, s.id); err != nil {
-				return err
-			}
-			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM item_genres WHERE item_id = ?`, s.id); err != nil {
-				return err
-			}
-			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM credits WHERE item_id = ?`, s.id); err != nil {
-				return err
-			}
-			if _, err := tx.tx.ExecContext(ctx, `DELETE FROM images WHERE item_id = ? AND source <> 'local'`, s.id); err != nil {
-				return err
-			}
-			if s.typ != "season" {
-				if err := reindex(ctx, tx, s.id, s.title, "", nil); err != nil {
-					return err
-				}
-			}
-		}
-		n = len(ids)
-		return tx.stampItems(ctx, ids)
+		n = len(all)
+		return dropStaleItems(ctx, tx, all)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("db: drop metadata not refreshed for long: %w", err)
 	}
 	return n, nil
+}
+
+// staleItem is an item whose provider's metadata is dropped.
+type staleItem struct {
+	id         int64
+	typ, title string
+}
+
+// dropStaleItems clears what a provider wrote onto items, and stamps them.
+func dropStaleItems(ctx context.Context, tx *Tx, all []staleItem) error {
+	ids := make([]int64, len(all))
+	for i, s := range all {
+		ids[i] = s.id
+		if s.typ == "collection" {
+			// A collection has no name of its own to fall back to.
+			s.title = "Collection"
+			if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET title = ?, sort_title = ? WHERE id = ?`,
+				s.title, strings.ToLower(s.title), s.id); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.tx.ExecContext(ctx, `UPDATE items SET original_title = NULL, overview = NULL, release_date = NULL,
+			runtime_ms = NULL, rating = NULL, content_rating = NULL, airing = NULL, refreshed_at = NULL WHERE id = ?`, s.id); err != nil {
+			return err
+		}
+		if _, err := tx.tx.ExecContext(ctx, `DELETE FROM item_genres WHERE item_id = ?`, s.id); err != nil {
+			return err
+		}
+		if _, err := tx.tx.ExecContext(ctx, `DELETE FROM credits WHERE item_id = ?`, s.id); err != nil {
+			return err
+		}
+		if _, err := tx.tx.ExecContext(ctx, `DELETE FROM images WHERE item_id = ? AND source <> 'local'`, s.id); err != nil {
+			return err
+		}
+		if s.typ != "season" {
+			if err := reindex(ctx, tx, s.id, s.title, "", nil); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.stampItems(ctx, ids)
 }

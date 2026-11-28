@@ -896,13 +896,33 @@ Two settings can be changed while the server runs, and are kept in the database.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /admin/review` | Items that are unmatched or matched with low confidence, with why. Parameters: `state` (`unmatched` or `review`), `limit`, `cursor`. The response carries `counts` for both states. |
-| `GET /admin/items/{id}/candidates` | Search a provider for matches. Parameters: `q`, `year`, `provider`. |
+| `GET /admin/review` | Items that are unmatched or matched with low confidence, with why. Parameters: `state` (`unmatched` or `review`; both without it), `limit` (1 to 200, 50 by default), `cursor`. The response carries `counts` for both states. |
+| `GET /admin/items/{id}/candidates` | Search a provider for matches, for a film or a series. Parameters: `q` (the item's title without it), `year` (the item's year without it; empty for none), `provider` (`tmdb`, the only one). The candidates are scored as matching scores them, best first. It waits for the provider: `409` `no_key` without a key, `502` `upstream` when the provider cannot be asked. |
 | `PUT /admin/items/{id}/match` | Fix a match: `{"provider": "tmdb", "value": "123456", "season_offset": 0, "episode_offset": 0, "numbering": "seasons"}`. Stored by folder, so it survives rescans. |
 | `DELETE /admin/items/{id}/match` | Forget the match. The item becomes unmatched. |
 | `POST /admin/items/{id}/refresh` | Fetch metadata again, asking the provider whatever the age of what it has: a film's or a series' details, and every season the series holds. A season or an episode refreshes its series. Returns `202` with `{}`; the fetch runs in the background (`GET /admin/tasks`, kind `fetch`). An item that is unmatched or on the review list, without an id and without a manual match, is searched for again instead, asking the provider (kind `match`; `06-library-and-metadata.md`, section 6.2). `404` for an item that does not exist, `400` for another type, `409` with code `no_key` when no metadata key is set. |
 
-- **Leaving an item unmatched.** `PUT /admin/items/{id}/match` with `{"provider": "none"}`. The item keeps the title from its file name, leaves the review list and is not matched again. Its `match.state` is `ignored`. It is stored by folder like a match, and the `DELETE` undoes it.
+- **The review list** holds every film and series that is `unmatched` (`state` `unmatched`) or on review (`review`), and every episode without a number (D51) that is not left as it is (`review`), by library, then title:
+
+```json
+{"items": [
+  {"id": 12, "type": "movie", "library_id": 1, "library": "Films", "title": "Glass Harbor", "year": null,
+   "path": "/media/films/Glass Harbor", "state": "review", "confidence": 0.9,
+   "why": {"reason": "too_close", "candidates": 2, "best": 0.9, "second": 0.9}},
+  {"id": 31, "type": "series", "library_id": 2, "library": "Shows", "title": "Ferry Signal", "year": 2016,
+   "path": "/media/shows/Ferry Signal (2016)", "state": "unmatched", "confidence": null, "why": {"reason": "no_results", "candidates": 0}},
+  {"id": 77, "type": "episode", "library_id": 2, "library": "Shows", "title": "Harbor Lantern - The Lighthouse", "year": null,
+   "path": "/media/shows/Harbor Lantern (2021)/Season 01/Harbor Lantern - The Lighthouse.mkv", "state": "review", "confidence": null,
+   "why": {"reason": "unnumbered"}, "series_id": 30, "series_title": "Harbor Lantern", "season": 1}
+], "counts": {"unmatched": 4, "review": 8}, "next": null}
+```
+
+  `path` is the item's folder, or its file, on the server. `why` is the matcher's note without what only it reads (`06-library-and-metadata.md`, section 6.2): `no_results`, `low_score`, `too_close` or `id_not_found`; `not_searched` for an item never searched for, as without a key; `unnumbered` for an episode without a number.
+- **A candidate**: `{"provider": "tmdb", "id": "402", "title": "Glass Harbor", "original_title": "Glass Harbor", "year": 2016, "poster": "https://image.tmdb.org/t/p/w154/p402.jpg", "score": 1}`, in `{"query": "Glass Harbor", "year": null, "candidates": […]}`. `poster` is a link to TMDB's poster at `w154`, or null: the one place where the API gives an address of the provider's, which the client loads from TMDB itself.
+- **A match by hand.** `provider` is `tmdb` and `value` TMDB's id. The item's ids are replaced by it, its `match.state` is `manual`, and its details are fetched again in the background. It is stored by its folder in `overrides`: a build that makes an item of that folder again finds it first, before any id in its names, and a folder renamed takes it along. `season_offset`, `episode_offset` and `numbering` (`seasons` or `absolute`) are a series' only, and are stored with it for the mapping of a running count (`06-library-and-metadata.md`, section 6.5), which is not built yet; until it is, `dry_run=1` answers `400`. The answer is the item's `match` and `external_ids`: `{"match": {"state": "manual", "confidence": null}, "external_ids": {"tmdb": "402"}}`. `400` for an item that takes no match: a season, a numbered episode, a collection, a video.
+- **Leaving an item unmatched.** `PUT /admin/items/{id}/match` with `{"provider": "none"}`. The item keeps the title from its file name, leaves the review list and is not matched again. Its ids go, and so does what was fetched for it, and the library is built again, so that it is titled from its names. Its `match.state` is `ignored`. It is stored by folder like a match, and the `DELETE` undoes it. An episode without a number takes only this, and keeps it on itself, not by folder: it leaves the review list.
+- **Forgetting a match.** `DELETE /admin/items/{id}/match` removes the folder's row, the item's ids and what was fetched for it, its seasons and its episodes, builds the library again and searches for the item. Its `match.state` is `unmatched`, or `matched` again at that build when its names carry ids. An episode without a number goes back on the review list.
+- **Ids stay.** A match, a new match, forgetting a match and a refresh never change an item's id, nor anyone's watch state on it.
 - **A preview.** `PUT /admin/items/{id}/match?dry_run=1` writes nothing and returns how the files would map:
 
 ```json
